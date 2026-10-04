@@ -6,9 +6,9 @@
       "sha256": "66ea4953e7ff5ccdef629de4df432d7502e1fe2cf43a2fb944ee9b7f09e9be51"
     },
     {
-      "bytes": 7687,
+      "bytes": 7358,
       "path": ".github/workflows/test.yml",
-      "sha256": "b31acd4489948e9240a771f9de15cc05be6b312260b87b1236ea62ac5d797e75"
+      "sha256": "8e1d7f16cab6ccb60e01366fe67b75f757908a424007f69508b509d346efe7de"
     },
     {
       "bytes": 1792,
@@ -756,14 +756,14 @@
       "sha256": "5df547af19f87d1abef65f9b775d809c2013bb6173dfe16fcdae5ed379f8908d"
     },
     {
-      "bytes": 32913,
+      "bytes": 39204,
       "path": "docs/PROGRESS.md",
-      "sha256": "746906f725b417e73bb1329cd4e7c4d34186fede660cc598297bfed1ef510a9f"
+      "sha256": "9fcca397856529ea6d11fbf234d4d78a80dc9a4a041c8494ef1c3abfaf379ba4"
     },
     {
-      "bytes": 8024,
+      "bytes": 8247,
       "path": "docs/RELEASE_SECURITY_AUDIT.md",
-      "sha256": "1553149f0dc64865d0ee47c7ddaacaa421e25f2a9630ec7c7817c44e5e976c23"
+      "sha256": "ade117cee982dd496a635017f4a2e68e46a980b179c9b9156584536edddaa21b"
     },
     {
       "bytes": 13449,
@@ -981,9 +981,9 @@
       "sha256": "6820234ccab3af6a35cd2458af7ae60fee3e20f7e3b42a40a80f7025da10774a"
     },
     {
-      "bytes": 8525,
+      "bytes": 8529,
       "path": "scripts/ci_tests.py",
-      "sha256": "fe600344a61c300b8ff1f051c388067ef706277f1a002864ec2c50b5bbeb1686"
+      "sha256": "850d1ee5822c5d8b27f44976fe991df9ff2d746c0ca97369efde3726ceba9e8e"
     },
     {
       "bytes": 14761,
@@ -1306,9 +1306,9 @@
       "sha256": "9ce4a7bcb9e3b12aa13ded16cf469546bf4a0992d8001e0fec68f742870a86eb"
     },
     {
-      "bytes": 7069,
+      "bytes": 7727,
       "path": "tests/test_ci_tests.py",
-      "sha256": "b07041f0c9db9b206972633e180c9a99e0fa63874f0c1a2574d8b276df93f0ae"
+      "sha256": "790fecdf11eceb5636cfc6dc02e4a72af3b8246a89e14a199e0e0e054c7b3cba"
     },
     {
       "bytes": 9535,

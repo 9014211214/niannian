@@ -25,13 +25,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {os: ubuntu-latest, python-version: "3.10", partition: all}
-          - {os: ubuntu-latest, python-version: "3.12", partition: all}
-          - {os: windows-latest, python-version: "3.10", partition: A}
-          - {os: windows-latest, python-version: "3.10", partition: B}
-          - {os: windows-latest, python-version: "3.12", partition: A}
-          - {os: windows-latest, python-version: "3.12", partition: B}
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.12"]
+        partition: [A1, A2, A3, B]
     env:
       CI_TEST_PARTITION: ${{ matrix.partition }}
     defaults:
@@ -114,9 +110,9 @@ jobs:
       - run: python scripts/ci_tests.py run --partition "${{ matrix.partition }}"
       - run: python -m pip check
       - run: python -m build
-        if: matrix.partition != 'A'
+        if: matrix.partition == 'B'
       - name: Verify wheel and sdist in separate clean environments
-        if: matrix.partition != 'A'
+        if: matrix.partition == 'B'
         run: python scripts/check_release_install.py --dist-dir dist --work-dir artifacts/ci/install
       - name: Check curated source policy
         run: python scripts/build_minimal_release.py --check

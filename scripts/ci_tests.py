@@ -1,4 +1,4 @@
-"""Partition Windows software tests and verify all four CI platform results."""
+"""Partition software tests and verify complete results for all four CI platforms."""
 from __future__ import annotations
 
 import argparse
@@ -8,15 +8,17 @@ from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
 
-WINDOWS_A_FILES = frozenset({
-    "tests/test_e1b_pacing_repair.py", "tests/test_e1b_structure_repair.py",
-    "tests/test_e1b_reflection_repair.py",
-})
-PARTITIONS = frozenset({"all", "A", "B"})
+FILE_PARTITIONS = {
+    "tests/test_e1b_pacing_repair.py": "A1",
+    "tests/test_e1b_structure_repair.py": "A2",
+    "tests/test_e1b_reflection_repair.py": "A3",
+}
+REQUIRED_PARTITIONS = frozenset({"A1", "A2", "A3", "B"})
+PARTITIONS = REQUIRED_PARTITIONS | {"all"}
 
 
 def partition_for(nodeid: str) -> str:
-    return "A" if nodeid.split("::", 1)[0] in WINDOWS_A_FILES else "B"
+    return FILE_PARTITIONS.get(nodeid.split("::", 1)[0], "B")
 
 
 def select_nodes(nodes: list[str], partition: str) -> list[str]:
@@ -48,7 +50,7 @@ def run_tests(partition: str, output: Path, *, collect_only: bool = False) -> in
             write_json(output / "collection.json", {
                 "schema": "aria_ci_collection_v1", "partition": partition,
                 "all_nodes": all_nodes, "selected_nodes": selected,
-                "partition_files": sorted(WINDOWS_A_FILES),
+                "partition_files": FILE_PARTITIONS,
                 "collect_only": collect_only,
             })
 
@@ -68,14 +70,14 @@ def run_tests(partition: str, output: Path, *, collect_only: bool = False) -> in
                 "outcomes": outcomes,
             })
 
-    args = ["-q", "-ra", "--durations=15"]
+    args = ["-q", "-ra", "--durations=15", "--rootdir=" + str(Path.cwd())]
     args += ["--collect-only"] if collect_only else ["--junitxml=" + str(output / "pytest.xml")]
     sys.path.insert(0, str(Path.cwd()))
     return int(pytest.main(args, plugins=[Evidence()]))
 
 
-def verify_cell(records: list[dict], *, windows: bool) -> dict:
-    expected = {"A", "B"} if windows else {"all"}
+def verify_cell(records: list[dict]) -> dict:
+    expected = REQUIRED_PARTITIONS
     if len(records) != len(expected) or {r["partition"] for r in records} != expected:
         raise ValueError("missing_or_duplicate_partition")
     universe = records[0]["collection"]["all_nodes"]
@@ -108,7 +110,7 @@ def verify_cell(records: list[dict], *, windows: bool) -> dict:
     if selected_union != set(universe):
         raise ValueError("partition_union_incomplete")
     installers = [r for r in records if r.get("install") is not None]
-    if (len(installers) != 1 or installers[0]["partition"] != ("B" if windows else "all")
+    if (len(installers) != 1 or installers[0]["partition"] != "B"
             or installers[0]["install"].get("status") != "pass"):
         raise ValueError("clean_install_missing_or_duplicate")
     return {**totals, "passed": totals["tests"] - totals["skipped"],
@@ -136,10 +138,10 @@ def summarize(directory: Path, output: Path, commit: str) -> dict:
     expected = {(os_name, py) for os_name in ("Windows", "Linux") for py in ("3.10", "3.12")}
     if set(groups) != expected:
         raise ValueError("four_platform_matrix_incomplete")
-    result = {"schema": "aria_ci_four_platform_summary_v1", "source_commit": commit,
+    result = {"schema": "aria_ci_four_platform_summary_v2", "source_commit": commit,
               "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
               "status": "pass", "model_effect_claim": False,
-              "platforms": {" / ".join(key): verify_cell(rows, windows=key[0] == "Windows")
+              "platforms": {" / ".join(key): verify_cell(rows)
                             for key, rows in sorted(groups.items())}}
     output.parent.mkdir(parents=True, exist_ok=True)
     write_json(output, result)
