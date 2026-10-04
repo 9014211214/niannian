@@ -772,6 +772,35 @@ class Engine:
                     detail if type(detail) is str and detail in _REFLECTION_ERROR_DETAILS
                     else "person_reflection_failed"
                 )
+                if getattr(self.hypothesis_updater, "body_json_protocol", False):
+                    client = getattr(self.hypothesis_updater, "reflection_metered_client",
+                                     getattr(self.hypothesis_updater, "llm", None))
+                    control = getattr(client, "model_request_control", None)
+                    diagnostic = getattr(client, "last_diagnostic", {})
+                    terminal = getattr(self.hypothesis_updater, "last_error_type", None) in {
+                        "invalid_json_response", "invalid_evidence_review_protocol"}
+                    terminal = terminal or (type(diagnostic) is dict and diagnostic.get("error_type") in {
+                        "timeout", "network_error", "http_error", "invalid_reflection_body_channel"})
+                    if not terminal and control is not None:
+                        settled_failure = getattr(control, "reflection_failure_is_terminal", None)
+                        if callable(settled_failure):
+                            try:
+                                terminal = settled_failure(client) is True
+                            except Exception:
+                                terminal = False
+                    # A received audit failure may finish this optional stage.
+                    # Storage/authorization/budget failures and unresolved
+                    # transport claims still require the caller's hard stop.
+                    if terminal and control is not None:
+                        try:
+                            accounting = control.snapshot()
+                            terminal = (accounting.get("stopped") is False
+                                        and not any(row.get("status") == "pending"
+                                                    for row in accounting.get("attempts", [])))
+                        except Exception:
+                            terminal = False
+                    if terminal:
+                        return persona, "sealed_failed", error_code
                 return persona, "failed", error_code
             update_delivery_state(updated)
             return updated, "skipped" if status == "skipped" else "ok", None

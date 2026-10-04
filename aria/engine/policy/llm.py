@@ -422,12 +422,12 @@ class OpenRouterLLMClient(OpenAILLMClient):
         max_retries: int | None = None,
         online_return_format: Literal["native", "json_object"] = "native",
         bounded_transport: bool = False,
-        reflection_return_format: Literal["native", "json_schema"] = "native",
+        reflection_return_format: Literal["native", "body_json", "json_schema", "json_schema_v1", "json_schema_v2"] = "native",
     ):
         if online_return_format not in {"native", "json_object"}:
             raise ValueError("invalid_online_return_format")
         self.online_return_format = online_return_format
-        if reflection_return_format not in {"native", "json_schema"}:
+        if reflection_return_format not in {"native", "body_json", "json_schema", "json_schema_v1", "json_schema_v2"}:
             raise ValueError("invalid_reflection_return_format")
         self.reflection_return_format = reflection_return_format
         if type(bounded_transport) is not bool:
@@ -550,8 +550,9 @@ class OpenRouterLLMClient(OpenAILLMClient):
     def complete(self, messages: list[dict]) -> str:
         self._start_decision()
         self.last_diagnostic = {}
-        reflection_json = self.reflection_return_format == "json_schema"
-        if reflection_json:
+        reflection_json = self.reflection_return_format in {"json_schema", "json_schema_v1", "json_schema_v2"}
+        reflection_body = self.reflection_return_format == "body_json"
+        if reflection_json or reflection_body:
             from .reflection_json import validate_reflection_request
             validate_reflection_request(self, messages)
         base_payload = {
@@ -591,7 +592,7 @@ class OpenRouterLLMClient(OpenAILLMClient):
             base_payload["response_format"] = {"type": "json_object"}
         elif reflection_json:
             from .reflection_json import reflection_request_format
-            base_payload["response_format"] = reflection_request_format()
+            base_payload["response_format"] = reflection_request_format(self.reflection_return_format)
         elif integrated:
             base_payload["tools"] = [online_decision_tool_spec(integrated)]
             base_payload["tool_choice"] = {
@@ -618,12 +619,16 @@ class OpenRouterLLMClient(OpenAILLMClient):
                         result = self._extract_json_decision(data, integrated)
                     elif reflection_json:
                         result = self._extract_reflection_json(data)
+                    elif reflection_body:
+                        result = self._extract_reflection_body(data)
                     else:
                         result = (self._extract_online_decision(data)
                                   if integrated else self._extract_response(data))
                 except Exception:
                     control = getattr(self, "model_request_control", None)
-                    if response_received and control is not None:
+                    if (response_received and control is not None
+                            and not (reflection_body and self.last_diagnostic.get("error_type")
+                                     == "invalid_reflection_body_channel")):
                         # The transport receipt can be valid while model JSON
                         # or its return channel is unusable. Direct callers
                         # must stop too, even without a Web error wrapper.
@@ -824,6 +829,29 @@ class OpenRouterLLMClient(OpenAILLMClient):
             raise ValueError("在线决策正文不满足完整JSON字段契约") from None
         self._record_response_shape(choice, output_kind="content_json", error_type=None)
         return raw
+
+    def _extract_reflection_body(self, data: dict) -> str:
+        """Deliver the first body unchanged; the updater owns local shape checks.
+
+        Refusal, truncation or a different return channel are not format errors
+        and must never be offered the product's one format correction.
+        """
+        self._record_effective_model(data.get("model"))
+        usage = data.get("usage")
+        self.last_usage = usage if isinstance(usage, dict) else {}
+        choice = self._first_choice(data)
+        message = choice.get("message")
+        if (len(data["choices"]) != 1 or type(message) is not dict
+                or choice.get("finish_reason") != "stop"
+                or message.get("tool_calls") not in (None, [])
+                or message.get("function_call") is not None
+                or message.get("refusal") not in (None, "")
+                or type(message.get("content")) is not str or not message["content"].strip()):
+            self._record_response_shape(choice, output_kind="invalid_reflection_body_channel",
+                                        error_type="invalid_reflection_body_channel")
+            raise ValueError("invalid_reflection_body_channel")
+        self._record_response_shape(choice, output_kind="reflection_body_json", error_type=None)
+        return message["content"]
 
     def _extract_reflection_json(self, data: dict) -> str:
         from .reflection_json import parse_reflection_json, reflection_shape_diagnostic

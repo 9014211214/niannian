@@ -624,6 +624,7 @@ class PersonaHypothesisUpdater:
         min_turns: int = 3,
         now_provider: Callable[[], datetime] | None = None,
         evidence_review_protocol: bool = False,
+        body_json_protocol: bool = False,
     ):
         self.llm = llm
         self.min_turns = min_turns
@@ -632,6 +633,11 @@ class PersonaHypothesisUpdater:
         self.last_error_type: str | None = None
         self.last_error_detail: str | None = None
         self.evidence_review_protocol = evidence_review_protocol
+        if type(body_json_protocol) is not bool or body_json_protocol and not evidence_review_protocol:
+            raise ValueError("body_json_requires_evidence_review_protocol")
+        self.body_json_protocol = body_json_protocol
+        self.last_format_attempts: list[dict] = []
+        self.last_format_correction_count = 0
         self.last_review_summary: dict | None = None
         self.last_response_transport: dict | None = None
         self.last_proposal_results: list[dict] = []
@@ -647,6 +653,8 @@ class PersonaHypothesisUpdater:
         self.last_proposal_results = []
         self.last_application_summary = None
         self.last_belief_change_results = None
+        self.last_format_attempts = []
+        self.last_format_correction_count = 0
         state = persona.person_model_state
         if ctx.session_id in state.reflected_session_ids:
             self.last_status = "skipped"
@@ -681,13 +689,19 @@ class PersonaHypothesisUpdater:
         )
         self.last_error_type = None
         try:
-            raw = self.llm.complete(messages)
+            raw = self._body_json_response(messages) if self.body_json_protocol else self.llm.complete(messages)
         except Exception:
             self.last_status = "failed"
             self.last_error_type = "model_call_failed"
             self.last_error_detail = "model_call_failed"
             if self.evidence_review_protocol:
                 self._record_proposal_outcomes(None, {}, review_status="not_evaluated")
+            return persona
+        if raw is None and self.body_json_protocol:
+            self.last_status = "failed"
+            self.last_error_type = "invalid_json_response"
+            self.last_error_detail = "invalid_json_response"
+            self._record_proposal_outcomes(None, {}, review_status="not_evaluated")
             return persona
         try:
             if self.evidence_review_protocol:
@@ -785,6 +799,53 @@ class PersonaHypothesisUpdater:
     # 兼容原有调用名；语义已经从“诊断”变为“更新系统的可推翻假设”。
     def diagnose(self, persona: PersonaProfile, ctx) -> PersonaProfile:
         return self.update(persona, ctx)
+
+    def _body_json_response(self, messages: list[dict]) -> str | None:
+        """At most one format correction, before the evidence transaction.
+
+        The first body is never echoed to the model. Every complete() remains
+        a separate metered call; no HTTP retry or ledger reset happens here.
+        Evidence/lineage/semantic validation runs only after this method and
+        can never trigger a second answer.
+        """
+        from ..policy.reflection_json import (
+            parse_reflection_json, reflection_body_system_prompt,
+            reflection_correction_issues, reflection_correction_message,
+            reflection_shape_diagnostic,
+        )
+        original = [{"role": "system", "content": reflection_body_system_prompt()}, messages[1].copy()]
+        request = original
+        for index in range(2):
+            attempt = {"product_step": "initial" if index == 0 else "format_correction",
+                       "attempt_index": index, "status": "started"}
+            self.last_format_attempts.append(attempt)
+            try:
+                raw = self.llm.complete(request)
+            except Exception:
+                attempt["status"] = "model_call_failed"
+                raise
+            # Content-independent call diagnostics; the transport ledger owns
+            # actual cost/unknown reservations and retains each physical call.
+            usage = getattr(self.llm, "last_usage", None)
+            if type(usage) is dict:
+                attempt["usage"] = {key: value for key in ("prompt_tokens", "completion_tokens", "cost")
+                                    if type(value := usage.get(key)) in (int, float)
+                                    and math.isfinite(value) and value >= 0}
+            body = raw
+            try:
+                body, _ = _unwrap_review_response(raw)
+                parse_reflection_json(body)
+            except (ValueError, TypeError, RecursionError) as error:
+                attempt.update(status="shape_failed", shape=reflection_shape_diagnostic(error))
+                issues = reflection_correction_issues(error, body)
+                if index or not issues:
+                    return None
+                request = [*original, reflection_correction_message(issues)]
+                self.last_format_correction_count = 1
+                continue
+            attempt["status"] = "shape_valid"
+            return raw
+        return None
 
     def _record_proposal_outcomes(
         self, raw_changes: list[dict] | None, reviews_by_local_id: dict,

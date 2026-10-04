@@ -18,7 +18,8 @@ EMPTY = {"protocol_version": "2.0", "reviews": [], "changes": []}
 
 
 def client():
-    return create_minimal_clients(model_calls_enabled=True, api_key="local-fixture").reflection
+    return create_minimal_clients(model_calls_enabled=True, api_key="local-fixture",
+                                  reflection_return_format="json_schema").reflection
 
 
 def response(c, content=None):

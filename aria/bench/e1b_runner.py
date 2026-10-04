@@ -36,6 +36,10 @@ class E1bRunStopped(RuntimeError):
 
 def _first_answer_attempts(guard, state):
     """Only validated no-answer transport recovery can precede a first answer."""
+    from ..engine.policy.e1br_calls import E1BRCallGuard, logical_attempts
+    if isinstance(guard, E1BRCallGuard):
+        guard._validate_history(state["attempts"])
+        return logical_attempts(state)
     policy = getattr(guard, "recovery_policy", None)
     if policy is None:
         return state["attempts"]
@@ -441,9 +445,13 @@ class _CapturedReflectionUpdater:
     def __init__(self, updater, capture):
         self.updater, self.capture = updater, capture
         client = updater.llm
+        self.reflection_metered_client = client
         class RecordedClient:
             def complete(self, messages):
                 return capture.complete(client, messages)
+
+            def __getattr__(self, name):
+                return getattr(client, name)
         updater.llm = RecordedClient()
 
     def __getattr__(self, name):
@@ -549,6 +557,8 @@ class E1bRunner:
     repeated branches share emotion readings and historical profile bytes but
     receive new session/run IDs; no clock is changed to imply elapsed days.
     """
+
+    reflection_capture_class = _ReflectionCapture
 
     def __init__(self, suite: E1bSuite, *, root: str | Path,
                  app_factory: Callable[[Path], MinimalWebApp], seed: int,
@@ -695,7 +705,7 @@ class E1bRunner:
                     session_id = self._session(app, case, number, arm="shared", repeat=0)
                     app.proposal_capture = _ProposalCapture(app, case_root, case_id=case.id, session=number,
                         session_id=session_id, source_sha256=self.suite.source_sha256)
-                    app.reflection_capture = _ReflectionCapture(app, case_root, case_id=case.id, session=number,
+                    app.reflection_capture = self.reflection_capture_class(app, case_root, case_id=case.id, session=number,
                         session_id=session_id, source_sha256=self.suite.source_sha256)
                     try:
                         self._operation(app, "reflect", lambda: app.reflect(f"e1b-review-{session_id}"),

@@ -1,4 +1,4 @@
-"""Explicit Claude/OpenRouter reflection format; no answer repair or retries.
+"""Reflection body JSON and explicitly archived provider schema formats.
 
 The provider enforces its supported JSON Schema subset. All omitted numeric,
 length and count constraints still run in the original local shape validator;
@@ -15,6 +15,8 @@ from ..memory.reflection_contract import (
 )
 
 REFLECTION_JSON_PROTOCOL_VERSION = "reflection_json_schema_v2"
+REFLECTION_BODY_PROTOCOL_VERSION = "reflection_body_json_v1"
+_CORRECTION_PREFIX = "本次仅更正 JSON 格式。保持原会话证据边界，不增补证据或改写任务；重新返回完整 JSON。字段路径及错误类型：\n"
 _LOCAL_ONLY = frozenset({
     "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
     "minLength", "maxLength", "maxItems", "uniqueItems",
@@ -184,10 +186,111 @@ def reflection_wire_schema() -> dict:
     return _factor_atomic_outcomes(_project_wire_keywords(reflection_response_schema()))
 
 
-def reflection_request_format() -> dict:
+def reflection_request_format(version: str = "json_schema") -> dict:
+    if version not in {"json_schema", "json_schema_v1", "json_schema_v2"}:
+        raise ValueError("invalid_reflection_return_format")
+    schema = (_project_wire_keywords(reflection_response_schema())
+              if version == "json_schema_v1" else reflection_wire_schema())
     return {"type": "json_schema", "json_schema": {
-        "name": "aria_reflection_v1", "strict": True, "schema": reflection_wire_schema(),
+        "name": "aria_reflection_v1", "strict": True, "schema": schema,
     }}
+
+
+def reflection_body_system_prompt() -> str:
+    from ..memory.diagnosis import reflection_system_prompt
+    return (reflection_system_prompt(True)
+            + "\n\n完整本地 JSON Schema（正文只返回完整 JSON，不使用工具、不省略 nullable 字段）：\n"
+            + json.dumps(reflection_response_schema(), ensure_ascii=False, sort_keys=True))
+
+
+def reflection_correction_issues(error: Exception, raw: str) -> list[dict]:
+    """Only syntactic/field-shape errors qualify, never evidence or refusals."""
+    if isinstance(error, ValidationError) and any(
+            row["type"] in {"value_error", "assertion_error"}
+            for row in error.errors(include_url=False, include_context=False, include_input=False)):
+        return []
+    diagnostic = reflection_shape_diagnostic(error)
+    kind = diagnostic.get("kind")
+    if kind == "schema":
+        # Cross-field validators can encode domain meaning. Do not label their
+        # rejection a format failure or solicit a different substantive answer.
+        if any(row["type"] in {"value_error", "schema_constraint"}
+               for row in diagnostic["issues"]):
+            return []
+        return diagnostic["issues"]
+    if kind == "json_syntax" and type(raw) is str and raw.lstrip().startswith(("{", "[")):
+        return [{"path": [], "type": "json_syntax"}]
+    if kind in {"duplicate_key", "nonfinite_number"}:
+        return [{"path": [], "type": kind}]
+    return []
+
+
+def reflection_correction_message(issues: list[dict]) -> dict:
+    """No generated content, exception message or arbitrary field names."""
+    if type(issues) is not list or not 1 <= len(issues) <= 20:
+        raise ValueError("invalid_reflection_correction")
+    for row in issues:
+        if (type(row) is not dict or set(row) != {"path", "type"}
+                or row["type"] not in _DIAGNOSTIC_TYPES | {"json_syntax", "duplicate_key", "nonfinite_number"}
+                or type(row["path"]) is not list or len(row["path"]) > 12
+                or any(not (type(part) is str and part in _DIAGNOSTIC_FIELDS
+                            or type(part) is int and 0 <= part <= 63) for part in row["path"])):
+            raise ValueError("invalid_reflection_correction")
+    return {"role": "user", "content": _CORRECTION_PREFIX + json.dumps(issues, ensure_ascii=False, sort_keys=True)}
+
+
+def reflection_product_step(messages) -> str:
+    """Identify the bounded product step from a validated request, not a flag."""
+    if (type(messages) is not list or len(messages) not in {2, 3}
+            or messages[0] != {"role": "system", "content": reflection_body_system_prompt()}
+            or type(messages[1]) is not dict or set(messages[1]) != {"role", "content"}
+            or messages[1]["role"] != "user" or type(messages[1]["content"]) is not str):
+        raise ValueError("reflection_json_requires_evidence_review_contract")
+    if len(messages) == 2:
+        return "initial"
+    last = messages[2]
+    if (type(last) is not dict or set(last) != {"role", "content"}
+            or last["role"] != "user" or type(last["content"]) is not str
+            or not last["content"].startswith(_CORRECTION_PREFIX)):
+        raise ValueError("invalid_reflection_correction")
+    try:
+        issues = json.loads(last["content"][len(_CORRECTION_PREFIX):])
+        if reflection_correction_message(issues) != last:
+            raise ValueError
+    except (ValueError, TypeError, KeyError):
+        raise ValueError("invalid_reflection_correction") from None
+    return "format_correction"
+
+
+def reflection_body_observation(data: dict) -> dict:
+    """Content-free, receipt-bound permission for a single format correction."""
+    from ..memory.diagnosis import _unwrap_review_response
+    result = {"channel_valid": False, "correction_issues": []}
+    choices = data.get("choices") if type(data) is dict else None
+    if type(choices) is not list or len(choices) != 1 or type(choices[0]) is not dict:
+        return result
+    choice = choices[0]
+    message = choice.get("message")
+    if (type(message) is not dict or choice.get("finish_reason") != "stop"
+            or message.get("tool_calls") not in (None, []) or message.get("function_call") is not None
+            or message.get("refusal") not in (None, "")
+            or message.get("reasoning") not in (None, "")
+            or message.get("reasoning_details") not in (None, "", [])
+            or type(message.get("content")) is not str or not message["content"].strip()):
+        return result
+    usage = data.get("usage")
+    details = usage.get("completion_tokens_details") if type(usage) is dict else None
+    if type(details) is dict and details.get("reasoning_tokens") is not None and (
+            type(details["reasoning_tokens"]) is not int or details["reasoning_tokens"] != 0):
+        return result
+    result["channel_valid"] = True
+    body = message["content"]
+    try:
+        body, _ = _unwrap_review_response(body)
+        parse_reflection_json(body)
+    except (ValueError, TypeError, RecursionError) as error:
+        result["correction_issues"] = reflection_correction_issues(error, body)
+    return result
 
 
 def validate_reflection_request(client, messages) -> None:
@@ -198,6 +301,9 @@ def validate_reflection_request(client, messages) -> None:
             or client.model != DEFAULT_REFLECTION_MODEL
             or client.max_retries != 0 or client.fallback_models):
         raise ValueError("unsupported_reflection_json_route")
+    if client.reflection_return_format == "body_json":
+        reflection_product_step(messages)
+        return
     if (type(messages) is not list or len(messages) != 2
             or messages[0] != {"role": "system", "content": reflection_system_prompt(True)}
             or type(messages[1]) is not dict or set(messages[1]) != {"role", "content"}

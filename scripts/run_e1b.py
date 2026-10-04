@@ -542,7 +542,8 @@ def execute(root, metadata, registration, *, allow_local_env=False, budget_choic
             packet, mapping = evaluation.load_bundle(output / "blind-bundle")
             receipt.update(packet_sha256=digest(packet), mapping_sha256=digest(mapping))
             if stage == "main":
-                evaluation.prepare_secondary(output / "blind-bundle")
+                if proto["secondary_positions"]:
+                    evaluation.prepare_secondary(output / "blind-bundle")
                 from scripts import e1b_formation as formation
                 formation.export_packet(runner.root, output / "formation-bundle", proto, registered_sha256=digest(proto))
                 formed, formed_key = formation.load_bundle(output / "formation-bundle")

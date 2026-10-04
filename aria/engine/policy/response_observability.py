@@ -567,7 +567,8 @@ def _native_provider_error(data: Any, result: dict) -> None:
 
 
 def observe_http_error(exc: urllib.error.HTTPError, *, observed_at: float | int | None = None,
-                       recovery_evidence: dict | None = None) -> tuple[dict, dict]:
+                       recovery_evidence: dict | None = None,
+                       no_content_evidence: dict | None = None) -> tuple[dict, dict]:
     """Consume at most limit+1 bytes, retaining only finite metadata and usage.
 
     Duplicate keys, incomplete bodies, oversized bodies and invalid envelopes
@@ -629,6 +630,24 @@ def observe_http_error(exc: urllib.error.HTTPError, *, observed_at: float | int 
             and type(data.get("error")) is dict and type(data["error"].get("code")) is int
             and data["error"]["code"] == 429):
         recovery_evidence.update(schema="http429_error_envelope_v1", complete_error_envelope=True, no_model_answer=True)
+    finite_error = False
+    if type(no_content_evidence) is dict and type(data) is dict:
+        try:
+            json.dumps(data, allow_nan=False)
+        except (ValueError, TypeError, RecursionError):
+            pass
+        else:
+            code = data.get("error", {}).get("code") if type(data.get("error")) is dict else None
+            finite_error = code is None or type(code) is int and (code in {400, 408, 429} or 500 <= code <= 599)
+    if (type(no_content_evidence) is dict and type(exc.code) is int
+            and (exc.code == 429 or 500 <= exc.code <= 599)
+            and not result.get("body_close_failed")
+            and (result["body_status"] == "empty" or (
+                result["body_status"] == "parsed" and type(data) is dict
+                and set(data) <= {"error", "id", "request_id", "usage"}
+                and type(data.get("error")) is dict and finite_error))):
+        no_content_evidence.update(schema="e1br_no_content_v1", kind="http_error",
+                                   http_status=exc.code, body_status=result["body_status"])
     return result, safe_usage(data)
 
 

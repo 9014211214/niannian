@@ -127,8 +127,7 @@ class MinimalCallGuard:
                 or self._pacing_interval != 10 or not hasattr(self, "policy")):
             raise ValueError("bounded_recovery_requires_observed_reserved_shared_allowance")
         if (type(connection_preparation_recovery) is not bool or connection_preparation_recovery and (
-                not transport_diagnostics or not callable(pre_application_check) or self.recovery_policy is None
-                or self.recovery_policy["schema"] not in {CONTINUATION_SCHEMA, MAIN_CONTINUATION_SCHEMA})
+                not transport_diagnostics or not callable(pre_application_check) or not self._preparation_policy_supported())
                 or not connection_preparation_recovery and pre_application_check is not None):
             raise ValueError("invalid_connection_preparation_recovery")
         self.connection_preparation_recovery = self._connection_preparation_recovery = connection_preparation_recovery
@@ -203,6 +202,15 @@ class MinimalCallGuard:
             self._db.close()
             raise
 
+    def _preparation_policy_supported(self):
+        return self.recovery_policy is not None and self.recovery_policy["schema"] in {
+            CONTINUATION_SCHEMA, MAIN_CONTINUATION_SCHEMA}
+
+    def _observe_http_failure(self, exc):
+        evidence = {} if self.recovery_policy is not None else None
+        observation, usage = observe_http_error(exc, recovery_evidence=evidence)
+        return observation, usage, ({"http_error_recovery_evidence": evidence} if evidence else {})
+
     def _check_pacing_configuration(self):
         if self.min_interval_seconds != self._pacing_interval:
             raise ValueError("request_pacing_configuration_changed")
@@ -271,17 +279,19 @@ class MinimalCallGuard:
         if getattr(client, "bounded_transport", False):
             binding["bounded_transport"] = True
         reflection_format = getattr(client, "reflection_return_format", "native")
-        if reflection_format not in {"native", "json_schema"}:
+        if reflection_format not in {"native", "body_json", "json_schema", "json_schema_v1", "json_schema_v2"}:
             raise ValueError("invalid_reflection_return_format")
-        if reflection_format == "json_schema":
+        if reflection_format != "native":
             from ..._openrouter import DEFAULT_REFLECTION_MODEL
-            from .reflection_json import reflection_request_format
+            from .reflection_json import reflection_request_format, reflection_body_system_prompt
             if (client.role != "reflection" or not client.bounded_transport
                     or client.model != DEFAULT_REFLECTION_MODEL):
                 raise ValueError("unsupported_reflection_json_route")
             binding["reflection_return_format"] = reflection_format
             binding["reflection_format_sha256"] = hashlib.sha256(json.dumps(
-                reflection_request_format(), sort_keys=True, allow_nan=False,
+                ({"system_prompt": reflection_body_system_prompt(), "format_corrections": 1}
+                 if reflection_format == "body_json" else reflection_request_format(reflection_format)),
+                sort_keys=True, allow_nan=False,
             ).encode()).hexdigest()
         if getattr(client, "reservation_max_price", None) is not None:
             binding["reservation_max_price"] = client.reservation_max_price
@@ -307,8 +317,9 @@ class MinimalCallGuard:
                 or type(message["content"]) is not str for message in messages)):
             raise MinimalCallStopped("model_request_configuration_changed")
         version = protocol_version(messages) if client.role == "online_fast" else None
-        reflection_json = getattr(client, "reflection_return_format", "native") == "json_schema"
-        if reflection_json:
+        reflection_format = getattr(client, "reflection_return_format", "native")
+        reflection_json = reflection_format in {"json_schema", "json_schema_v1", "json_schema_v2"}
+        if reflection_json or reflection_format == "body_json":
             from .reflection_json import reflection_request_format, validate_reflection_request
             try:
                 validate_reflection_request(client, messages)
@@ -331,7 +342,7 @@ class MinimalCallGuard:
             if version and json_transport:
                 expected["response_format"] = {"type": "json_object"}
             elif reflection_json:
-                expected["response_format"] = reflection_request_format()
+                expected["response_format"] = reflection_request_format(reflection_format)
             elif version:
                 raise MinimalCallStopped("model_request_configuration_changed")
         else:
@@ -468,22 +479,27 @@ class MinimalCallGuard:
             if stored != (binding,):
                 raise MinimalCallStopped("model_configuration_changed")
             previous = [row for row in state["attempts"] if row["operation_id"] == scope["operation_id"] and row["role"] == client.role]
-            if previous and (self.recovery_policy is None or self._recovery.active is None):
-                raise MinimalCallStopped("duplicate_model_operation")
             if (request.full_url != client.base_url.rstrip("/") + "/chat/completions"
                     or request.get_method() != "POST"):
                 raise MinimalCallStopped("model_endpoint_changed")
             try:
                 payload = json.loads(request.data, object_pairs_hook=_unique_request_object)
                 self._validate_payload(client, payload)
+                product = self._reflection_product_metadata(client, payload, previous)
+                if (product.get("product_step") == "format_correction"
+                        and previous[0].get("session_id") != scope["session_id"]):
+                    raise MinimalCallStopped("reflection_correction_session_changed")
             except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError):
                 raise MinimalCallStopped("model_request_configuration_changed") from None
+            if (previous and product.get("product_step") != "format_correction"
+                    and (self.recovery_policy is None or self._recovery.active is None)):
+                raise MinimalCallStopped("duplicate_model_operation")
             reservation = self._reserve(client, request, payload, state)
             row = {"request_id": uuid.uuid4().hex, **scope,
                    "role": client.role, "model": client.model, "status": "pending",
                    "started_at": _stamp(), "usage": {}, "observation": {},
                    "request_sha256": hashlib.sha256(request.data).hexdigest(), "elapsed_ms": None,
-                   **reservation}
+                   **reservation, **product}
             if self.recovery_policy is not None:
                 spec = self.policy["models"][client.model]
                 providers = spec["response_providers"]
@@ -496,6 +512,34 @@ class MinimalCallGuard:
             self._db.execute("INSERT INTO attempts(request_id,record) VALUES(?,?)",
                              (row["request_id"], json.dumps(row, ensure_ascii=False, allow_nan=False)))
         return row
+
+    @staticmethod
+    def _reflection_product_metadata(client, payload, previous):
+        """Bind one correction to the first received shape error, not a retry."""
+        if getattr(client, "reflection_return_format", "native") != "body_json":
+            return {}
+        from .reflection_json import reflection_product_step, reflection_correction_message
+        messages = payload["messages"]
+        step = reflection_product_step(messages)
+        digest = hashlib.sha256(json.dumps(messages[:2], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        result = {"product_step": step, "reflection_input_sha256": digest}
+        if step == "format_correction":
+            if (len(previous) != 1 or previous[0].get("status") != "received"
+                    or previous[0].get("product_step") != "initial"
+                    or previous[0].get("reflection_input_sha256") != digest):
+                raise MinimalCallStopped("invalid_reflection_correction_antecedent")
+            first = previous[0]
+            issues = first.get("reflection_body", {}).get("correction_issues")
+            if not issues or messages[2] != reflection_correction_message(issues):
+                raise MinimalCallStopped("reflection_correction_diagnostic_mismatch")
+            result["format_parent_request_id"] = first["request_id"]
+        return result
+
+    @staticmethod
+    def _observe_reflection_body(client, row, data):
+        if getattr(client, "reflection_return_format", "native") == "body_json":
+            from .reflection_json import reflection_body_observation
+            row["reflection_body"] = reflection_body_observation(data)
 
     def _reserve(self, client, request, payload, state):
         return {}
@@ -678,6 +722,7 @@ class MinimalCallGuard:
                     row["validation_error"] = "non_object_response"
                     raise ValueError("non_object_response")
                 phase = "receipt_validation"
+                self._observe_reflection_body(client, row, data)
                 self._record_receipt(client, row, data)
                 row["status"] = "received"
                 return data
@@ -689,10 +734,8 @@ class MinimalCallGuard:
                     client._update_diagnostic(error_type="minimal_request_failed")
                     raise MinimalCallStopped("request_failed") from None
                 row["http_status"] = exc.code
-                recovery_evidence = {} if self.recovery_policy is not None else None
-                row["observation"], row["usage"] = observe_http_error(exc, recovery_evidence=recovery_evidence)
-                if recovery_evidence:
-                    row["http_error_recovery_evidence"] = recovery_evidence
+                row["observation"], row["usage"], failure_metadata = self._observe_http_failure(exc)
+                row.update(failure_metadata)
                 row.update(failure_phase="http_status", failure_code="http_error")
                 client._update_diagnostic(http_status=exc.code, error_type="http_error")
                 raise MinimalCallStopped("request_failed") from None

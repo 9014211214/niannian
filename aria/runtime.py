@@ -66,7 +66,7 @@ def create_minimal_clients(
     online_model: str = DEFAULT_ONLINE_FAST_MODEL,
     memory_model: str = DEFAULT_MEMORY_MODEL,
     reflection_model: str = DEFAULT_REFLECTION_MODEL,
-    reflection_return_format: str = "json_schema",
+    reflection_return_format: str = "body_json",
 ) -> MinimalModelClients:
     """Create inert local clients unless model calls are explicitly enabled.
 
@@ -90,9 +90,9 @@ def create_minimal_clients(
     models = (online_model, memory_model, reflection_model)
     if not all(isinstance(model, str) and model.strip() for model in models):
         raise ValueError("minimal assembly requires explicit nonempty model names")
-    if reflection_return_format not in {"native", "json_schema"}:
+    if reflection_return_format not in {"native", "body_json", "json_schema", "json_schema_v1", "json_schema_v2"}:
         raise ValueError("invalid_reflection_return_format")
-    if reflection_return_format == "json_schema" and reflection_model.strip() != DEFAULT_REFLECTION_MODEL:
+    if reflection_return_format != "native" and reflection_model.strip() != DEFAULT_REFLECTION_MODEL:
         raise ValueError("structured reflection requires the verified default model; native must be explicit")
     clients = [
         OpenRouterLLMClient(
@@ -166,7 +166,8 @@ def create_minimal_engine(
             if memory_enabled else _PreviewMemoryExtractor()
         ),
         hypothesis_updater=(
-            PersonaHypothesisUpdater(selected.reflection, evidence_review_protocol=True)
+            PersonaHypothesisUpdater(selected.reflection, evidence_review_protocol=True,
+                                     body_json_protocol=getattr(selected.reflection, "reflection_return_format", None) == "body_json")
             if reflection_enabled and store is not None else None
         ),
         world_knowledge=None,

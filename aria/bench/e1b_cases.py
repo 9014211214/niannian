@@ -180,3 +180,19 @@ def select_prescreen(suite: E1bSuite, violations: dict[str, tuple[bool, bool, bo
             "actual_denominator": len(selected), "prescreen_only": True,
             "main_gate_registered": len(selected) == target,
             "status": "ready_for_registration" if len(selected) == target else "denominator_rule_required"}
+
+
+def select_prescreen_balanced(suite: E1bSuite, violations: dict[str, tuple[bool, bool, bool]]) -> dict:
+    """Approved E1b-R selection; identities fixed before any A1 generation."""
+    select_prescreen(suite, violations)  # Reuse the complete 18 x 3 label checks.
+    if not all(any(violations[case.id]) for case in suite.items):
+        raise ValueError("e1br_requires_original_all18_eligible_evidence")
+    selected = [f"e1b_{group}{number}" for group in "abcdef" for number in (1, 2)]
+    selected_cases = [case for case in suite.items if case.id in selected]
+    if [case.id for case in selected_cases] != selected or Counter(case.category for case in selected_cases) != Counter(dict.fromkeys(CATEGORIES, 2)):
+        raise ValueError("e1br_fixed_balanced_selection_changed")
+    return {"schema": "e1br_balanced_selection_v1", "case_ids": selected,
+            "planned_denominator": 12, "actual_denominator": 12,
+            "per_category": 2, "all18_originally_eligible": True,
+            "selection_uses_a1_outcomes": False, "selection_uses_violation_magnitude": False,
+            "status": "ready_for_registration", "main_gate_registered": False}

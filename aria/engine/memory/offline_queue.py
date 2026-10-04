@@ -164,14 +164,14 @@ class OfflineSessionQueue:
         ))
         persona.offline_session_audit = persona.offline_session_audit[-OFFLINE_AUDIT_LIMIT:]
 
-    def _finish(self, candidate, job, now):
+    def _finish(self, candidate, job, now, *, outcome="completed", error_code=None):
         job.state, job.active_stage, job.last_error_code = "pending", None, None
         state = candidate.person_model_state
         if job.turns and job.session_id not in state.completed_session_ids:
             state.completed_session_ids.append(job.session_id)
             state.completed_session_ids = state.completed_session_ids[-100:]
             state.sessions_completed += 1
-        self._audit(candidate, job, now, "completed")
+        self._audit(candidate, job, now, outcome, error_code)
         candidate.offline_sessions = [row for row in candidate.offline_sessions if row.session_id != job.session_id]
         self._clear_matching_checkpoint(candidate, job.session_id)
 
@@ -353,7 +353,8 @@ class OfflineSessionQueue:
                         if (not isinstance(result, tuple) or len(result) != 3
                                 or not isinstance(result[0], PersonaProfile)
                                 or result[0].user_id != self.persona.user_id
-                                or type(result[1]) is not str or result[1] not in {"ok", "skipped", "failed"}):
+                                or type(result[1]) is not str or result[1] not in {"ok", "skipped", "failed", "sealed_failed"}
+                                or result[1] == "sealed_failed" and stage != "reflection"):
                             error = "offline_handler_result_invalid"
                         elif result[1] == "failed":
                             error = _safe_code(result[2])
@@ -372,6 +373,19 @@ class OfflineSessionQueue:
                     if not self._commit(candidate):
                         error = "offline_store_failed"
                     return self._result("failed", error, attempted_jobs=attempted, completed_jobs=completed)
+                if result[1] == "sealed_failed":
+                    # Discard the handler candidate entirely. Memory/R1 were
+                    # already committed; a failed personality review cannot
+                    # mutate them or block future sessions at the FIFO head.
+                    candidate = self.persona.model_copy(deep=True)
+                    active = candidate.offline_sessions[0]
+                    self._finish(candidate, active, self._clock(), outcome="reflection_failed",
+                                 error_code=_safe_code(result[2]))
+                    if not self._commit(candidate):
+                        return self._result("failed", "offline_store_failed", attempted_jobs=attempted,
+                                            completed_jobs=completed)
+                    completed += 1
+                    break
                 candidate = self._merge_result(result[0], stage=stage)
                 active = candidate.offline_sessions[0]
                 setattr(active, stage + "_completed", True)

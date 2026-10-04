@@ -360,7 +360,7 @@ def test_v5_execution_tools_included_but_old_v4_scope_stays_verifiable(source, t
     release.build_release(source, current)
     with zipfile.ZipFile(current) as packed:
         assert release.V5_POLICY_FILES <= set(packed.namelist())
-    assert release.verify_release(current)["policy_version"] == "aria-minimal-source-5"
+    assert release.verify_release(current)["policy_version"] == release.POLICY_VERSION
     _, contents, manifest = release.inspect_source(source)
     contents = {name: data for name, data in contents.items() if name not in release.V5_POLICY_FILES}
     manifest["files"] = [row for row in manifest["files"] if row["path"] in contents]
@@ -375,3 +375,68 @@ def test_v5_execution_tools_included_but_old_v4_scope_stays_verifiable(source, t
     assert release.verify_release(old)["policy_version"] == "aria-minimal-source-4"
     assert old.read_bytes() == before
     assert all(not release._allowed(name, release.V4_POLICY_VERSION) for name in release.V5_POLICY_FILES)
+
+
+def test_e1br_authored_tools_include_no_private_campaign_or_ledger(source, tmp_path, monkeypatch):
+    for name in release.V6_POLICY_FILES:
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# Authored E1b-R fixture\n", encoding="utf-8")
+    excluded = (
+        "artifacts/local/e1br-formal-v1/campaign.json",
+        "artifacts/local/e1br-formal-v1/ledger.sqlite3",
+        "artifacts/local/tasks/20261004-07/user-approval.json",
+        "experiments/e1br-formal-v1/raw_response.json",
+        "experiments/e1br-formal-v1/fees.json",
+        "scripts/unreviewed_e1br_tool.py", "docs/unreviewed_e1br_notes.md",
+    )
+    for name in excluded:
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"private content must not be read")
+    original = Path.read_bytes
+
+    def guarded(path):
+        if path in {source / name for name in excluded}:
+            raise AssertionError("private E1b-R content was read for release")
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded)
+    target = tmp_path / "e1br-current.zip"
+    release.build_release(source, target)
+    with zipfile.ZipFile(target) as packed:
+        assert release.V6_POLICY_FILES <= set(packed.namelist())
+        assert not set(excluded) & set(packed.namelist())
+    assert release.verify_release(target)["policy_version"] == "aria-minimal-source-6"
+
+
+def test_v5_archive_retains_original_scope_without_new_e1br_files(source, tmp_path):
+    _, contents, manifest = release.inspect_source(source)
+    manifest["policy_version"] = release.V5_POLICY_VERSION
+    target = tmp_path / "retained-v5.zip"
+    with zipfile.ZipFile(target, "w") as packed:
+        for name, data in contents.items():
+            packed.writestr(name, data)
+        packed.writestr("RELEASE_MANIFEST.json", release._manifest_bytes(manifest))
+        packed.writestr("RELEASE_SCOPE.md", release.V5_SCOPE_TEXT)
+    before = target.read_bytes()
+    assert release.verify_release(target)["policy_version"] == "aria-minimal-source-5"
+    assert target.read_bytes() == before
+
+
+@pytest.mark.parametrize("policy", [release.LEGACY_POLICY_VERSION, release.PREVIOUS_POLICY_VERSION,
+                                    release.V4_POLICY_VERSION, release.V5_POLICY_VERSION])
+def test_e1br_files_cannot_enter_old_archive_policy(source, tmp_path, policy):
+    _, contents, manifest = release.inspect_source(source)
+    added = "scripts/run_e1br.py"
+    contents[added] = b"# authored E1b-R fixture\n"
+    manifest["policy_version"] = policy
+    manifest["files"].append({"path": added, "bytes": len(contents[added]), "sha256": release._digest(contents[added])})
+    target = tmp_path / "wrong-old-policy.zip"
+    with zipfile.ZipFile(target, "w") as packed:
+        for name, data in contents.items():
+            packed.writestr(name, data)
+        packed.writestr("RELEASE_MANIFEST.json", release._manifest_bytes(manifest))
+        packed.writestr("RELEASE_SCOPE.md", release.V5_SCOPE_TEXT)
+    with pytest.raises(release.ReleaseError, match="archive_policy_member_rejected"):
+        release.verify_release(target)

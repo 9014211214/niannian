@@ -7,7 +7,7 @@ import urllib.request
 import pytest
 
 from aria.engine.policy.minimal_calls import MinimalCallGuard, MinimalCallStopped
-from aria.engine.memory.diagnosis import reflection_system_prompt
+from aria.engine.policy.reflection_json import reflection_body_system_prompt
 from aria.runtime import create_minimal_clients
 from tests.test_online_json import MESSAGES, envelope
 from tests.test_minimal_call_guard import _Response, _call, _client, _stub
@@ -34,7 +34,7 @@ def wire_client(monkeypatch, *, role="online_fast", integrated=True):
         patch.setattr(client, "_request_json", capture)
         messages = MESSAGES if integrated else [{"role": "user", "content": "虚构输入"}]
         if role == "reflection":
-            messages = [{"role": "system", "content": reflection_system_prompt(True)}, *messages]
+            messages = [{"role": "system", "content": reflection_body_system_prompt()}, *messages]
         client.complete(messages)
     return client, requests[0]
 

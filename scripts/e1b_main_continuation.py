@@ -214,13 +214,13 @@ def assert_prefix_unchanged(prefix, *, full=False):
                      "retained_main_prefix_bytes_changed")
 
 
-def runner_class(prefix):
+def runner_class(prefix, *, base_runner=E1bRunner):
     """Return the ordinary runner with one fixed checkpoint continuation hook.
 
     The new caller must create a fresh e1b-main-v1 experiment and a new guarded
     ledger that carries the old costs/holds. No registration row is rewritten.
     """
-    class MainContinuationRunner(E1bRunner):
+    class MainContinuationRunner(base_runner):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self._prefix_restored = False

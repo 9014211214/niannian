@@ -70,9 +70,9 @@ def write_once(path, value):
         os.fsync(stream.fileno())
 
 
-def draft_protocol(suite, *, phase, case_ids=None):
+def draft_protocol(suite, *, phase, case_ids=None, revision=None):
     ids = list(case_ids) if case_ids is not None else [c.id for c in suite.items]
-    return {"schema": "e1b_evaluation_protocol_v1", "status": "draft", "source_sha256": suite.source_sha256,
+    result = {"schema": "e1b_evaluation_protocol_v1", "status": "draft", "source_sha256": suite.source_sha256,
             "phase": phase, "case_ids": ids, "planned_denominator": len(ids),
             "repeats": [1, 2, 3], "evaluation_turns": [7, 8, 9], "third_session_turns": 10,
             "arms": ["A0"] if phase == "prescreen" else ["A0", "A1"],
@@ -81,6 +81,14 @@ def draft_protocol(suite, *, phase, case_ids=None):
             "max_worse": 0, "formation_expected_per_case": 1, "formation_rate": "0.80",
             "formation_max_false": 0, "secondary_positions": 40 if phase == "main" and len(ids) == 12 else 0,
             "secondary_seed": 20261003, "secondary_min_exact_agreement": "0.85"}
+    if revision is not None:
+        if revision != "e1br_v1" or phase != "main" or ids != [f"e1b_{g}{n}" for g in "abcdef" for n in (1, 2)]:
+            raise ValueError("invalid_e1br_evaluation_revision")
+        result.update(schema="e1br_evaluation_protocol_v1", secondary_positions=0,
+                      secondary_seed=None, secondary_min_exact_agreement=None,
+                      independent_judge="codex_only_no_second_model_calibration",
+                      reflection_measure="secondary_not_a_main_or_formation_gate")
+    return result
 
 
 def validate_protocol(protocol, suite, *, registered_sha256=None):
@@ -93,7 +101,8 @@ def validate_protocol(protocol, suite, *, registered_sha256=None):
     phase = protocol.get("phase")
     if phase not in {"main", "prescreen"}:
         raise ValueError("invalid_protocol_phase")
-    expected = draft_protocol(suite, phase=phase, case_ids=ids)
+    expected = draft_protocol(suite, phase=phase, case_ids=ids,
+                              revision="e1br_v1" if protocol.get("schema") == "e1br_evaluation_protocol_v1" else None)
     # Only the externally supplied status may differ. Numeric bools must not
     # compare equal to integer denominators or repeat indices.
     candidate = deepcopy(protocol)
@@ -544,6 +553,11 @@ def aggregate(root):
     result["main_gate"] = ("not_registered" if protocol["status"] == "draft" else "software_fixture_only"
                            if packet["evidence_kind"] != "real_model" else "generation_not_registered"
                            if not result["generation_registration_matches"] else "real_transport_eligibility_missing")
+    if protocol["schema"] == "e1br_evaluation_protocol_v1":
+        result["secondary"] = {"status": "not_planned_by_approved_revision", "planned_positions": 0,
+                               "exact_agreement": None,
+                               "limitation": "Independent Codex only; no second-model calibration."}
+        return result
     result["secondary"] = {"status": "not_evaluable", "planned_positions": 40, "exact_agreement": None}
     try:
         sample = _load_secondary(root, packet)
