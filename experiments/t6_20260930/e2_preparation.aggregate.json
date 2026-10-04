@@ -1,0 +1,36 @@
+{
+  "suite": "cped_holdout_source_preparation_v1",
+  "builder_version": "1.0",
+  "status": "stopped_feasibility",
+  "evidence_status": "mechanical_preparation_not_identity_clearance_or_effect_evidence",
+  "artifact_scope": "aggregate_only_no_case_level_derivatives",
+  "source_row_count": 132762,
+  "unique_source_row_count": 132762,
+  "duplicate_source_row_count": 0,
+  "eligible_role_count": 113,
+  "selected_role_count": 48,
+  "elderly_role_count": 3,
+  "position_counts": [
+    12,
+    12,
+    12,
+    12
+  ],
+  "surface_correct_counts": {
+    "length": 11,
+    "lexical": 20,
+    "position": 12,
+    "punctuation": 12
+  },
+  "failure_counts": {
+    "insufficient_independent_dialogues": 20,
+    "insufficient_unique_formation": 146,
+    "no_eligible_holdout_target": 56,
+    "no_matched_distractor_triplet": 54,
+    "surface_shortcut_above_35_percent": 1
+  },
+  "seed": 20260909,
+  "executed_model_calls": 0,
+  "identity_review_required": true,
+  "cloud_submission_allowed": false
+}

@@ -1,0 +1,26 @@
+{
+  "schema": "aria_t72_repair_v1",
+  "id": "t72_20260930_v1",
+  "inherits": {
+    "t6_seal": "f020b5079bdd1c6ccaf68409af0728e99cb305d524ff2f1b16b69cc41e3a7212",
+    "t7_seal": "e49db651619b6ccb23a87efae1c453f28ad5eef2f6d774160ed7ce9e1d741538",
+    "t71_seal": "b073aff9657e8889a8e940c7b57e8a5dd247db925fe2e6d02af87dea38d5378d"
+  },
+  "purpose": "Actual-wire parameter preflight and bounded HTTP diagnostic repair; read-only rerun qualification",
+  "wire_changes": [],
+  "allows_model_execution": false,
+  "unknown_cost_policy": "retain_and_block",
+  "same_campaign_resume_allowed": false,
+  "automatic_retry_allowed": false,
+  "fixed_generation_positions": 204,
+  "budget_usd": {"e1": "0.5", "judge": "0.5", "pause_total": "2", "total": "5"},
+  "supersedes_assumption": "T7.1 omitted parallel_tool_calls from metadata projection while retaining the wire field. Single-tool receipt validation does not establish routing compatibility.",
+  "rerun_requirements": [
+    "Verify all inherited source, request and private failed-attempt evidence",
+    "Resolve previous unknown cost with attributable provider evidence; retain original receipt and use a separate reconciliation record",
+    "Obtain parameter support evidence for the actual payload, or separately register an exact request-parameter amendment",
+    "Register a linked prospective execution protocol carrying all previous costs and failures; never reopen or reset the stopped ledger",
+    "Recompute full-stage reserve within existing limits and recheck current public endpoint metadata before credentials or claims",
+    "Preserve fixed case inventory, denominators, judge contract and stopping rules; no model retries under this repair"
+  ]
+}

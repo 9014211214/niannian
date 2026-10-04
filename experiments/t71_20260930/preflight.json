@@ -1,0 +1,66 @@
+{
+  "blocking_reasons": [],
+  "bound_status": "authorized_planning_assumption_with_post_usage_stop",
+  "e1_requests": 204,
+  "execution_seal_sha256": "b073aff9657e8889a8e940c7b57e8a5dd247db925fe2e6d02af87dea38d5378d",
+  "full_reserved_cost_usd": "0.2244",
+  "live_metadata_checked": true,
+  "max_input_token_plan_bound": 25314,
+  "metadata": {
+    "actual_payload_sha256": "d62bcf555375156648c81a13ee16b895546d4a6710a7ab2e94b6bfbb0c50a14c",
+    "authenticated": false,
+    "canonical_slug": "qwen/qwen3.7-flash-20260727",
+    "checked_at_utc": "2026-09-30T14:09:30.318290+00:00",
+    "completion_price_usd": "1.3E-7",
+    "inference_requests": 0,
+    "model": "qwen/qwen3.7-flash",
+    "parallel_tool_calls": {
+      "actual_wire_field_removed": false,
+      "fallback": "exactly_one_aria_turn_decision_or_stop",
+      "metadata_status": "unverified",
+      "sent": true,
+      "value": false
+    },
+    "policy_id": "aria_t71_execution_policy_v1",
+    "post_response_usage_check_required": true,
+    "prompt_price_usd": "3E-8",
+    "provider": "alibaba",
+    "provider_billing_guarantee": false,
+    "provider_hard_token_bound_verified": false,
+    "sources": [
+      {
+        "response_sha256": "78c42500a27e396ff58fa95e518e055114455b87c0e1c9bb400e68d182fbb671",
+        "url": "https://openrouter.ai/api/v1/models"
+      },
+      {
+        "response_sha256": "5c57535280ca51e9f0be49669e6ead6558610e5cb67c1d0306547efe266e4ab0",
+        "url": "https://openrouter.ai/api/v1/models/qwen/qwen3.7-flash/endpoints"
+      }
+    ],
+    "supported_parameters": [
+      "include_reasoning",
+      "logprobs",
+      "max_tokens",
+      "presence_penalty",
+      "reasoning",
+      "response_format",
+      "seed",
+      "temperature",
+      "tool_choice",
+      "tools",
+      "top_logprobs",
+      "top_p"
+    ],
+    "tier_min_prompt_tokens": 0,
+    "tier_next_prompt_tokens": 32000
+  },
+  "model_requests": 0,
+  "original_t6_files_verified": 104,
+  "original_t6_validation_uses_preserved_reference": true,
+  "original_t7_files_verified": 10,
+  "parallel_tool_calls_support": "unverified_single_native_tool_receipt_required",
+  "provider_hard_bound_verified": false,
+  "ready_to_send": true,
+  "stage": "e1",
+  "stage_limit_usd": "0.5"
+}

@@ -1,0 +1,52 @@
+{
+  "schema": "aria_t72_repair_seal_v1",
+  "id": "t72_20260930_v1",
+  "inherits": {
+    "t6_seal": "f020b5079bdd1c6ccaf68409af0728e99cb305d524ff2f1b16b69cc41e3a7212",
+    "t7_seal": "e49db651619b6ccb23a87efae1c453f28ad5eef2f6d774160ed7ce9e1d741538",
+    "t71_seal": "b073aff9657e8889a8e940c7b57e8a5dd247db925fe2e6d02af87dea38d5378d"
+  },
+  "files": [
+    {
+      "path": "docs/E1_EXECUTION_T72.md",
+      "bytes": 5957,
+      "sha256": "f187dcd22c5556396b8620bbc5f251d0d1cd7d6bd445846afa3b6c3cdd64833f"
+    },
+    {
+      "path": "experiments/t72_20260930/amendment.json",
+      "bytes": 1706,
+      "sha256": "c55b5a70b26b340881096e8def2681d42249b106f79fb88227f319fc05089c63"
+    },
+    {
+      "path": "scripts/check_e1_t72.py",
+      "bytes": 12119,
+      "sha256": "08f4a2eb5401954cbaaf7c772d2ae27b64fe5fba7704286dd84bfcbc646a7e70"
+    },
+    {
+      "path": "scripts/t72_policy.py",
+      "bytes": 7011,
+      "sha256": "bad84606ee2cb94483c365d683984883f95d035a2af719ec95a437586e8fbcc4"
+    },
+    {
+      "path": "scripts/t72_transport.py",
+      "bytes": 10796,
+      "sha256": "69f2c41db990a8485ad3f0e72d44f427df081226d740157737fd3504190a3373"
+    },
+    {
+      "path": "tests/test_e1_t72.py",
+      "bytes": 9858,
+      "sha256": "fd76598eae7946a7017feb61a393592543a01f57af8763b510bad89e8bfdb023"
+    },
+    {
+      "path": "tests/test_t72_policy.py",
+      "bytes": 11564,
+      "sha256": "7893d3703bb55ae192f73bb91229822acae84dc8c868e8ead582087140b0e1b7"
+    },
+    {
+      "path": "tests/test_t72_transport.py",
+      "bytes": 15655,
+      "sha256": "09facba954185e6432e294493cdd53cbaf70607d7f7398657711c70a1e4ef226"
+    }
+  ],
+  "seal_sha256": "814e433fff3ace7a7524b831e9e25567938be8429fbb986d164290a32cc99e33"
+}

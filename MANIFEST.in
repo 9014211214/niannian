@@ -1,0 +1,62 @@
+include .env.example
+include README.md README.zh.md LICENSE CONTRIBUTING.md SECURITY.md THIRD_PARTY_NOTICES.md AGENTS.md
+include scripts/build_minimal_release.py
+include scripts/check_release_install.py
+include scripts/codex_judge_local.py
+include scripts/verify_experiment_freeze.py
+include scripts/prepare_model_policy.py scripts/e1b_rehearsal.py scripts/prefeval_prepare.py
+include scripts/e1b_evaluation.py
+include scripts/run_e1b.py scripts/e1b_formation.py scripts/e1b_secondary.py
+include scripts/run_e1b_repair.py
+include scripts/run_e1b_reflection_repair.py
+include scripts/run_e1b_structure_repair.py
+include scripts/run_e1b_pacing_repair.py
+include scripts/run_e1b_observed_repair.py
+include scripts/run_e1b_bounded_repair.py
+include scripts/run_e1b_composed_repair.py
+include scripts/e1b_composed_evidence.py
+include scripts/run_e1b_main_continuation.py scripts/e1b_main_continuation.py
+include scripts/e1b_assessment.py
+include scripts/ctest_rehearsal.py scripts/run_ctest.py
+include scripts/run_ctest_repair.py
+include aria/bench/cases/e1b_v1_draft.yaml
+include experiments/t6_20260930/plan.json experiments/t6_20260930/manifest.json
+include experiments/t6_20260930/judge_contract.json experiments/t6_20260930/public_metadata.json
+include experiments/t6_20260930/e2_preparation.aggregate.json
+include scripts/run_e1_experiment.py scripts/t7_ledger.py scripts/t7_transport.py scripts/t7_judge.py
+include experiments/t7_20260930/execution.json experiments/t7_20260930/preflight.json
+include scripts/run_e1_t71.py scripts/t71_policy.py scripts/audit_release.py
+include experiments/t71_20260930/amendment.json experiments/t71_20260930/execution.json
+include experiments/t71_20260930/preflight.json experiments/t71_20260930/outcome.aggregate.json
+include experiments/t71_20260930/validation.t6.md
+include scripts/check_e1_t72.py scripts/t72_policy.py scripts/t72_transport.py
+include experiments/t72_20260930/amendment.json experiments/t72_20260930/execution.json
+include scripts/check_e1_t73.py scripts/t73_policy.py scripts/t73_execution.py
+include experiments/t73_20261001/amendment.json experiments/t73_20261001/requests.json experiments/t73_20261001/execution.json
+include scripts/run_e1_t73.py experiments/t73_20261001/authorized_run.json experiments/t73_20261001/authorized_execution.json
+include scripts/check_e1_tool_choice.py
+include scripts/e1_compat.py scripts/run_e1_compat.py scripts/t74_transport.py
+include scripts/run_e1_authorized.py experiments/t74_20261001/authorized_run.json experiments/t74_20261001/authorized_execution.json
+include scripts/run_e1_carrier.py scripts/e1_json_carrier.py
+include experiments/t75_20261001/amendment.json experiments/t75_20261001/execution.json
+include scripts/run_e1_json_mode.py scripts/e1_json_mode.py scripts/t76_transport.py
+include experiments/t76_20261001/amendment.json experiments/t76_20261001/requests.json experiments/t76_20261001/execution.json
+include scripts/run_e1_json_schema_mode.py scripts/e1_json_schema_mode.py
+include experiments/t77_20261001/amendment.json experiments/t77_20261001/requests.json experiments/t77_20261001/execution.json
+include experiments/t77_20261001/outcome.aggregate.json
+include experiments/t74_20261001/amendment.json experiments/t74_20261001/requests.json experiments/t74_20261001/execution.json
+recursive-include LICENSES *.txt
+recursive-include docs *.md
+prune docs/media
+recursive-include examples *.py
+recursive-include tests *.py
+include tests/fixtures/followthrough_synthetic.json
+include tests/fixtures/external_emotion_no_input_prompts.json
+prune bench_reports
+prune data
+prune .cache
+prune artifacts/local
+# Upstream PrefEval data/templates and all experiment outputs stay local.
+prune prefeval-source
+prune benchmark_dataset
+prune error_type

@@ -1,0 +1,229 @@
+{
+  "schema": "aria_t6_plan_v1",
+  "id": "t6_20260930_v1",
+  "created_at_utc": "2026-09-30T00:35:27.307644+00:00",
+  "status": "protocol_frozen_e1_transport_pending_e2_stopped_feasibility",
+  "is_execution_authorization": false,
+  "authorization": {
+    "cped_operator_confirmation": "user_self_reported_local_evaluation_aggregate_only_20260930",
+    "cped_rights": "NOASSERTION_unverified",
+    "cped_cloud_submission_authorized": false,
+    "judge": "Claude_all_primary_204",
+    "judge_limit_usd": 0.3,
+    "total_limit_usd": 5.0,
+    "cumulative_pause_usd": 2.0,
+    "human_40_completion": "not_arranged_not_completed",
+    "this_task_model_calls": 0
+  },
+  "e1": {
+    "expected_calls": 204,
+    "traps": 10,
+    "pairs": 3,
+    "repetitions": 3,
+    "arms": [
+      "B0",
+      "B1",
+      "B2",
+      "B3a",
+      "B3b"
+    ],
+    "pair_arms": [
+      "B0",
+      "B2",
+      "B3b"
+    ],
+    "arm_denominators": {
+      "B0": 48,
+      "B1": 30,
+      "B2": 48,
+      "B3a": 30,
+      "B3b": 48
+    },
+    "extra_same_response_control_calls": 0,
+    "applicable_label_slots": 651,
+    "nonapplicable_label_slots": 165,
+    "preparation": {
+      "model": "local/e1-freeze",
+      "temperature": 0.2,
+      "max_completion_tokens": 1024,
+      "seed": 0,
+      "max_cost_usd": 0.5,
+      "per_request_reserve_usd": 0.005
+    },
+    "wire": {
+      "model": "qwen/qwen3.7-flash",
+      "temperature": 0.2,
+      "max_tokens": 1024,
+      "reasoning": {
+        "enabled": false,
+        "exclude": true
+      },
+      "provider": {
+        "only": [
+          "alibaba"
+        ],
+        "allow_fallbacks": false,
+        "require_parameters": true,
+        "data_collection": "deny"
+      },
+      "stream": false
+    },
+    "metadata_snapshot": "qwen/qwen3.7-flash-20260727",
+    "allowed_actual_model_strings": [
+      "qwen/qwen3.7-flash",
+      "qwen/qwen3.7-flash-20260727"
+    ],
+    "lock_first_actual_model_and_provider_for_all_calls": true,
+    "model_rng_seed": null,
+    "inventory_seed_is_not_model_seed": true,
+    "max_prompt_tokens": 31999,
+    "per_request_reserve_usd": 0.0011,
+    "max_cost_usd": 0.5,
+    "maximum_full_inventory_reservation_usd": 0.2244,
+    "source_prompt_builder": "aria.bench.refocus_e1_runner.prepare_trial",
+    "wire_change": "max_completion_tokens mapped to supported max_tokens; explicit reasoning/provider/stream; all prompt/tool bytes preserved",
+    "live_transport_implemented": false,
+    "no_production_default_changes": true,
+    "decisions": {
+      "primary_stage": "raw",
+      "majority": "per applicable criterion at least 2 of 3 violations; null is not 0",
+      "strictly_better": "no applicable criterion majority worsens and at least one improves",
+      "v2_B2_vs_B1": "all 10 traps no majority criterion worse; B2 captured >=44/48; selected_in_candidates >=44/48; complete required results",
+      "latency": "nearest_rank independently on 30 common trap requests per arm; p50(B2)-p50(B1)<=0.8s and p95 difference<=1.2s; no failed/missing cherry-pick",
+      "profile_B3b_vs_B2": "all 16 shared stimuli no majority criterion worse, at least 2 of the 10 traps strictly better; all 3 pair groups pass",
+      "pair_pass": "same-repeat both persons respect individual boundaries and required action difference in at least 2 of 3 repeats; no text-only warmth difference; missing fails evaluability",
+      "four_of_six_correction": "prospectively tightened to 3/3 actual independent pair groups; not equivalent to 4/6",
+      "filming": "B2 vs B0: >=6 of fixed t01-t08 better, none of all t01-t10 worse; all 10 reported",
+      "calibration": "40 raw coordinates sampled without replacement before outputs via committed private seed; >=34/40 records agree on all applicable labels; no human completion -> uncalibrated only, no default promotion",
+      "missing": "retain all coordinates; missing applicable labels null; incomplete gate is not_evaluable, not pass",
+      "repeat_policy": "no automatic rerun; permitted future revised version must be preregistered, original result retained and total budget respected"
+    },
+    "preflight_measurement": {
+      "unique_payloads": 65,
+      "message_and_tool_utf8_bytes_min": 13051,
+      "message_and_tool_utf8_bytes_max": 16787,
+      "not_measured_provider_tokens": true,
+      "provider_template_overhead_and_billing_bound_not_verified": true,
+      "case_arm_combinations": 68
+    },
+    "preparation_scope": "Offline local fixture configuration for prepare_trial only; its synthetic reserve does not set the future live 0.0011 USD reservation."
+  },
+  "judge": {
+    "contract_path": "experiments/t6_20260930/judge_contract.json",
+    "configured_model": "anthropic/claude-sonnet-5",
+    "metadata_snapshot": "anthropic/claude-sonnet-5-20260630",
+    "allowed_actual_model_strings": [
+      "anthropic/claude-sonnet-5",
+      "anthropic/claude-sonnet-5-20260630"
+    ],
+    "provider": "anthropic",
+    "temperature": "omitted_not_supported_by_selected_endpoint",
+    "max_tokens_per_batch": 512,
+    "reasoning": {
+      "enabled": false,
+      "exclude": true
+    },
+    "max_requests": 35,
+    "max_cost_usd": 0.3,
+    "full_inventory_input_cost_check_required_after_generation": true,
+    "price_estimate_is_not_completion_guarantee": true,
+    "private_seed_commitment_sha256": "a5904b6c28bea7ff6b7d2cc90d5ed62c9839ee1809efd5791f40ef6d7d3120c4",
+    "live_transport_implemented": false,
+    "human_sample_positions_commitment_sha256": "24ef011cd8a70d4c9cfc31401fe40575b519ad92ae211fdb7505498e92edd590",
+    "human_empty_form_sha256": "16fcb88484ec771c2b9f1bf75f5286101fe534bda1cbdc23fcf03c5b446b0870"
+  },
+  "e2": {
+    "status": "stopped_feasibility",
+    "planned_roles": 48,
+    "planned_formation_calls": 48,
+    "planned_prediction_calls": 240,
+    "planned_calls": 288,
+    "currently_allowed_calls": 0,
+    "builder_seed": 20260909,
+    "execution_seed": 20260929,
+    "bootstrap_samples": 2000,
+    "report_path": "experiments/t6_20260930/e2_preparation.aggregate.json",
+    "surface_stop_above": 0.35,
+    "observed_lexical_correct": 20,
+    "surface_denominator": 48,
+    "selected_elderly_roles": 3,
+    "elderly_minimum_roles": 24,
+    "identity_review_complete": false,
+    "runnable_cohort_frozen": false,
+    "model_identity_rule": "fixed actual model per stage; stages may differ; all five behavior conditions same actual model",
+    "formation": {
+      "model": "anthropic/claude-sonnet-5",
+      "metadata_snapshot": "anthropic/claude-sonnet-5-20260630",
+      "provider": "anthropic",
+      "max_tokens": 1536,
+      "temperature": "omitted",
+      "reasoning": {
+        "enabled": false,
+        "exclude": true
+      }
+    },
+    "prediction": {
+      "model": "qwen/qwen3.7-flash",
+      "metadata_snapshot": "qwen/qwen3.7-flash-20260727",
+      "provider": "alibaba",
+      "max_tokens": 128,
+      "temperature": 0.0,
+      "reasoning": {
+        "enabled": false,
+        "exclude": true
+      }
+    },
+    "primary_comparison": "inferred_persona_vs_wrong_persona",
+    "max_cost_usd": 2.0,
+    "full_cost_reservation": "not_estimated_or_approved_for_failed_cohort; requires new cohort revision",
+    "source_registration": "private_external_archive_only",
+    "publication": "aggregate_only_no_per_case_data_or_linkable_ids",
+    "no_seed_search": true,
+    "repair_policy": "new prespecified builder version before model outputs; retain this failed version; no selective deletion or denominator change",
+    "cloud_submission_authorized": false,
+    "live_transport_implemented": false,
+    "private_raw_output_retention_implemented": false
+  },
+  "transport": {
+    "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+    "serial": true,
+    "timeout_seconds": 120,
+    "min_interval_seconds": 0.2,
+    "client_retries": 0,
+    "provider_fallbacks": false,
+    "model_fallbacks": [],
+    "response_format_repair_calls": 0,
+    "runtime_environment_may_override_frozen_parameters": false,
+    "provider_identity_required": true,
+    "api_keys": "never in freeze; not read during T6"
+  },
+  "stop_on": [
+    "source_or_prompt_or_contract_changed",
+    "model_or_provider_changed_or_missing",
+    "unsupported_parameter_or_route",
+    "token_or_cost_receipt_missing",
+    "cost_above_reserved_maximum",
+    "provider_or_network_error_including_429",
+    "invalid_required_output_schema",
+    "durable_claim_or_raw_result_save_failed",
+    "unknown_result_or_unknown_cost",
+    "stage_or_shared_budget_would_be_exceeded",
+    "cumulative_cost_reaches_2_usd_pause_before_next_call"
+  ],
+  "future_live_gates": [
+    "freeze_verification_passes",
+    "explicit_immutable_stage_and_shared_cost_journal",
+    "actual_wire_payload_matches_frozen_hash",
+    "selected_provider_current_prices_and_parameter_support_rechecked_without_spend",
+    "input_token_bound_and_worst_cost_reserved_before_send",
+    "provider_raw_private_output_persisted_without_hidden_reasoning",
+    "no_actual_model_requests_in_T6",
+    "E2 remains stopped until separately preregistered candidate repair and data-submission scope resolved"
+  ],
+  "environment": {
+    "python": "3.13.11",
+    "pydantic": "2.13.4",
+    "pyyaml": "6.0.3",
+    "effect_of_environment_change": "requires pre-run compatibility review and new source/config freeze; no silent migration"
+  }
+}

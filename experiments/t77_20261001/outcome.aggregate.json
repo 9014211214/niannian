@@ -1,0 +1,55 @@
+{
+  "actual_attempts": 204,
+  "actual_model": "qwen/qwen3.7-flash",
+  "actual_provider": "alibaba",
+  "actual_response_carriers": {
+    "content_json": 204
+  },
+  "all_204_actual_receipts_strictly_reparsed_and_verified": true,
+  "campaign_id": "e1_t77_20261001_v1",
+  "completed": 204,
+  "cumulative_known_e1_cost_usd": "0.026719172",
+  "execution_seal": "6f5c10073670b98d3c819814229e90feec8f54e3d72ddaaa2eac3e76ba3a99a8",
+  "failed": 0,
+  "fixed_positions": 204,
+  "generation_status": "complete",
+  "historical_originals_preserved": true,
+  "historical_unknown_cost_count": 2,
+  "human_labels_completed": 0,
+  "judge_model_requests": 0,
+  "judge_qualification": {
+    "batches_by_stage": {
+      "delivered": 6,
+      "pairs": 3,
+      "raw": 16
+    },
+    "budget_excess_usd": "0.432728",
+    "delivered_slots": 204,
+    "first_batch_cost_usd": "0.02941",
+    "fixed_seed_and_human_source_commitments_verified": true,
+    "full_actual_text_reserve_usd": "0.932728",
+    "human_labels_completed": 0,
+    "human_review_slots": 40,
+    "identical_raw_delivery_reuse_count": 196,
+    "pair_slots": 27,
+    "planned_batches": 25,
+    "raw_slots": 204,
+    "ready_to_send": false,
+    "reason": "judge_budget_insufficient",
+    "slot_availability": {
+      "awaiting_identical_raw_review": 196,
+      "pending": 212
+    },
+    "stage_limit_usd": "0.5",
+    "status": "blocked_budget",
+    "token_reservation_method": "at_least_one_utf8_byte_per_token_not_provider_verified"
+  },
+  "model_effect_measured": false,
+  "new_known_cost_usd": "0.020702642",
+  "new_unknown_cost_count": 0,
+  "not_started": 0,
+  "schema": "aria_e1_t77_generation_aggregate_v1",
+  "scope": "generation_protocol_and_evidence_only_not_companion_effect_or_public_release",
+  "task_id": "20261001-04",
+  "total_actual_cost_usd": null
+}

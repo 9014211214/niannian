@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Aria · 爸，你帮我看看</title>
+  <style>
+    :root { --paper:#f5f3eb; --white:#fffef9; --ink:#253f37; --muted:#69756c; --line:#dedfd3; --green:#284f40; --soft:#e8eee3; --gold:#bb8b48; --warning:#8e502e; --radius:22px; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.65 "Segoe UI","Microsoft YaHei",sans-serif; }
+    button,textarea,select { font:inherit; }
+    button { cursor:pointer; border:1px solid var(--line); border-radius:12px; background:var(--white); color:var(--ink); padding:9px 15px; transition:background .15s,border-color .15s; }
+    button:hover:not(:disabled) { background:var(--soft); border-color:#9aab98; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    button:focus-visible,textarea:focus-visible,summary:focus-visible,select:focus-visible,a:focus-visible { outline:3px solid var(--gold); outline-offset:3px; }
+    button.primary { background:var(--green); border-color:var(--green); color:white; }
+    button.primary:hover:not(:disabled) { background:#38644f; }
+    button.quiet { background:transparent; border-color:transparent; }
+    p,h1,h2,h3 { margin-top:0; }
+    h1 { font:500 clamp(30px,3.5vw,48px)/1.35 Georgia,"Songti SC","SimSun",serif; letter-spacing:.01em; margin-bottom:12px; }
+    h2 { font-size:18px; font-weight:600; margin-bottom:5px; }
+    h3 { font-size:14px; font-weight:600; margin-bottom:5px; }
+    .shell { max-width:1370px; padding:28px 40px 36px; margin:auto; }
+    .topbar,.brand,.top-actions,.row,.section-head,.composer-footer,.timeline-head { display:flex; align-items:center; gap:12px; }
+    .topbar { justify-content:space-between; padding-bottom:27px; }
+    .brand { gap:9px; font:600 24px/1 Georgia,serif; letter-spacing:.02em; }
+    .brand-mark { width:29px; height:29px; border:1px solid var(--green); border-radius:50% 50% 50% 10%; display:grid; place-items:center; font:17px Georgia,serif; }
+    .brand small { font:12px "Microsoft YaHei",sans-serif; color:var(--muted); margin-left:10px; letter-spacing:.08em; }
+    .badge { display:inline-flex; align-items:center; gap:7px; font-size:12px; padding:5px 10px; border:1px solid var(--line); border-radius:30px; background:var(--white); }
+    .badge::before { content:""; width:6px; height:6px; background:var(--gold); border-radius:50%; }
+    .badge.live::before { background:#558466; }
+    .hero { display:grid; grid-template-columns:1fr 290px; gap:35px; padding:14px 0 27px; }
+    .eyebrow { color:#827454; font-size:11px; letter-spacing:.16em; text-transform:uppercase; margin-bottom:11px; }
+    .hero-copy { max-width:740px; color:var(--muted); margin:0; }
+    .story-note { border-left:1px solid #d2c9b5; padding:5px 0 5px 22px; align-self:center; color:var(--muted); font-size:13px; }
+    .story-note p { margin:0; }
+    .story-note strong { display:block; color:var(--ink); font-weight:500; margin-bottom:6px; }
+    .notice { background:#eceee5; padding:12px 17px; border-radius:12px; font-size:13px; margin-bottom:18px; }
+    .workspace { display:grid; grid-template-columns:minmax(0,1fr) 335px; gap:22px; align-items:start; }
+    .panel { background:var(--white); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; }
+    .section-head { justify-content:space-between; padding:20px 24px; border-bottom:1px solid var(--line); }
+    .section-head p,.section-head h2 { margin:0; }
+    .subtle { color:var(--muted); font-size:12px; }
+    .count { color:var(--muted); white-space:nowrap; font-size:12px; }
+    .conversation { min-height:300px; max-height:510px; overflow:auto; padding:24px; scroll-behavior:smooth; }
+    .empty { min-height:266px; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; }
+    .empty p { max-width:365px; color:var(--muted); font-size:14px; margin:4px 0; }
+    .pinwheel { position:relative; width:67px; height:78px; margin-bottom:20px; }
+    .pinwheel::after { content:""; position:absolute; top:32px; left:32px; width:2px; height:47px; background:#b29c71; z-index:0; }
+    .pinwheel span { position:absolute; width:31px; height:31px; top:3px; left:33px; background:#afbea8; clip-path:polygon(0 0,100% 0,0 100%); transform-origin:0 100%; z-index:1; }
+    .pinwheel span:nth-child(2) { transform:rotate(90deg); background:#d2b879; }
+    .pinwheel span:nth-child(3) { transform:rotate(180deg); background:#829e8c; }
+    .pinwheel span:nth-child(4) { transform:rotate(270deg); background:#e0c79b; }
+    .turn { margin-bottom:24px; }
+    .turn:last-child { margin-bottom:0; }
+    .message { max-width:93%; margin-bottom:13px; }
+    .message.user { margin-left:auto; }
+    .message-meta { display:flex; align-items:center; gap:8px; margin-bottom:5px; color:var(--muted); font-size:11px; }
+    .user .message-meta { justify-content:flex-end; }
+    .message-body { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.8; padding:13px 16px; background:#f0f2e9; border-radius:2px 14px 14px 14px; }
+    .user .message-body { background:#e8eee3; border-radius:14px 2px 14px 14px; }
+    .message.system .message-body { background:#f6f0e2; color:#756242; font-size:13px; border:1px dashed #ddd0ad; }
+    .message.failed .message-body { background:#faf0ea; color:var(--warning); }
+    .composer { padding:18px 24px 20px; border-top:1px solid var(--line); }
+    .composer label { display:block; font-size:13px; font-weight:600; margin-bottom:9px; }
+    textarea { resize:vertical; min-height:91px; width:100%; border:1px solid #d5dacb; border-radius:12px; padding:13px 15px; color:var(--ink); background:#fcfcf7; line-height:1.6; }
+    .composer-footer { justify-content:space-between; margin-top:10px; }
+    .composer-footer p { margin:0; font-size:11px; color:var(--muted); }
+    .suggestions { margin:15px 0 0; border-top:1px dashed var(--line); padding-top:13px; }
+    summary { cursor:pointer; font-size:13px; font-weight:500; }
+    .suggestion-intro { margin:9px 0; color:var(--muted); font-size:12px; }
+    .story-select { width:100%; color:var(--ink); border:1px solid var(--line); border-radius:9px; background:var(--white); padding:7px 9px; margin:11px 0 3px; }
+    .choices { display:grid; gap:6px; padding-top:5px; }
+    .choice { text-align:left; font-size:12px; line-height:1.55; padding:9px 11px; border-radius:9px; }
+    .choice.used::before { content:"已用 · "; color:var(--muted); }
+    .session-actions { display:flex; flex-wrap:wrap; gap:8px; padding:0 24px 20px; }
+    .session-actions button { font-size:12px; }
+    .aside { padding:20px; }
+    .aside > p { color:var(--muted); font-size:12px; margin-bottom:17px; }
+    .understanding { border-top:1px solid var(--line); padding:15px 0; }
+    .understanding:last-child { padding-bottom:0; }
+    .understanding summary { display:list-item; font-size:14px; }
+    .understanding summary .number { float:right; font-size:11px; color:var(--muted); font-weight:400; }
+    .detail-body { padding-top:12px; font-size:12px; }
+    .placeholder { margin:0; color:var(--muted); }
+    .evidence-card { padding:11px 0; border-bottom:1px dashed var(--line); }
+    .evidence-card:first-child { padding-top:0; }
+    .evidence-card:last-child { padding-bottom:0; border:0; }
+    .evidence-card p { white-space:pre-wrap; overflow-wrap:anywhere; margin:0 0 7px; }
+    .evidence-card dl { margin:6px 0; }
+    .evidence-card dt { color:var(--muted); margin-top:5px; }
+    .evidence-card dd { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .evidence-card blockquote { margin:9px 0; border-left:2px solid #c8d3bb; padding-left:10px; color:#647359; }
+    .inline-detail { margin-top:10px; }
+    .inline-detail summary { font-size:12px; }
+    .care-context { padding:11px 13px; border:1px solid var(--line); border-radius:10px; background:#f5f6ee; font-size:12px; overflow-wrap:anywhere; }
+    .care-context .detail-body { padding-top:9px; }
+    .care-context-group { margin-top:12px; }
+    .care-context-group > summary { font-size:12px; }
+    .offline { margin:19px 0 0; padding:13px; border-radius:12px; background:#f2f2e9; font-size:12px; }
+    .offline p { margin:5px 0 0; color:var(--muted); white-space:pre-wrap; }
+    .timeline { margin-top:22px; padding:20px 24px; }
+    .timeline-head { justify-content:space-between; margin-bottom:16px; }
+    .timeline-head p { margin:0; }
+    .timeline-items { display:flex; gap:12px; overflow:auto; padding:2px 0 9px; }
+    .timeline-item { flex:1 0 190px; text-align:left; padding:13px 15px; min-width:0; }
+    .timeline-item[aria-pressed="true"] { background:var(--soft); border-color:#8fa484; }
+    .timeline-item strong { display:block; font-size:13px; font-weight:500; }
+    .timeline-item span { display:block; font-size:11px; color:var(--muted); padding-top:4px; }
+    .timeline-item.planned { border-style:dashed; }
+    .timeline-note { color:var(--muted); font-size:11px; margin:7px 0 0; }
+    .error { padding:13px 16px; border:1px solid #e2bba7; border-radius:12px; background:#fff4ed; color:var(--warning); margin-bottom:17px; font-size:13px; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .status-line { min-height:24px; font-size:12px; color:var(--muted); margin:12px 0 0; }
+    .footer { display:flex; justify-content:space-between; gap:20px; align-items:center; padding-top:17px; color:var(--muted); font-size:11px; }
+    .footer p { margin:0; max-width:850px; }
+    .footer button { color:var(--warning); font-size:11px; white-space:nowrap; }
+    .delete-confirm { margin-top:12px; padding:16px; border:1px solid #dcbca8; border-radius:12px; background:#fff8f1; font-size:13px; }
+    .delete-confirm p { margin-bottom:12px; }
+    a { color:var(--green); text-underline-offset:3px; }
+    .stage { border-bottom:1px solid var(--line); background:#e9eadc; }
+    .stage-header { display:flex; justify-content:space-between; gap:10px; padding:12px 20px 0; font-size:11px; color:#5d6c57; }
+    .stage-room { width:100%; display:block; height:auto; max-height:340px; }
+    .stage-room .actor { transform-box:fill-box; transform-origin:center bottom; animation:breathe 4s ease-in-out infinite; }
+    .stage-room .robot { animation-delay:1s; }
+    .stage[data-speaker="robot"] .robot-head { transform-box:fill-box; transform-origin:center; animation:nod 1.4s ease-in-out infinite; }
+    .stage[data-speaker="elder"] .elder-head { transform-box:fill-box; transform-origin:center bottom; animation:nod 2.4s ease-in-out infinite; }
+    .stage[data-playing="false"] * { animation-play-state:paused !important; }
+    .stage-caption { margin:0 20px 14px; padding:12px 16px; min-height:92px; background:rgba(255,254,249,.94); border-radius:13px; border:1px solid #d8ddcd; }
+    .stage-caption strong { display:block; font-size:11px; font-weight:500; color:#77836c; margin-bottom:5px; }
+    .stage-caption p { margin:0; font-size:16px; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.8; }
+    .stage-controls { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:0 20px 13px; }
+    .stage-controls button { font-size:11px; padding:7px 11px; }
+    .stage-note { font-size:10px; color:#6b755f; padding:0 20px 12px; margin:0; }
+    .replay-controls { display:flex; gap:9px; align-items:center; flex-wrap:wrap; padding:2px 20px 14px; font-size:11px; }
+    .replay-controls input { min-width:100px; flex:1; accent-color:var(--green); }
+    .replay-controls button { padding:6px 10px; font-size:11px; }
+    .stage.text-view .stage-room { display:none; }
+    .stage.text-view .stage-caption { margin-top:12px; }
+    @keyframes breathe { 0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)} }
+    @keyframes nod { 0%,100%{transform:rotate(0)}50%{transform:rotate(1.5deg)} }
+    .care-panel { margin-top:22px; padding:20px 24px; }
+    .care-panel > summary { font-size:17px; font-weight:600; }
+    .care-panel .care-content { margin-top:17px; }
+    .care-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+    .care-block { border-top:1px solid var(--line); padding:15px 0; min-width:0; }
+    .care-block > summary { margin-bottom:10px; }
+    .care-form { display:grid; gap:9px; font-size:12px; }
+    .care-form label { display:grid; gap:4px; }
+    .care-form input,.care-form select { min-width:0; width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); font:inherit; }
+    .care-form .check-label { display:flex; align-items:start; gap:8px; }
+    .care-form .check-label input { width:auto; margin-top:4px; }
+    .care-form button { justify-self:start; font-size:12px; }
+    .care-card { margin:10px 0; padding:12px 14px; border:1px solid var(--line); border-radius:12px; font-size:12px; background:#fafbf5; overflow-wrap:anywhere; }
+    .care-card p { margin:5px 0; white-space:pre-wrap; }
+    .care-card .row { flex-wrap:wrap; gap:7px; margin-top:9px; }
+    .care-card button { font-size:11px; padding:6px 9px; }
+    .care-card input { max-width:110px; font-size:12px; padding:6px; border:1px solid var(--line); border-radius:7px; }
+    @media(max-width:760px) { .care-grid{grid-template-columns:1fr;gap:0}.care-panel{padding:18px}.stage-caption p{font-size:14px}.stage-caption{margin-left:14px;margin-right:14px}.stage-header{padding-left:14px;padding-right:14px}.topbar{flex-wrap:wrap;gap:12px}.top-actions{flex-wrap:wrap}.top-actions a{font-size:11px}.stage-header{flex-wrap:wrap;gap:3px}.stage-room{min-height:210px;object-fit:cover;} }
+    [hidden] { display:none !important; }
+    @media(max-width:1000px) { .shell{padding:22px}.workspace{grid-template-columns:minmax(0,1fr) 295px;gap:16px}.hero{grid-template-columns:1fr 240px;gap:20px}.section-head,.composer{padding-left:18px;padding-right:18px}.conversation{padding:18px}.session-actions{padding-left:18px;padding-right:18px}.brand small{display:none} }
+    @media(max-width:760px) { .shell{padding:18px 14px}.topbar{padding-bottom:20px}.top-actions{gap:3px}.top-actions button{padding:7px 9px;font-size:12px}.badge{font-size:11px;padding:5px 8px}.hero{grid-template-columns:1fr;gap:18px;padding-top:2px}.story-note{padding-left:14px}.workspace{grid-template-columns:1fr}.conversation{max-height:460px;min-height:250px}.empty{min-height:225px}.aside{padding:20px}.timeline{padding:18px}.timeline-head{align-items:start;gap:10px}.timeline-head .subtle{max-width:145px}.footer{align-items:start}.composer-footer{align-items:start}.composer-footer p{max-width:60%}.section-head{gap:8px}.message{max-width:97%}.story-note p{max-width:540px} }
+    @media(prefers-reduced-motion:reduce) { *{scroll-behavior:auto !important;transition:none !important;animation:none !important;} }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">a</span> Aria <small>从一句话，慢慢认识一个人</small></div>
+      <div class="top-actions"><span id="mode-badge" class="badge">正在读取模式</span><a href="/care">护理员入口</a><button id="refresh" class="quiet" type="button">刷新状态</button></div>
+    </header>
+    <section class="hero" aria-labelledby="story-title">
+      <div><p class="eyebrow">A little room for understanding · 故事建议草案</p><h1 id="story-title">爸，你帮我看看。</h1><p class="hero-copy">一只纸风车，一本旧本子，几次可以慢慢聊的天。陪伴从认真听见开始，也给误解留下被纠正的余地。</p></div>
+      <div class="story-note"><strong>陈师傅 · 72 岁 · 虚构角色</strong><p>退休前修公交车。女儿小时候常拿坏玩具来找他；现在，外孙女想做一只纸风车。</p><p>背景只给演示者阅读，未说出口的内容不会发送给 Agent。</p></div>
+    </section>
+    <div id="mode-notice" class="notice" role="status">正在读取本地体验状态。尚未发送任何对话。</div>
+    <div id="error" class="error" role="alert" hidden></div>
+    <div class="workspace">
+      <section class="panel" aria-labelledby="conversation-title">
+        <div class="section-head"><div><h2 id="conversation-title">留一点时间，听他说</h2><p id="session-caption" class="subtle">三次会话只是建议，聊多久由你决定。</p></div><span id="turn-count" class="count">尚未开始</span></div>
+        <section id="stage" class="stage" data-playing="false" data-speaker="narrator" aria-label="虚构人物互动舞台">
+          <div class="stage-header"><span id="stage-mode">本地流程预览</span><span>原创角色演出 · 不是视觉或情绪观测</span></div>
+          <svg class="stage-room" viewBox="0 0 900 340" role="img" aria-label="固定房间里，陈师傅与机器人坐在放着旧本子和纸风车的桌旁">
+            <defs><linearGradient id="room-light" x2="0" y2="1"><stop stop-color="#e7eadb"/><stop offset="1" stop-color="#d8decf"/></linearGradient><linearGradient id="window-light" x2="0" y2="1"><stop stop-color="#e1ecde"/><stop offset="1" stop-color="#f9ecd1"/></linearGradient></defs>
+            <path d="M0 0H900V340H0Z" fill="url(#room-light)"/><path d="M0 254H900V340H0Z" fill="#c7c4a9"/><path d="M0 255H900" stroke="#b9bea7"/>
+            <path d="M81 12H288V197H81Z" fill="#c1cbb5"/><path d="M91 20H278V187H91Z" fill="url(#window-light)"/><path d="M184 20V187M91 100H278" stroke="#f7f5e9" stroke-width="7"/>
+            <path d="M109 182C123 111 145 115 153 183M207 184C214 135 238 128 257 181" fill="#b5c6ad" opacity=".6"/><path d="M73 14C69 79 78 161 62 207H105C122 144 101 60 108 14M261 14C269 67 250 157 268 207H308C285 145 303 84 299 14" fill="#d1c9a7"/>
+            <rect x="648" y="33" width="97" height="85" rx="3" fill="#9e977c"/><rect x="655" y="40" width="83" height="71" fill="#ede4cd"/><path d="M671 87L685 72L698 87L713 63L727 94H671Z" fill="#a6b69b"/><circle cx="682" cy="57" r="6" fill="#d5b77d"/>
+            <path d="M813 245V162M813 199C779 201 773 174 783 171C802 169 813 189 813 199M813 220C846 214 852 187 841 185C823 187 813 204 813 220M813 178C802 163 803 140 815 139C828 142 826 164 813 178" fill="#789779" stroke="#789779" stroke-width="3"/><path d="M789 239H837L829 279H797Z" fill="#b49b7a"/>
+            <ellipse cx="451" cy="300" rx="280" ry="25" fill="#7c876e" opacity=".12"/>
+            <path d="M234 179Q200 178 206 222L221 282H332L341 209Q341 178 313 179Z" fill="#9eae99"/><path d="M223 275L216 310M327 275L335 310" stroke="#766f58" stroke-width="8"/>
+            <g class="actor elder">
+              <path d="M248 240L246 292L271 296L291 245M291 242L306 291L331 287L321 236" fill="#687366"/><path d="M240 291L238 303Q257 313 276 302L275 294M303 290L311 304Q334 308 342 297L329 286" fill="#4f5d50"/>
+              <path d="M249 163Q222 172 224 222L235 252Q275 270 327 246L326 194Q323 170 300 163Z" fill="#b59d76"/><path d="M275 170V251" stroke="#968561" stroke-width="2"/><circle cx="280" cy="198" r="2" fill="#756e51"/><circle cx="280" cy="218" r="2" fill="#756e51"/>
+              <path d="M235 185Q215 230 247 233L296 226" fill="none" stroke="#bba47f" stroke-width="17" stroke-linecap="round"/><path d="M293 226L309 222" stroke="#d4b796" stroke-width="12" stroke-linecap="round"/>
+              <g class="elder-head"><path d="M271 153V174L293 172V151" fill="#cfad8e"/><ellipse cx="280" cy="125" rx="36" ry="40" fill="#d7b998"/><path d="M247 130Q232 87 268 83Q314 77 317 120L307 118Q305 98 286 101Q265 93 251 120Z" fill="#ede9dc"/><path d="M247 119Q235 116 239 132L249 137M313 120Q325 116 320 131L310 137" fill="#cfae8e"/><path d="M255 123Q265 118 273 123M284 123Q294 118 303 123" fill="none" stroke="#637062" stroke-width="2"/><rect x="252" y="121" width="22" height="14" rx="5" fill="none" stroke="#667263" stroke-width="2"/><rect x="283" y="121" width="22" height="14" rx="5" fill="none" stroke="#667263" stroke-width="2"/><path d="M274 125H283M279 129L276 141L283 141M270 149Q282 154 294 147" fill="none" stroke="#9c8268" stroke-width="1.6"/><circle cx="264" cy="128" r="2" fill="#596051"/><circle cx="292" cy="128" r="2" fill="#596051"/></g>
+            </g>
+            <path d="M355 231H594L575 251H373Z" fill="#b8a580"/><path d="M354 230H594V239H354Z" fill="#cbbb98"/><path d="M380 243L368 311M568 244L581 311" stroke="#887c61" stroke-width="9"/>
+            <path d="M406 211L455 204L474 222L423 228Z" fill="#758f78"/><path d="M425 226L474 220V224L426 231Z" fill="#f0e7cf"/><path d="M411 213L458 206" stroke="#adbb98" stroke-width="2"/>
+            <path d="M512 224V169" stroke="#8d7954" stroke-width="3"/><g transform="translate(512 168)"><path d="M0 0L0-29L27-28Z" fill="#d0af69"/><path d="M0 0L29 0L28 27Z" fill="#8da78a"/><path d="M0 0L0 29L-27 28Z" fill="#e4cd96"/><path d="M0 0L-29 0L-28-27Z" fill="#6f9179"/><circle r="3.5" fill="#ede3c5"/></g>
+            <g class="actor robot"><ellipse cx="655" cy="289" rx="42" ry="10" fill="#6f8875"/><path d="M623 257L620 286H640L647 254M663 256L673 286H692L683 251" fill="#9baa98"/><path d="M614 189Q602 216 609 255Q650 278 694 255L700 216Q698 191 675 183Z" fill="#e9eddd" stroke="#b4c1ab" stroke-width="2"/><path d="M610 210Q594 219 586 224M696 211Q711 235 700 245" fill="none" stroke="#b4c3ac" stroke-width="14" stroke-linecap="round"/><circle cx="650" cy="227" r="12" fill="#91ab8c"/><path d="M645 229L651 218L656 229Z" fill="#edf0e1"/>
+              <g class="robot-head"><path d="M650 137V120" stroke="#a5b498" stroke-width="4"/><circle cx="650" cy="116" r="6" fill="#d2b776"/><rect x="605" y="134" width="90" height="68" rx="28" fill="#eef1e4" stroke="#b3c0a8" stroke-width="2"/><rect x="617" y="150" width="67" height="33" rx="15" fill="#718f79"/><path d="M631 161V169M669 161V169" stroke="#e6eddc" stroke-width="4" stroke-linecap="round"/><path d="M644 173Q650 176 656 173" fill="none" stroke="#e6eddc" stroke-width="2" stroke-linecap="round"/></g>
+            </g>
+            <text x="278" y="331" fill="#626e59" text-anchor="middle" font-size="11">陈师傅 · 虚构角色</text><text x="650" y="331" fill="#626e59" text-anchor="middle" font-size="11">Aria · 表现角色</text>
+          </svg>
+          <div class="stage-caption" aria-live="polite"><strong id="subtitle-source">演出说明</strong><p id="subtitle">开始会话后，这里显示你送出的原话与实际返回文本。</p></div>
+          <div class="stage-controls"><button id="stage-play" type="button">开始演出</button><button id="stage-view" type="button">文字视图</button><button id="takeover" type="button">接管输入</button><button type="button" disabled title="本轮未授权TTS调用；不使用系统语音替代真实服务">声音关闭 · TTS 未启用</button><button id="replay-start" type="button" disabled>回放已保存会话</button></div>
+          <div id="replay-controls" class="replay-controls" hidden><button id="replay-restart" type="button">从头重播</button><label for="replay-position">字幕位置</label><input id="replay-position" type="range" min="0" max="0" value="0"><span id="replay-progress"></span><button id="replay-exit" type="button">退出回放</button></div>
+          <p id="stage-note" class="stage-note">动画只是表现，不记录为情绪依据。暂停只暂停演出，不撤回已提交的请求。语音调用未获授权，本轮无声音。</p>
+        </section>
+        <div id="conversation" class="conversation" role="log" aria-live="polite" aria-relevant="additions text" aria-label="对话记录"></div>
+        <form id="composer" class="composer">
+          <label for="message-input">替陈师傅接一句，或用自己的话继续</label>
+          <textarea id="message-input" maxlength="500" placeholder="可以从纸风车聊起，也可以完全换一个话题。" aria-describedby="send-help" disabled></textarea>
+          <div class="composer-footer"><p id="send-help">每次最多 500 字，点击发送才提交。Ctrl / ⌘ + Enter 发送；Enter 换行。</p><button id="send" class="primary" type="submit" disabled>发送这句话 ↗</button></div>
+          <p class="subtle">询问提醒或通知时，相关护理状态会作为本轮参考。创建、取消与授权仍须在下方明确保存。</p>
+          <details class="suggestions"><summary>需要一点开场灵感？看看老人侧的可选输入</summary><select id="story-select" class="story-select" aria-label="选择故事会话"><option value="0">第一次 · 认识这个人</option><option value="1">第二次 · 允许纠正</option><option value="2">第三次 · 由他决定</option></select><p class="suggestion-intro">每句只填入输入框。先读 Agent 的实际回应，再选择、修改或跳过；不自动推进剧情。</p><div id="choices" class="choices"></div><p id="care-boundary" class="suggestion-intro" hidden>第三次含护理愿望输入。聊天不自动创建提醒或授权，请在下方“我的提醒与通知授权”明确保存，以结构化状态和回执为准。</p></details>
+        </form>
+        <div class="session-actions"><button id="start" class="primary" type="button" disabled>开始第一次会话</button><button id="seal" type="button" disabled>结束并封存</button><button id="reflect" type="button" disabled>明确启动会后整理</button><button id="preference-review" type="button" disabled hidden>本地规则提取相处说明</button><button id="return-current" class="quiet" type="button" hidden>返回当前会话</button></div>
+      </section>
+      <aside class="panel aside" aria-labelledby="understanding-title">
+        <p class="eyebrow">Understanding, with evidence</p><h2 id="understanding-title">理解，要有来处。</h2><p>记住发生了什么，与理解一个人如何接受关心，是两件事。下方档案是当前版本；“本轮实际输入依据”按当轮保存，不会被后来的修改覆盖。</p>
+        <details class="understanding" open><summary>事实记忆 <span id="fact-count" class="number">0 条</span></summary><div id="facts" class="detail-body"></div></details>
+        <details class="understanding" open><summary>他说过希望怎样被对待 <span id="preference-count" class="number">0 条</span></summary><div class="detail-body"><p class="subtle">原话需要本人再次确认，才在后续回应中参考。当前意愿优先；不构成分享、通知或医疗授权。回看和回放时只读。</p><div id="stated-preferences"></div></div></details>
+        <details class="understanding"><summary>人物假设 <span id="hypothesis-count" class="number">0 条</span></summary><div class="detail-body"><p class="subtle">可被推翻的局部理解，不是诊断或永久标签。置信记录是工程证据累计，不是准确率。</p><div id="hypotheses"></div></div></details>
+        <details class="understanding"><summary>本轮实际输入依据 <span id="input-evidence-summary" class="number">尚无回合</span></summary><div id="input-evidence" class="detail-body"></div></details>
+        <details class="understanding"><summary>本轮情绪与回应策略</summary><div id="strategy" class="detail-body"></div></details>
+        <details class="understanding"><summary>本轮护理依据 <span id="care-context-summary" class="number">尚无回合</span></summary><div id="care-context" class="detail-body"></div></details>
+        <details class="understanding"><summary>会后变化与纠正 <span id="change-count" class="number">0 条</span></summary><div id="changes" class="detail-body"></div></details>
+        <details class="understanding"><summary>原话与审核来源 <span id="evidence-count" class="number">0 条</span></summary><div id="evidence" class="detail-body"></div></details>
+        <details class="understanding"><summary>模型调用与费用 <span id="model-usage-summary" class="number">正在读取</span></summary><div id="model-usage" class="detail-body"></div></details>
+        <p id="model-guard-notice" class="error" role="status" hidden></p>
+        <div class="offline"><strong id="offline-title">会后整理尚未运行</strong><p id="offline-status">封存与整理分开。离开页面只尝试封存，不会自动调用会后模型。</p><details class="inline-detail"><summary>查看整理阶段记录</summary><div id="offline-stages" class="detail-body"></div></details></div>
+      </aside>
+    </div>
+    <section class="panel timeline" aria-labelledby="timeline-title"><div class="timeline-head"><div><h2 id="timeline-title">几次相遇，慢慢了解</h2><p class="subtle">会话与理解变化时间线</p></div><p class="subtle">选择已有会话，只读回看保存的文字。</p></div><div id="timeline-items" class="timeline-items"></div><p class="timeline-note">按真实运行时间记录，不把故事中的“明天”改写成跨天证据。保存回放只改变浏览器中的字幕与演出，不再次执行模型、提醒或通知。</p></section>
+    <details id="cognitive-panel" class="panel care-panel"><summary>记忆与日常变化提醒 · 由我决定</summary><div class="care-content">
+      <p class="subtle">默认关闭。开启后，只在明确启动会后整理时留意我自己说出的变化，并和我自己的过去比较。不会判断疾病，不会自动告诉家人。这里是虚构角色的本人操作页面，护理员不能代开。</p>
+      <p id="cognitive-state" role="status"></p>
+      <div class="row"><button id="cognitive-enable" type="button">我愿意开启留意变化</button><button id="cognitive-disable" type="button" data-cognitive-reduction="true" hidden>关闭留意变化</button><button id="cognitive-arranged" type="button" hidden>我已自行安排，暂时不再提</button></div>
+      <div id="cognitive-disable-choice" class="delete-confirm" hidden><p>关闭后不再采集或主动提醒。已有观察记录要保留还是删除？</p><div class="row"><button id="cognitive-keep" type="button" data-cognitive-reduction="true">关闭并保留记录</button><button id="cognitive-delete-all" type="button" data-cognitive-reduction="true">关闭并删除记录</button><button id="cognitive-cancel" type="button" data-cognitive-reduction="true">先不关闭</button></div></div>
+      <div id="cognitive-observations"></div>
+      <p class="subtle">下方只展示本人原话，可逐条删除。删除观察不会删除原聊天；清除整段虚构体验可删除聊天。校准期至少 14 天、6 次会话，期间只记录；重复回放和护理提醒未确认均不计作变化。</p>
+    </div></details>
+    <details id="elder-care" class="panel care-panel"><summary>我的提醒与通知授权</summary><div class="care-content">
+      <p id="care-mode" class="notice">护理数据尚未读取。展开后只读取本人的结构化提醒与授权。</p>
+      <p class="subtle">这里的操作以护理服务保存结果为准。确认只表示回应了提醒，不证明已服药或完成了具体活动；未确认也不等于发生危险。</p>
+      <div class="row"><button id="care-refresh" type="button">刷新护理状态</button><a href="/care">护理员登录与跟进</a></div><p id="care-error" class="error" role="alert" hidden></p>
+      <div class="care-grid">
+        <section class="care-block"><h3>到点提醒与我的回应</h3><div id="care-occurrences"></div><h3>已设置的提醒</h3><div id="care-reminders"></div>
+          <details><summary>设置一条生活提醒</summary><form id="reminder-form" class="care-form"><label>提醒内容<input id="reminder-label" maxlength="120" required placeholder="例如：拿好风车的纸和旧本子"></label><div class="care-grid"><label>频率<select id="reminder-schedule"><option value="once">一次性</option><option value="daily">每日</option></select></label><label>首次日期<input id="reminder-date" type="date" required></label><label>时间<input id="reminder-time" type="time" required></label><label>时区<select id="reminder-timezone"><option>Asia/Shanghai</option><option>UTC</option></select></label></div><label>多久未确认后记为待跟进（分钟）<input id="reminder-grace" type="number" value="30" min="1" max="1440" required></label><p class="subtle">通知还需要下方另行授权。仅创建提醒不会自动取得联系家属的权限。</p><button type="submit">保存这条提醒</button></form></details>
+        </section>
+        <section class="care-block"><h3>联系人与有效授权</h3><div id="care-contacts"></div><div id="care-consents"></div>
+          <details><summary>添加本地演示联系人</summary><form id="contact-form" class="care-form"><label>联系人称呼<input id="contact-name" maxlength="80" required placeholder="例如：女儿（虚构）"></label><label>关系<input id="contact-relation" maxlength="40" placeholder="女儿、朋友等"></label><p class="subtle">本轮仅本地模拟通道，无真实通信地址，不向家属真实外发。</p><button type="submit">保存演示联系人</button></form></details>
+          <details><summary>明确一条未确认通知授权</summary><form id="consent-form" class="care-form"><label>通知给谁<select id="consent-contact" required></select></label><label>针对哪条提醒<select id="consent-reminder" required></select></label><label>授权有效至<input id="consent-expires" type="datetime-local" required></label><label>有效期时区<select id="consent-timezone"><option>Asia/Shanghai</option><option>UTC</option></select></label><p>触发条件：该提醒超过宽限时间仍未确认。分享范围仅“提醒未确认”的必要状态；不含聊天内容或心理假设。</p><label class="check-label"><input id="consent-confirmed" type="checkbox" required>我明确同意这条本地模拟授权；可随时撤回尚未执行的通知。</label><button type="submit">保存模拟授权</button></form></details>
+        </section>
+      </div>
+      <section class="care-block"><h3>通知记录</h3><p class="subtle">排队、通道受理、本地模拟接收、真实送达及家属确认分别记录。模拟结果不代表家属收到。</p><div id="care-deliveries"></div></section>
+    </div></details>
+    <p id="status" class="status-line" role="status" aria-live="polite"></p>
+    <footer class="footer"><p>这是虚构角色演示，请勿输入真实私人资料。声音、摄像头与情绪模拟未启用。退出时尝试封存；处理中的会话由后台闲置机制封存，不自动整理。已独立启用的护理后台不因关闭页面而停止。</p><button id="forget" class="quiet" type="button" disabled>清除本次体验资料</button></footer>
+    <div id="delete-confirm" class="delete-confirm" role="region" aria-label="确认清除体验资料" hidden><p>将清除这个最小体验保存的会话与理解资料，无法从本页恢复。不会撤回已经发生的外部操作。</p><p id="forget-usage-note" hidden>调用次数和费用记录会保留；清除资料不会恢复调用额度。</p><div class="row"><button id="confirm-forget" type="button">确认清除</button><button id="cancel-forget" class="quiet" type="button">保留资料</button></div></div>
+  </main>
+  <script>
+  (() => {
+    'use strict';
+    const TOKEN = '__ARIA_DEMO_TOKEN__';
+    const $ = id => document.getElementById(id);
+    const stories = [
+      {title:'认识这个人', lines:['这纸风车翅膀折反了，怪不得不转。','囡囡她妈小时候，什么坏了都拿来找我。','现在她老说别折腾，买一个就行。','她对我好，我知道。可有些事我自己愿意做。','今天先聊到这儿，这事先别跟她讲。']},
+      {title:'允许纠正', lines:['社区周末也有手作，女儿给我报了。我还没说想去呢。','不是不喜欢别人教，上回竹编老师讲的我就爱听。','我是想，写我名字以前，总得问问我。','去一次可以，就怕答应了以后回回都得去。','今天我只是想坐会儿，不用再帮我找活动。']},
+      {title:'由他决定', lines:['周六我想和囡囡试试那个风车，不一定去上课。','明天下午三点半提醒我拿纸和本子，先提醒一次。','如果能设规则，过半小时我还没确认就告诉女儿提醒没确认，别发咱们聊天。','我改主意了，取消这个提醒和后续通知。','现在是什么状态？告诉她了吗？']}
+    ];
+    const names = {candidate:'待观察',working:'适用中',stable:'较稳定',retired:'已撤回',open:'进行中',active:'进行中',sealed:'已封存',reviewed:'已整理',expired:'已到期',completed:'已完成',pending:'等待处理',idle:'暂无待办',blocked:'需核查后再继续',failed:'失败',unknown:'结果未知',not_run:'未执行',not_started:'未开始',disabled:'未启用',local_preview:'本地流程占位',live:'真实生成',model:'真实模型生成',rule:'安全规则接管',rule_protection:'安全规则接管',rule_safety:'安全规则接管',support:'支持',counter:'反证',not_applied:'未应用',applied:'已应用',conversation:'对话原话',synthetic_demo:'虚构角色演示',added:'新增',revised:'修订',removed:'撤回',unchanged:'维持',facts:'事实',fact:'事实',hypotheses:'人物假设',hypothesis:'人物假设',unavailable:'未观测'};
+    let state = null, busy = false, uncertain = null, selectedSession = null, activeSession = null;
+    Object.assign(names,{proposed:'待本人确认',confirmed:'本人已确认',declined:'不记这条',withdrawn:'本人已撤回',superseded:'已由新说明取代',stated_preferences:'本人相处说明',local_rule:'本地规则示意',ui:'本人页面操作',result_unknown:'生成或保存结果不明',model_failed:'模型调用或返回失败'});
+    let renderingTurns = '', suggestedSession = null, leavingSeal = false;
+    let stagePlaying=false, replayMode=false, replayFrames=[], replayIndex=0, replayTimer=null;
+    let careState=null, careBusy=false, careUnknown=null;
+    const array = value => Array.isArray(value) ? value : [];
+    const scalar = value => value === undefined || value === null ? '' : typeof value === 'object' ? '' : String(value);
+    const label = value => names[value] || scalar(value);
+    const text = (tag, value, className) => { const el=document.createElement(tag); el.textContent=scalar(value); if(className)el.className=className; return el; };
+    const shortId = value => scalar(value).slice(0,12);
+    const displayTime = value => { if(!value)return ''; const date=new Date(value); return Number.isNaN(date.valueOf()) ? scalar(value) : date.toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}); };
+    function fields(container, entries) { const dl=document.createElement('dl'); entries.forEach(([key,value])=>{ const v=scalar(value); if(v){dl.append(text('dt',key),text('dd',v));} }); if(dl.childNodes.length)container.append(dl); }
+    function placeholder(container,message) { container.replaceChildren(text('p',message,'placeholder')); }
+    function setError(message) { $('error').textContent=message || ''; $('error').hidden=!message; }
+    function status(message) { $('status').textContent=message; }
+    function isCurrentOpen() { if(!state?.session_id)return false; const session=array(state.sessions).find(s=>s.session_id===state.session_id); return !session || ['open','active','in_progress'].includes(session.status); }
+    function viewingHistory() { return !!selectedSession && selectedSession!==activeSession; }
+    function modelCallsStopped() { return state?.model_usage?.configured===true && state.model_usage.stopped===true; }
+    function allReviews() { return [...array(state?.reviews),...array(state?.preference_reviews)]; }
+    function renderModelUsage() {
+      const usage=state?.model_usage || {}, container=$('model-usage'), configured=usage.configured===true;
+      container.replaceChildren();
+      $('forget-usage-note').hidden=!configured;
+      $('model-guard-notice').hidden=!modelCallsStopped();
+      $('model-guard-notice').textContent=modelCallsStopped()?'后续模型调用已停止，请核查记录或调用限额。不会自动重试；已保存的对话仍可回看。':'';
+      if(!configured) {
+        $('model-usage-summary').textContent=state?.mode==='live'?'状态未提供':'模型已关闭';
+        placeholder(container,state?.mode==='live'?'尚未取得调用记录，请刷新核查。':'本地预览的模型调用已关闭。');
+        return;
+      }
+      $('model-usage-summary').textContent=modelCallsStopped()?'已停止后续调用':`${scalar(usage.calls_used)} / ${scalar(usage.max_requests)}`;
+      fields(container,[['调用尝试',`${usage.calls_used==null?'无法读取':scalar(usage.calls_used)} / 上限 ${scalar(usage.max_requests)}`],['供应商已报告费用',usage.known_cost_usd===null || usage.known_cost_usd===undefined?'未报告':`$${scalar(usage.known_cost_usd)} USD`],['费用尚未报告的尝试',usage.unknown_cost_requests==null?'无法读取':`${scalar(usage.unknown_cost_requests)} 次`],['已报告费用停止阈值',`$${scalar(usage.max_observed_cost_usd)} USD`]]);
+      container.append(text('p','调用尝试在发送前登记；结果不明时，不能确定是否已发出。未知费用不算作零费用。','subtle'));
+      container.append(text('p','达到次数或费用阈值，或费用、结果不明时，停止后续模型请求。费用阈值只阻止后续请求，不保证单次账单上限。','subtle'));
+      container.append(text('p','清除体验资料会保留调用记录，不恢复调用额度。','subtle'));
+    }
+    function updateControls() {
+      const pending=[...array(state?.turns),...allReviews()].some(row=>['pending','unknown'].includes(row.status) || row.requires_review);
+      const locked=busy || careBusy || replayMode || !!uncertain || pending || state?.storage_failed || state?.requires_review || !state;
+      const writable=!locked && !modelCallsStopped() && isCurrentOpen() && !viewingHistory();
+      $('message-input').disabled=!writable;
+      $('send').disabled=!writable || !$('message-input').value.trim();
+      $('send').textContent=busy ? '处理中…' : '发送这句话 ↗';
+      $('start').disabled=locked || isCurrentOpen();
+      $('start').textContent=array(state?.sessions).length ? '开始下一次会话' : '开始第一次会话';
+      $('seal').disabled=locked || !isCurrentOpen();
+      $('reflect').hidden=state?.mode==='local_preview';
+      $('reflect').disabled=locked || modelCallsStopped() || isCurrentOpen() || !array(state?.sessions).length;
+      $('preference-review').hidden=state?.mode!=='local_preview';
+      $('preference-review').disabled=locked || isCurrentOpen() || viewingHistory() || !array(state?.sessions).length;
+      $('stated-preferences').querySelectorAll('button').forEach(button=>{const cannotWithdraw=busy || careBusy || replayMode || !!uncertain || state?.storage_failed || !state || viewingHistory();button.disabled=button.dataset.preferenceAction==='withdraw'?cannotWithdraw:locked || viewingHistory();});
+      $('cognitive-panel').querySelectorAll('button').forEach(button=>{const cannotReduce=busy || careBusy || replayMode || !state || viewingHistory();button.disabled=button.dataset.cognitiveReduction==='true'?cannotReduce:locked || viewingHistory();});
+      $('forget').disabled=locked;
+      $('confirm-forget').disabled=locked;
+      $('refresh').disabled=busy || replayMode;
+      $('return-current').hidden=!viewingHistory();
+      $('choices').querySelectorAll('button').forEach(button=>button.disabled=!writable);
+      $('replay-start').disabled=busy || careBusy || !array(state?.turns).some(turn=>turn.session_id===(selectedSession || activeSession));
+      $('takeover').disabled=busy || careBusy;
+      updateCareControls();
+    }
+    function framesFor(turns) {
+      return turns.flatMap(turn=>{
+        const user={speaker:'elder',source:'陈师傅 · 演示者原话',text:turn.text,turn_id:turn.turn_id};
+        const preview=turn.source==='local_preview' || turn.source==='preview';
+        const failed=turn.status==='failed', pending=['pending','unknown'].includes(turn.status);
+        const response={speaker:failed || pending || preview?'narrator':'robot',source:failed?'失败记录':pending?'结果未确定':preview?'本地占位 · 非模型回复':label(turn.source) || '实际返回文本',text:failed?turn.error || '本轮失败，没有可交付回复。':pending?'本轮没有确定结果；不会用预写回复替代。':turn.response || '本轮没有返回文本。',turn_id:turn.turn_id};
+        if(turn.external_emotion?.simulated){user.source+=' · 合成情绪实验';response.source+=' · 合成情绪实验，非真实观测';}
+        return [user,response];
+      });
+    }
+    function renderStage() {
+      const turns=array(state?.turns).filter(turn=>turn.session_id===(selectedSession || activeSession));
+      const frame=replayMode?replayFrames[replayIndex]:framesFor(turns).at(-1);
+      $('stage').dataset.playing=String(stagePlaying);$('stage').dataset.speaker=frame?.speaker || 'narrator';
+      $('stage-mode').textContent=replayMode?'保存回放 · 原始来源逐句标注':state?.mode==='live'?'真实生成模式 · 实际交付原文':'本地流程预览 · 无模型生成';
+      $('subtitle-source').textContent=frame?.source || '演出说明';
+      $('subtitle').textContent=frame?.text || '开始会话后，这里显示你送出的原话与实际返回文本。';
+      $('stage-play').textContent=stagePlaying?'暂停演出':replayMode?'继续回放':'开始演出';
+      $('replay-controls').hidden=!replayMode;
+      $('replay-position').max=String(Math.max(0,replayFrames.length-1));$('replay-position').value=String(replayIndex);
+      $('replay-progress').textContent=`${replayIndex+1} / ${replayFrames.length}`;
+      $('stage-note').textContent=replayMode?'只播放当前浏览器已保存文本，不发起模型或护理请求。字幕停留时间是演出节奏，不代表原始实时延迟。后台已启用的护理调度独立继续。':'动画只是表现，不记录为情绪依据。暂停只暂停演出，不撤回已提交的请求。语音调用未获授权，本轮无声音。';
+      const currentTurn=replayMode?turns.find(turn=>turn.turn_id===frame?.turn_id):turns.at(-1);
+      renderCareContextForTurn(currentTurn);
+      fillInputEvidence($('input-evidence'),currentTurn);
+      $('input-evidence-summary').textContent=!currentTurn?'尚无回合':!currentTurn.input_evidence?'旧轮无快照':currentTurn.input_evidence.status==='not_built'?'本轮未构建':'已保存快照';
+    }
+    function stopReplayTimer() { if(replayTimer!==null){clearTimeout(replayTimer);replayTimer=null;} }
+    function scheduleReplay() {
+      stopReplayTimer();if(!replayMode || !stagePlaying)return;
+      const duration=Math.max(3000,Math.min(9000,(replayFrames[replayIndex]?.text.length || 0)*95));
+      replayTimer=setTimeout(()=>{replayTimer=null;if(!replayMode || !stagePlaying)return;if(replayIndex<replayFrames.length-1){replayIndex++;renderStage();scheduleReplay();}else{stagePlaying=false;renderStage();status('保存回放结束，没有重新执行任何模型或护理操作。');}},duration);
+    }
+    function exitReplay() {stopReplayTimer();replayMode=false;stagePlaying=false;replayFrames=[];replayIndex=0;renderStage();updateControls();}
+    function beginReplay() {
+      if(busy || careBusy)return;
+      const turns=array(state?.turns).filter(turn=>turn.session_id===(selectedSession || activeSession));
+      if(!turns.length)return;
+      replayFrames=framesFor(turns);replayIndex=0;replayMode=true;stagePlaying=true;
+      renderStage();updateControls();scheduleReplay();status('正在回放浏览器中已保存的会话；聊天与护理操作暂时锁定。');
+    }
+    const careNames={active:'有效',cancelled:'已取消',completed:'已完成',pending:'待回应',unconfirmed:'尚未确认',acknowledged:'已确认收到提醒',declined:'已拒绝',snoozed:'已延后',superseded:'已由新一期替代',revoked:'已撤回',queued:'排队中',sending:'正在发送',accepted:'通道受理',delivered:'已送达',delivered_local:'本地模拟接收',family_ack:'家属确认（以来源为准）',failed:'失败',unknown:'结果未知',simulation:'本地模拟授权',real:'真实授权',once:'一次性',daily:'每日',local:'本地模拟通道',local_care_inbox:'本地模拟收件箱'};
+    const careLabel=value=>careNames[value] || scalar(value);
+    function fillInputEvidence(container, turn) {
+      container.replaceChildren();
+      const snapshot=turn?.input_evidence;
+      if(!snapshot || typeof snapshot!=='object') {placeholder(container,turn?'这一旧回合没有输入快照；不从当前档案反推。':'尚无回合，发送后可查看当轮选入的依据。');return;}
+      fields(container,[['所属回合',shortId(turn.turn_id)],['保存时间',displayTime(snapshot.recorded_at)],['回复来源',label(snapshot.generation_status)],['轮次状态',label(snapshot.turn_status)]]);
+      container.append(text('p','只展示这一轮构建时选入的事实、人物假设和本人确认说明。出处用于核查，不代表模型已经落实这些依据。','subtle'));
+      if(snapshot.status==='not_built' || snapshot.passed_to_client!==true) {
+        container.append(text('p',snapshot.status==='not_built'?'本轮未构建在线输入，可能由安全规则直接接管；没有模型输入依据。':'输入已准备，但未记录交给在线客户端；不能声称模型已收到。','placeholder'));
+      } else container.append(text('p',snapshot.generation_status==='local_preview'?'本地占位客户端：模型未运行，以下只验证输入选择流程。':'已交给在线客户端；该记录不证明供应商收到或模型采纳。失败回合仍保留本次准备的依据。','subtle'));
+      [['事实记忆（实际选入内容）',snapshot.recalled_episodes,'fact-input'],['人物假设（选入内容与出处）',snapshot.hypotheses,'hypothesis'],['本人确认的相处说明（实际选入内容）',snapshot.stated_preferences,'preference-input']].forEach(([title,items,kind])=>{
+        const group=document.createElement('details');group.className='inline-detail';group.append(text('summary',`${title} · ${array(items).length} 条`));
+        if(!array(items).length)group.append(text('p','本轮未选入此类依据。','placeholder'));
+        array(items).forEach(item=>group.append(evidenceCard(item,kind)));container.append(group);
+      });
+      if(array(snapshot.recalled_provenance_not_injected).length) {const provenance=document.createElement('details');provenance.className='inline-detail';provenance.append(text('summary','事实出处核查（出处未注入本轮模型输入）'));snapshot.recalled_provenance_not_injected.forEach(item=>{provenance.append(text('p',item.content));if(!array(item.sources).length)provenance.append(text('p','本轮未保存可核查出处，不从当前档案推断。','placeholder'));array(item.sources).forEach(source=>provenance.append(evidenceCard(source,'evidence')));});container.append(provenance);}
+    }
+    function fillCareContext(container, turn) {
+      container.replaceChildren();
+      if(!turn) {placeholder(container,'尚无回合。护理依据会按当轮保存，不从其他回合补填。');return;}
+      const snapshot=turn.care_context;
+      if(!snapshot || typeof snapshot!=='object' || Array.isArray(snapshot)) {
+        placeholder(container,'本轮没有保存护理依据。无关对话不会附带护理记录；旧回合也不会事后补填。');return;
+      }
+      fields(container,[['所属回合',shortId(turn.turn_id)],['来源',snapshot.source==='minimal_care_records'?'本地护理服务的保存记录':scalar(snapshot.source) || '来源未提供'],['读取时间',scalar(snapshot.observed_at) || '未提供'],['使用方式',snapshot.read_only===true?'只读参考，不执行护理操作':'只展示已保存内容；只读标记未提供']]);
+      container.append(text('p','这是当轮保存的参考，不代表现在的最新状态。未确认仅表示尚未回应提醒，不等于没吃药或发生危险。','subtle'));
+      if(state?.mode==='local_preview' || ['local_preview','preview'].includes(turn.source))container.append(text('p','本地预览：快照来自本地记录，模型未运行，不构成模型理解或回复效果。','subtle'));
+      if(snapshot.status!=='available') {
+        const message=snapshot.status==='not_configured'?'本轮护理服务未配置，无法提供状态。':snapshot.status==='unavailable'?'本轮护理状态读取失败，状态未知；不能当作没有提醒、授权或通知。':'本轮护理快照状态不明确，不能据此确认护理结果。';
+        container.append(text('p',message,'placeholder'));return;
+      }
+      fields(container,[['通知通道',careLabel(snapshot.channel) || '未提供'],['真实外发',snapshot.external_enabled===false?'未启用':snapshot.external_enabled===true?'已启用（仍以实际回执为准）':'状态未提供']]);
+      container.append(text('p','本地模拟接收及模拟家属确认都不代表真实家属收到。排队、通道受理、送达、家属确认与护理员处置分别核对。','subtle'));
+      container.append(text('p','授权的期限及状态符合要求，不代表触发条件已满足或允许立即通知；仍按保存的规则和执行时校验处理。','subtle'));
+      const definitions=[
+        ['reminders','提醒设置',item=>[['提醒',item.label],['编号',item.id],['状态',careLabel(item.status)],['频率',careLabel(item.schedule)],['首次日期',item.date],['时间',item.time],['时区',item.timezone],['下次到点',item.next_due_at],['宽限分钟',item.grace_minutes],['已跳过期数',item.skipped_total]]],
+        ['occurrences','各提醒最近一期',item=>[['编号',item.id],['提醒编号',item.reminder_id],['状态',careLabel(item.status)],['到点时间',item.due_at],['时区',item.timezone],['提供提醒时间',item.offered_at],['回应截止',item.deadline_at],['延后至',item.snoozed_until]]],
+        ['consents','通知授权',item=>[['编号',item.id],['提醒编号',item.reminder_id],['联系人编号',item.contact_id],['状态',careLabel(item.status)],['来源',careLabel(item.source)],['有效起点',item.valid_from],['有效至',item.expires_at],['期限及状态',item.valid_now===true?'读取时符合':item.valid_now===false?'读取时不符合':'未提供']]],
+        ['deliveries','通知回执',item=>[['编号',item.id],['事件编号',item.event_id],['提醒期次',item.occurrence_id],['状态',careLabel(item.status)],['来源',careLabel(item.source)],['通道',careLabel(item.channel)],['创建时间',item.created_at],['尝试时间',item.attempted_at],['回执来源',careLabel(item.receipt_source)]]],
+        ['tasks','护理员待办',item=>[['编号',item.id],['提醒期次',item.occurrence_id],['状态',careLabel(item.status)]]]
+      ];
+      definitions.forEach(([key,title,entries])=>{
+        const items=array(snapshot[key]).filter(item=>item && typeof item==='object' && !Array.isArray(item));
+        const counts=snapshot.counts?.[key] || {}, total=Number.isInteger(counts.total) && counts.total>=0?counts.total:null;
+        const omitted=Number.isInteger(counts.omitted) && counts.omitted>=0?counts.omitted:null;
+        const group=document.createElement('details');group.className='care-context-group';
+        group.append(text('summary',`${title} · ${items.length}${total===null?' 条':` / ${total} 条`}`));
+        const body=document.createElement('div');body.className='detail-body';
+        if(!items.length)body.append(text('p',total===0?'本轮快照没有此类记录。':'本轮摘要未包含此类记录，不能据此断定不存在。','placeholder'));
+        items.forEach(item=>{const card=document.createElement('article');card.className='evidence-card';fields(card,entries(item));body.append(card);});
+        if(omitted>0)body.append(text('p',`摘要省略 ${omitted} 条；请在下方护理区查看完整记录。当前状态可能已与本轮不同。`,'subtle'));
+        group.append(body);container.append(group);
+      });
+    }
+    function renderCareContextForTurn(turn) {
+      const snapshot=turn?.care_context;
+      $('care-context-summary').textContent=!turn?'尚无回合':!snapshot?'本轮未附':snapshot.status==='available'?'已保存快照':snapshot.status==='not_configured'?'未配置':'状态未知';
+      fillCareContext($('care-context'),turn);
+    }
+    function careError(value) {$('care-error').textContent=value || '';$('care-error').hidden=!value;}
+    function updateCareControls() {
+      const locked=replayMode || busy || careBusy || !!careUnknown || !careState?.configured;
+      $('elder-care').querySelectorAll('input,select,button').forEach(el=>{el.disabled=locked;});
+      $('care-refresh').disabled=replayMode || careBusy || busy;
+    }
+    function careCard(container,title,entries) {const card=document.createElement('article');card.className='care-card';card.append(text('h3',title));entries.forEach(([key,value])=>{if(value!==undefined && value!==null && value!=='')card.append(text('p',key+'：'+scalar(value)));});container.append(card);return card;}
+    function careButton(card,title,action,payload) {const button=text('button',title);button.type='button';button.addEventListener('click',()=>careAction(action,payload));let row=card.querySelector('.row');if(!row){row=document.createElement('div');row.className='row';card.append(row);}row.append(button);return button;}
+    function populateOptions(id,items,labeler) {const select=$(id),previous=select.value;select.replaceChildren();const prompt=text('option',items.length?'请选择':'暂无可选记录');prompt.value='';select.append(prompt);items.forEach(item=>{const option=text('option',labeler(item));option.value=item.id;select.append(option);});if(items.some(item=>item.id===previous))select.value=previous;}
+    function renderCare(next) {
+      careState={...next,maintenance_errors:next.maintenance_errors===undefined?careState?.maintenance_errors || {}:next.maintenance_errors};next=careState;
+      $('care-mode').textContent=Object.keys(next.maintenance_errors || {}).length?'后台调度或保存出现故障，请核查。当前展示最后可读取的记录，不能认定调度正常完成。':next.configured?'本地护理流程已配置。有效模拟授权满足规则后自动写入本地通知记录，无真实家属外发。关闭聊天不会暂停护理调度。':'护理后台尚未配置。请由护理员在本机配置账号和负责的老人后使用；没有预置默认密码。';
+      const contacts=array(next.contacts),reminders=array(next.reminders);
+      [['care-occurrences',next.occurrences,'暂无到点提醒。'],['care-reminders',reminders,'还没有设置提醒。'],['care-contacts',contacts,'还没有演示联系人。'],['care-consents',next.consents,'没有通知授权；未取得授权不会自动通知。'],['care-deliveries',next.deliveries,'暂无通知记录。']].forEach(([id,items,empty])=>{$(id).replaceChildren();if(!array(items).length)placeholder($(id),empty);});
+      array(next.occurrences).forEach(item=>{
+        const card=careCard($('care-occurrences'),item.label,[['状态',careLabel(item.status)],['原定时间',item.due_at],['时区',item.timezone],['未确认时限',item.deadline_at],['延后至',item.snoozed_until]]);
+        if(['pending','unconfirmed','snoozed'].includes(item.status)) {
+          careButton(card,'确认收到提醒','occurrence.ack',{occurrence_id:item.id});careButton(card,'我不接受这次提醒','occurrence.decline',{occurrence_id:item.id});
+          const row=document.createElement('div');row.className='row';const minutes=document.createElement('input');minutes.type='number';minutes.min='1';minutes.max='1440';minutes.value='10';minutes.setAttribute('aria-label','延后分钟');const snooze=text('button','延后（分钟）');snooze.type='button';snooze.addEventListener('click',()=>{if(!minutes.checkValidity()){minutes.reportValidity();return;}careAction('occurrence.snooze',{occurrence_id:item.id,minutes:Number(minutes.value)});});row.append(minutes,snooze);card.append(row);
+        }
+      });
+      reminders.forEach(item=>{const card=careCard($('care-reminders'),item.label,[['状态',careLabel(item.status)],['安排',`${careLabel(item.schedule)} · ${item.date} ${item.time} · ${item.timezone}`],['未确认宽限',`${item.grace_minutes} 分钟`],['下次到点',item.next_due_at],['断机遗漏',item.skipped_total?`${item.skipped_total} 次未提供，不算已送达`:null]]);if(item.status==='active')careButton(card,'取消提醒及未发通知','reminder.cancel',{reminder_id:item.id});});
+      contacts.forEach(item=>careCard($('care-contacts'),item.name,[['关系',item.relation],['通道',careLabel(item.channel)],['验证来源',item.verification_source || '未验证']]));
+      array(next.consents).forEach(item=>{const card=careCard($('care-consents'),`${contacts.find(contact=>contact.id===item.contact_id)?.name || item.contact_id} · ${careLabel(item.status)}`,[['提醒',reminders.find(reminder=>reminder.id===item.reminder_id)?.label || item.reminder_id],['触发', '超过该提醒宽限时间仍未确认'],['分享范围','仅提醒状态，不含聊天或心理假设'],['有效至',item.expires_at],['授权来源',careLabel(item.source)]]);if(item.status==='active')careButton(card,'撤回这条授权','consent.revoke',{consent_id:item.id});});
+      array(next.deliveries).forEach(item=>careCard($('care-deliveries'),careLabel(item.status),[['通知内容',item.message],['联系人',contacts.find(contact=>contact.id===item.contact_id)?.name || item.contact_id],['稳定事件编号',item.id],['来源','本轮仅本地模拟，未真实外发']]));
+      populateOptions('consent-contact',contacts,item=>item.name);populateOptions('consent-reminder',reminders.filter(item=>item.status==='active'),item=>item.label);updateCareControls();
+    }
+    async function readCare() {
+      if(replayMode || careBusy || busy)return;
+      careBusy=true;updateControls();
+      try {const response=await fetch('/api/minimal/care',{credentials:'same-origin',cache:'no-store',headers:{'X-Aria-Demo-Token':TOKEN}}),data=await response.json();if(!response.ok || data.ok===false)throw new Error(data.error || '读取护理状态失败。');renderCare(data.state || data);careError(careUnknown?`上次护理操作结果仍需核查，不会自动重发。请求编号：${careUnknown.id}`:'');}
+      catch(error){careError(error.message);}finally{careBusy=false;updateControls();}
+    }
+    async function careAction(action,payload) {
+      if(replayMode || busy || careBusy || careUnknown || !careState?.configured)return;
+      const requestId=crypto.randomUUID();careBusy=true;careError('');updateControls();
+      try {
+        const response=await fetch('/api/minimal/care',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Aria-Demo-Token':TOKEN},body:JSON.stringify({action,payload:{...payload,request_id:requestId}})});
+        const data=await response.json(),view=data.state || data;
+        if(Array.isArray(view.reminders))renderCare(view);
+        if(!response.ok || data.ok===false){const error=new Error(data.error || '护理操作未完成。');error.confirmed=response.status<500;throw error;}
+        if(!Array.isArray(view.reminders))throw new Error('未取得护理保存状态，不能确认结果。');
+        status('护理操作已返回；以结构化状态和回执为准，没有生成模型回复。');
+      }catch(error){if(!error.confirmed)careUnknown={id:requestId,action};careError((careUnknown?'结果不明，停止后续护理写入；刷新仅核查，不重发。\n':'')+error.message+(careUnknown?`\n请求编号：${requestId}`:''));}
+      finally{careBusy=false;updateControls();}
+    }
+    function renderChoices() {
+      const index=Number($('story-select').value), used=new Set(array(state?.turns).map(turn=>turn.text));
+      $('choices').replaceChildren();
+      stories[index].lines.forEach((line,i)=>{
+        const button=text('button',`${String(i+1).padStart(2,'0')}  ${line}`,'choice'+(used.has(line)?' used':'')); button.type='button';
+        button.addEventListener('click',()=>{ $('message-input').value=line; $('message-input').focus(); updateControls(); status('已填入老人侧建议。可以修改，点击发送后才会提交。'); });
+        $('choices').append(button);
+      });
+      $('care-boundary').hidden=index!==2;
+      updateControls();
+    }
+    function message(role, body, source, failed) {
+      const box=document.createElement('div'); box.className='message '+role+(failed?' failed':'');
+      const meta=document.createElement('div'); meta.className='message-meta'; meta.append(text('span',role==='user'?'陈师傅 · 演示者输入':role==='system'?'流程状态':'Aria'),text('span',source));
+      box.append(meta,text('div',body,'message-body')); return box;
+    }
+    function renderConversation() {
+      const sessionId=selectedSession || activeSession;
+      const turns=array(state.turns).filter(turn=>!sessionId || turn.session_id===sessionId);
+      const stamp=JSON.stringify([sessionId,turns]);
+      if(stamp!==renderingTurns) {
+        renderingTurns=stamp; $('conversation').replaceChildren();
+        if(!turns.length) {
+          const empty=document.createElement('div'); empty.className='empty';
+          const pinwheel=document.createElement('div'); pinwheel.className='pinwheel'; pinwheel.setAttribute('aria-hidden','true'); for(let i=0;i<4;i++)pinwheel.append(document.createElement('span'));
+          empty.append(pinwheel,text('h2',isCurrentOpen()?'从你愿意说的开始。':'让对话，有一个开始。'),text('p','你可以选择一句建议，也可以自由输入。没有规定的答案，也不必走向同一个结局。'));
+          $('conversation').append(empty);
+        }
+        turns.forEach(turn=>{
+          const wrapper=document.createElement('article'); wrapper.className='turn';
+          wrapper.append(message('user',turn.text,displayTime(turn.created_at || turn.at)));
+          if(turn.external_emotion)wrapper.append(text('p',`${turn.external_emotion.simulated?'合成情绪实验 · 非真实观测':'外部情绪读数 · 可能有误'}：${turn.external_emotion.label} · 来源 ${turn.external_emotion.source}`,'subtle'));
+          const isPreview=turn.source==='local_preview' || turn.source==='preview' || (state.mode==='local_preview' && !['model','rule_safety','rule','rule_protection'].includes(turn.source));
+          if(turn.status==='failed')wrapper.append(message('system',turn.error || '本轮处理失败，没有可交付的 Agent 回复。失败不会用预写回答替代。','失败',true));
+          else if(turn.status==='pending' || turn.status==='unknown')wrapper.append(message('system','本轮尚无确定结果。请刷新状态核查，勿重复发送这句话。',label(turn.status)));
+          else if(isPreview)wrapper.append(message('system',turn.response || '这句话已进入本地流程。模型调用关闭，没有生成机器人回复。','本地流程占位 · 非模型回复'));
+          else if(turn.response)wrapper.append(message('assistant',turn.response,label(turn.source) || '实际交付文本'));
+          else wrapper.append(message('system','本轮没有返回可展示的回复。',label(turn.status)));
+          {
+            const details=document.createElement('details');details.className='inline-detail care-context';
+            details.append(text('summary','查看这一轮的输入依据 · 保存快照'));
+            const body=document.createElement('div');body.className='detail-body';fillInputEvidence(body,turn);details.append(body);wrapper.append(details);
+          }
+          if(turn.care_context) {
+            const details=document.createElement('details');details.className='inline-detail care-context';
+            details.append(text('summary','查看这一轮的护理依据 · 保存快照'));
+            const body=document.createElement('div');body.className='detail-body';fillCareContext(body,turn);details.append(body);wrapper.append(details);
+          }
+          $('conversation').append(wrapper);
+        });
+        if(!viewingHistory())$('conversation').scrollTop=$('conversation').scrollHeight;
+      }
+      const session=array(state.sessions).find(s=>s.session_id===sessionId);
+      const number=session?.number || turns[0]?.session_number || state.session_number;
+      $('conversation-title').textContent=number ? `第 ${number} 次相遇${viewingHistory()?' · 只读回看':''}` : '留一点时间，听他说';
+      $('session-caption').textContent=viewingHistory()?'展示已保存原文，不重新生成或执行动作。':isCurrentOpen()?'正在继续同一次会话；可随时改变话题。':'会话已封存后，可以明确启动整理，再开始下一次相遇。';
+      $('turn-count').textContent=`${turns.length} 条老人输入`;
+      const last=turns.at(-1);
+      renderStage();
+      const strategy=$('strategy'); strategy.replaceChildren();
+      if(!last || state.mode==='local_preview')placeholder(strategy,'尚无真实模型的情绪与策略摘要。缺少声学、视觉时，不补造观测。');
+      else {
+        const strategyText=typeof last.strategy_summary==='object' ? last.strategy_summary?.label || last.strategy_summary?.summary : last.strategy_summary;
+        const emotionText=typeof last.emotion_summary==='object' ? last.emotion_summary?.label || last.emotion_summary?.summary : last.emotion_summary;
+        fields(strategy,[['当前情绪',emotionText || '未提供可展示的判断'],['情绪判断来源',label(last.emotion_summary?.source)],['声学 / 视觉',[last.emotion_summary?.acoustic,last.emotion_summary?.visual].filter(Boolean).join(' / ')],['回应策略',strategyText || '未提供可展示的摘要'],['回应目标',last.strategy_summary?.goal],['来源',last.turn_id?`本会话 · ${shortId(last.turn_id)}`:'本轮实际交付']]);
+        array(last.corrections).forEach(item=>strategy.append(text('p',typeof item==='string'?item:item.summary)));
+      }
+    }
+    function evidenceCard(item, kind) {
+      const card=document.createElement('article'); card.className='evidence-card';
+      if(typeof item==='string') { card.append(text('p',item)); return card; }
+      if(!item || typeof item!=='object')return card;
+      const main=item.injected_text || item.do || item.claim || item.summary || item.text || item.content || item.event_summary || item.reason;
+      if(item.injected_text)card.append(text('h3','实际选入文本'));
+      if(main)card.append(text('p',main));
+      if(kind==='change') {
+        fields(card,[['变更',label(item.kind)],['类型',label(item.category)]]);
+        [['之前',item.before],['之后',item.after]].forEach(([name,value])=>{
+          if(value===undefined)return;
+          card.append(text('h3',name));
+          if(value===null){card.append(text('p','无记录','placeholder'));return;}
+          if(typeof value==='string'){card.append(text('p',value));return;}
+          fields(card,[['内容',value.do || value.claim || value.summary || value.content || value.text],['范围',value.scope || value.atomic_claim?.conditions],['状态',label(value.status)]]);
+        });
+      }
+      const scope=item.scope || item.atomic_claim?.conditions;
+      if(item.injected_text)card.append(text('p','下列范围、置信和出处是构建时的原记录；实际输入以上方文本为准，过长文本会被截断。','subtle'));
+      fields(card,[['状态',label(item.status || item.disposition)],['适用范围',scope],['置信记录',kind==='hypothesis' && item.confidence!==undefined ? `${item.confidence}（非准确率）`:null],['来源',item.extraction_source==='rule'?'本地规则提议（非模型学习）':item.extraction_source==='model'?'会后模型提议（原话经代码校验）':label(item.source || item.evidence_basis)],['会话',item.session_id?shortId(item.session_id):null],['时间',displayTime(item.at || item.created_at || item.timestamp || item.first_observed_at)],['变化',item.from_status && item.to_status?`${label(item.from_status)} → ${label(item.to_status)}`:null],['依据关系',label(item.relation)],['引用位置',array(item.turn_indices).length ? item.turn_indices.join('、') : null],['原话轮次',item.turn_index]]);
+      if(item.quote)card.append(text('blockquote',item.quote));
+      if(kind==='fact') {
+        fields(card,[['原话来源会话',item.source_session_id ? shortId(item.source_session_id) : '旧记录未保存来源会话'],['原话轮次',item.source_turn_index ?? '旧记录未保存来源轮次']]);
+        card.append(text(item.source_quote?'blockquote':'p',item.source_quote || '旧记录未保存原话，不据记忆摘要猜测。',item.source_quote?'':'placeholder'));
+      }
+      array(item.quotes).forEach(quote=>{card.append(text('blockquote',typeof quote==='string'?quote:quote.text || quote.quote));if(typeof quote==='object')fields(card,[['原话会话',shortId(quote.session_id)],['原话轮次',quote.turn_index]]);});
+      if(array(item.not_implies).length)fields(card,[['不能推断',item.not_implies.join('；')]]);
+      if(item.confirmation) {
+        const confirmation=item.confirmation;
+        fields(card,[['本人确认',typeof confirmation==='string'?confirmation:confirmation.source==='ui'?`页面操作 · ${displayTime(confirmation.at)}`:confirmation.text],['确认来源',typeof confirmation==='object'?label(confirmation.source || 'conversation'):null]]);
+      }
+      const evidence=array(item.evidence), history=array(item.status_history);
+      if(array(item.provenance_not_injected).length) {const provenance=document.createElement('details');provenance.className='inline-detail';provenance.append(text('summary','出处核查（以下出处未注入本轮模型输入）'));item.provenance_not_injected.forEach(entry=>provenance.append(evidenceCard(entry,'evidence')));card.append(provenance);}
+      if(evidence.length || history.length) {
+        const details=document.createElement('details'); details.className='inline-detail'; details.append(text('summary',`查看依据与轨迹（${evidence.length+history.length}）`));
+        evidence.forEach(entry=>details.append(evidenceCard(entry,'evidence'))); history.forEach(entry=>details.append(evidenceCard(entry,'change'))); card.append(details);
+      }
+      if(!card.childNodes.length)card.append(text('p','已保存一条结构化记录；暂无可展示摘要。','placeholder'));
+      return card;
+    }
+    function renderPreferences() {
+      const items=array(state?.profile?.stated_preferences),container=$('stated-preferences');container.replaceChildren();$('preference-count').textContent=`${items.length} 条`;
+      if(!items.length)placeholder(container,'还没有相处说明。会后可从本人原话提议，经确认后才使用。');
+      items.forEach(item=>{
+        const card=evidenceCard(item,'preference');
+        const actions=item.status==='proposed'?[['confirm','按这句话记下'],['decline','不记']]:item.status==='confirmed'?[['withdraw','撤回']]:[];
+        if(actions.length){const row=document.createElement('div');row.className='row';actions.forEach(([action,title])=>{const button=text('button',title);button.type='button';button.dataset.preferenceAction=action;button.addEventListener('click',()=>{if(replayMode || viewingHistory())return;mutate('preference',{action,id:item.id});});row.append(button);});card.append(row);}
+        const history=array(item.history);if(history.length){const details=document.createElement('details');details.className='inline-detail';details.append(text('summary','查看形成与本人操作记录'));history.forEach(entry=>details.append(text('p',`${displayTime(entry.at)} · ${label(entry.from || entry.from_status) || '新提议'} → ${label(entry.to)} · ${entry.source==='rule'?'本地规则提议':label(entry.source)}`)));card.append(details);}
+        container.append(card);
+      });
+    }
+    function renderCognitive() {
+      const value=state.cognitive || {}, enabled=value.enabled===true;
+      $('cognitive-enable').hidden=enabled;$('cognitive-disable').hidden=!enabled;
+      $('cognitive-arranged').hidden=!enabled || value.status!=='review_suggested';
+      const statusNames={disabled:'已关闭',calibrating:'正在了解我自己的日常',watch:'已完成初步记录',review_suggested:'有持续变化，等待合适时机由我决定是否聊聊'};
+      $('cognitive-state').textContent=(statusNames[value.status] || '已关闭')+(value.cooldown_until?` · 暂不主动提起至 ${displayTime(value.cooldown_until)}`:'');
+      const container=$('cognitive-observations');container.replaceChildren();
+      if(!array(value.observations).length)placeholder(container,'目前没有已保存的变化观察。');
+      array(value.observations).forEach(item=>{const card=document.createElement('article');card.className='care-card';card.append(text('p',displayTime(item.at),'subtle'),text('p',scalar(item.quote) || '旧记录没有可展示原话。'));if(item.context_only)card.append(text('p','仅作背景，不计入变化规则。','subtle'));const button=text('button','删除这条观察');button.type='button';button.dataset.cognitiveReduction='true';button.addEventListener('click',()=>{if(replayMode || viewingHistory())return;mutate('cognitive',{action:'delete',id:item.id});});card.append(button);container.append(card);});
+    }
+    function renderProfile() {
+      const profile=state.profile || {};
+      [['facts','fact-count','fact','还没有会后整理出的事实记忆。'],['hypotheses','hypothesis-count','hypothesis','暂无人物假设。证据不够时，保持待观察也是合理结果。'],['changes','change-count','change','暂无已记录的变化。没有新证据时，不强求更新。'],['evidence','evidence-count','evidence','暂无会后审核来源。老人已发送的原话可在会话中查看。']].forEach(([key,count,kind,empty])=>{
+        const items=array(profile[key]); $(count).textContent=`${items.length} 条`; $(key).replaceChildren(); if(!items.length)placeholder($(key),empty); else items.forEach(item=>$(key).append(evidenceCard(item,kind)));
+      });
+      renderPreferences();
+      renderCognitive();
+      const offline=state.offline || {}, review=array(state.reviews).at(-1), localReview=array(state.preference_reviews).at(-1);
+      $('offline-title').textContent=`会后整理 · ${label(review?.status || offline.status) || '尚未运行'}`;
+      $('offline-status').textContent=scalar(review?.error || offline.message || offline.notice || offline.error) || (state.mode==='local_preview'?'本地规则只从已封存原话提议相处说明，需本人确认；未执行模型、事实抽取或人物反思。'+(localReview?` 最近一次规则提取：${label(localReview.status)}。`:''):'封存后，只有点击“明确启动会后整理”才调用模型；memory 整理事实，reflection 审核人物假设。');
+      if(offline.pending_count!==undefined)$('offline-status').append(document.createTextNode(` 待整理：${offline.pending_count} 次会话。`));
+      const stages=$('offline-stages'), records=[...array(offline.audit).slice(-3),...array(offline.jobs)]; stages.replaceChildren();
+      if(!records.length)placeholder(stages,'暂无已保存的整理阶段记录。');
+      records.forEach(job=>{
+        const card=document.createElement('article');card.className='evidence-card';
+        fields(card,[['来源会话',shortId(job.session_id)],['状态',label(job.state || job.outcome)],['事实整理',job.memory_completed?'已完成':'未完成'],['人物审核',job.reflection_completed?'已完成':'未完成'],['尝试次数',job.attempts],['失败记录',job.last_error_code || job.error_code]]);stages.append(card);
+      });
+    }
+    function renderTimeline() {
+      const container=$('timeline-items'); container.replaceChildren();
+      const sessions=array(state.sessions);
+      const total=Math.max(3,sessions.length);
+      for(let i=0;i<total;i++) {
+        const session=sessions[i], number=session?.number || i+1;
+        const button=document.createElement('button'); button.type='button'; button.className='timeline-item'+(!session?' planned':'');
+        button.append(text('strong',`${String(number).padStart(2,'0')} · ${stories[i]?.title || '继续认识'}`));
+        if(session) {
+          const count=array(state.turns).filter(turn=>turn.session_id===session.session_id).length;
+          button.append(text('span',`${label(session.status)} · ${count} 条输入`),text('span',displayTime(session.started_at || session.created_at || session.at) || '按真实会话记录'));
+          button.setAttribute('aria-pressed',String((selectedSession || activeSession)===session.session_id));
+          button.addEventListener('click',()=>{if(replayMode)exitReplay();selectedSession=session.session_id;renderConversation();renderTimeline();updateControls();status('正在只读回看已保存的会话；没有发起模型或护理操作。');});
+        } else { button.append(text('span','建议篇章 · 尚未开始')); button.disabled=true; }
+        container.append(button);
+      }
+    }
+    function render(nextState) {
+      state=nextState; activeSession=state.session_id || array(state.sessions).at(-1)?.session_id || null;
+      if(selectedSession && !array(state.sessions).some(s=>s.session_id===selectedSession))selectedSession=null;
+      $('mode-badge').textContent=state.mode==='live' ? '真实生成模式' : '本地流程预览';
+      $('mode-badge').classList.toggle('live',state.mode==='live');
+      $('mode-notice').textContent=state.mode==='live' ? '真实生成模式：显式发送会调用在线模型；明确启动会后整理会另行调用模型。故事输入来自虚构角色扮演。' : '本地流程预览 · 模型调用关闭。可检查输入、封存和连续会话；占位状态不是 Agent 回复，也不证明人物学习效果。';
+      if(state.notice)$('mode-notice').append(document.createTextNode(' '+scalar(state.notice)));
+      if(state.care_notice)$('mode-notice').append(document.createTextNode(' '+scalar(state.care_notice)));
+      if(state.storage_failed)setError('保存失败，已停止写操作。请先核查本地保存问题；刷新仅查看状态，不会重发请求。');
+      else if(state.requires_review || [...array(state.turns),...allReviews()].some(row=>row.requires_review))setError('有请求需要核查结果与费用，已停止后续写操作。失败记录仍保留；刷新不会重发或创建新请求。');
+      const suggested=Math.min(Math.max((state.session_number || 1)-1,0),2);
+      if(suggestedSession!==state.session_number){$('story-select').value=String(suggested);suggestedSession=state.session_number;}
+      renderConversation();renderProfile();renderTimeline();renderChoices();renderModelUsage();updateControls();
+    }
+    async function request(endpoint, body) {
+      const response=await fetch('/api/minimal/'+endpoint,{method:body===undefined?'GET':'POST',credentials:'same-origin',cache:'no-store',headers:{'X-Aria-Demo-Token':TOKEN,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+      let data; try {data=await response.json();} catch(_) {throw new Error('服务器未返回可核查的状态。');}
+      if(data.state)render(data.state);
+      if(!response.ok || data.ok===false) { const error=new Error(scalar(data.error) || `请求未完成（${response.status}）。`); error.confirmed=!!data.state; throw error; }
+      if(body!==undefined && !data.state)throw new Error('操作缺少保存状态，无法确认结果。');
+      return data;
+    }
+    async function refresh() {
+      if(busy || replayMode)return; busy=true;updateControls();status('正在读取状态…');
+      try {
+        const data=await request('state'); render(data.state || data);
+        if(uncertain) {
+          const known=uncertain.endpoint==='text' && array(state.turns).find(turn=>turn.turn_id===uncertain.id);
+          const sealed=uncertain.endpoint==='seal' && array(state.sessions).some(session=>session.session_id===uncertain.sessionId && !['open','active','in_progress'].includes(session.status));
+          const started=uncertain.endpoint==='start' && state.session_id && !uncertain.sessionIds.includes(state.session_id);
+          const forgotten=uncertain.endpoint==='forget' && !array(state.sessions).length && !array(state.turns).length;
+          const reflected=uncertain.endpoint==='reflect' && array(state.reviews).some(review=>review.request_id===uncertain.id && ['completed','failed'].includes(review.status));
+          const localReviewed=uncertain.endpoint==='preference-review' && array(state.preference_reviews).some(review=>review.request_id===uncertain.id && ['completed','failed'].includes(review.status));
+          const preferenceSaved=uncertain.endpoint==='preference' && array(state.profile?.stated_preferences).some(item=>item.id===uncertain.id && item.status===({confirm:'confirmed',decline:'declined',withdraw:'withdrawn'}[uncertain.action]));
+          const cognitiveSaved=uncertain.endpoint==='cognitive' && ((uncertain.action==='enable' && state.cognitive?.enabled===true) || (uncertain.action==='disable' && state.cognitive?.enabled===false) || (uncertain.action==='delete' && !array(state.cognitive?.observations).some(item=>item.id===uncertain.id)) || (uncertain.action==='reminder_set' && state.cognitive?.status==='watch' && state.cognitive?.cooldown_until));
+          if((known && ['completed','failed'].includes(known.status)) || sealed || started || forgotten || reflected || localReviewed || preferenceSaved || cognitiveSaved){ uncertain=null; setError(''); status('已找到这次操作的保存结果；没有重新发送。'); }
+          else {setError('上次请求结果仍需核查，已停止写操作且不会自动重发。你可以继续刷新查看保存结果。'+(uncertain.id?`\n请求编号：${uncertain.id}`:''));status('已读取状态；未执行任何新的模型或护理操作。');}
+        } else if(state.storage_failed) {setError('保存失败，已停止写操作。请先核查本地保存问题；刷新仅查看状态。');status('已读取状态；保存故障尚未解决。');}
+        else if(state.requires_review || [...array(state.turns),...allReviews()].some(row=>['pending','unknown'].includes(row.status) || row.requires_review)) {setError('存在等待处理、结果不明或需要核查费用的请求，已停止写操作。刷新只查看保存结果，不会重新发送。');status('已读取状态；仍有请求需要核查。');}
+        else {setError('');status('已读取保存状态。');}
+        if(!uncertain && (state.requires_review || [...array(state.turns),...allReviews()].some(row=>row.requires_review))) {setError('保存记录仍要求核查结果与费用，后续写操作保持停止。已读取的失败不会换新编号重发。');status('已取得保存状态；核查标记尚未解除。');}
+      } catch(error){setError('读取状态失败：'+error.message);status('没有自动重试。');}
+      finally {busy=false;updateControls();}
+    }
+    async function mutate(endpoint, body, onSuccess) {
+      const privacyReduction=endpoint==='cognitive' && ['disable','delete'].includes(body.action);
+      const previousUncertain=uncertain;
+      if(busy || careBusy || replayMode || (uncertain && !privacyReduction) || (endpoint==='cognitive' && viewingHistory()))return;
+      if(modelCallsStopped() && ['text','reflect'].includes(endpoint)){renderModelUsage();status('后续模型调用已停止；请核查记录或调用限额。');return;}
+      const submitted={endpoint,id:body.turn_id || body.request_id || body.id || null,action:body.action || null,sessionId:body.session_id || null,sessionIds:array(state?.sessions).map(session=>session.session_id)};
+      busy=true;setError('');updateControls();status(endpoint==='reflect'?'正在处理明确提出的会后整理请求…':'正在保存本次操作…');
+      try {const data=await request(endpoint,body);if(data.state)render(data.state);if(onSuccess)onSuccess(data);status(endpoint==='reflect' && state?.mode==='local_preview'?'预览模式未运行模型；请查看会后状态。':'操作已返回，状态按保存记录展示。');}
+      catch(error) {
+        if(!error.confirmed){uncertain=previousUncertain || submitted;setError('请求结果不明，已停止写操作。请刷新状态核查；不会自动重试或重新发送。\n'+error.message+(uncertain.id?`\n请求编号：${uncertain.id}`:''));}
+        else setError(error.message);
+        status('本次操作没有被界面当作成功。');
+      } finally {busy=false;updateControls();}
+    }
+    $('composer').addEventListener('submit',event=>{event.preventDefault();const value=$('message-input').value.trim();if(!value || !isCurrentOpen() || viewingHistory())return;mutate('text',{text:value,turn_id:crypto.randomUUID(),session_id:state.session_id},()=>{$('message-input').value='';});});
+    $('message-input').addEventListener('input',updateControls);
+    $('message-input').addEventListener('keydown',event=>{if(event.key==='Enter' && (event.ctrlKey || event.metaKey)){event.preventDefault();$('composer').requestSubmit();}});
+    $('story-select').addEventListener('change',renderChoices);
+    $('cognitive-enable').addEventListener('click',()=>mutate('cognitive',{action:'enable'}));
+    $('cognitive-arranged').addEventListener('click',()=>mutate('cognitive',{action:'reminder_set'}));
+    $('cognitive-disable').addEventListener('click',()=>{$('cognitive-disable-choice').hidden=false;});
+    $('cognitive-cancel').addEventListener('click',()=>{$('cognitive-disable-choice').hidden=true;});
+    $('cognitive-keep').addEventListener('click',()=>mutate('cognitive',{action:'disable',delete_records:false},()=>{$('cognitive-disable-choice').hidden=true;}));
+    $('cognitive-delete-all').addEventListener('click',()=>mutate('cognitive',{action:'disable',delete_records:true},()=>{$('cognitive-disable-choice').hidden=true;}));
+    $('stage-play').addEventListener('click',()=>{stagePlaying=!stagePlaying;renderStage();scheduleReplay();});
+    $('stage-view').addEventListener('click',()=>{const plain=$('stage').classList.toggle('text-view');$('stage-view').textContent=plain?'舞台视图':'文字视图';});
+    $('takeover').addEventListener('click',()=>{if(replayMode)exitReplay();stagePlaying=false;selectedSession=null;render(state);if(!$('message-input').disabled){$('message-input').focus();$('message-input').scrollIntoView({block:'center',behavior:'smooth'});}else status('请先开始可写会话；若有失败或未知请求，先核查保存状态。');});
+    $('replay-start').addEventListener('click',beginReplay);
+    $('replay-restart').addEventListener('click',()=>{replayIndex=0;stagePlaying=true;renderStage();scheduleReplay();});
+    $('replay-position').addEventListener('input',()=>{stopReplayTimer();stagePlaying=false;replayIndex=Number($('replay-position').value);renderStage();});
+    $('replay-exit').addEventListener('click',()=>{exitReplay();status('已退出保存回放。没有发起新请求。');});
+    $('elder-care').addEventListener('toggle',()=>{if($('elder-care').open && !careState)readCare();});
+    $('care-refresh').addEventListener('click',readCare);
+    $('reminder-form').addEventListener('submit',event=>{event.preventDefault();careAction('reminder.create',{label:$('reminder-label').value.trim(),schedule:$('reminder-schedule').value,date:$('reminder-date').value,time:$('reminder-time').value,timezone:$('reminder-timezone').value,grace_minutes:Number($('reminder-grace').value)});});
+    $('contact-form').addEventListener('submit',event=>{event.preventDefault();careAction('contact.create',{name:$('contact-name').value.trim(),relation:$('contact-relation').value.trim(),channel:'local'});});
+    $('consent-form').addEventListener('submit',event=>{event.preventDefault();const value=$('consent-expires').value,offset=$('consent-timezone').value==='UTC'?'+00:00':'+08:00';careAction('consent.grant',{contact_id:$('consent-contact').value,reminder_id:$('consent-reminder').value,trigger:'unconfirmed',scope:'reminder_status',expires_at:value+(value.length===16?':00':'')+offset,source:'simulation',confirmed:$('consent-confirmed').checked});});
+    $('start').addEventListener('click',()=>mutate('start',{},()=>{selectedSession=null;render(state);$('message-input').focus();}));
+    $('seal').addEventListener('click',()=>mutate('seal',{session_id:state.session_id}));
+    $('reflect').addEventListener('click',()=>mutate('reflect',{request_id:crypto.randomUUID()}));
+    $('preference-review').addEventListener('click',()=>mutate('preference-review',{request_id:crypto.randomUUID()}));
+    $('refresh').addEventListener('click',refresh);
+    $('return-current').addEventListener('click',()=>{selectedSession=null;render(state);status('已回到当前会话。');});
+    $('forget').addEventListener('click',()=>{$('delete-confirm').hidden=false;$('confirm-forget').focus();});
+    $('cancel-forget').addEventListener('click',()=>{$('delete-confirm').hidden=true;$('forget').focus();});
+    $('confirm-forget').addEventListener('click',()=>mutate('forget',{},()=>{$('delete-confirm').hidden=true;selectedSession=null;renderingTurns='';$('message-input').value='';careState=null;careUnknown=null;careError('');['care-occurrences','care-reminders','care-contacts','care-consents','care-deliveries'].forEach(id=>placeholder($(id),'本次体验资料已清除。'));['reminder-form','contact-form','consent-form'].forEach(id=>$(id).reset());$('care-mode').textContent='本次体验资料已清除；可刷新读取护理状态。';render(state);if($('elder-care').open)setTimeout(readCare,0);}));
+    function sealOnLeave() {
+      if(leavingSeal || busy || uncertain || replayMode || !isCurrentOpen())return;
+      leavingSeal=true;
+      fetch('/api/minimal/seal',{method:'POST',credentials:'same-origin',keepalive:true,headers:{'Content-Type':'application/json','X-Aria-Demo-Token':TOKEN},body:JSON.stringify({session_id:state.session_id})}).catch(()=>{});
+    }
+    window.addEventListener('pagehide',sealOnLeave);
+    window.addEventListener('pageshow',event=>{leavingSeal=false;if(event.persisted)refresh();});
+    refresh();
+  })();
+  </script>
+</body>
+</html>

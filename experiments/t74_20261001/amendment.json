@@ -1,0 +1,124 @@
+{
+  "accepted_unknown_attempts": [
+    [
+      "t6_20260930_v1",
+      "e1_001"
+    ]
+  ],
+  "authorization_source": "User requested actual compatibility repair; original E1 budget/key authorization retained; no new unknown exception inferred.",
+  "budget_usd": {
+    "e1": "0.5",
+    "judge": "0.5",
+    "pause_total": "2",
+    "total": "5"
+  },
+  "campaign_id": "e1_t74_20261001_v1",
+  "fixed_generation_positions": 204,
+  "parent_execution_seal": "ce932d135b4504b18e9627ff2d12817be8bf77ed9a012762bf2a456835ccbfa6",
+  "prior_campaigns": [
+    {
+      "artifacts": [
+        {
+          "bytes": 288,
+          "path": "campaign.json",
+          "sha256": "e9fc19d0556784bc593dae5fd7d2f111d89045a39264795f74b420273d0ad7f3"
+        },
+        {
+          "bytes": 57344,
+          "path": "campaign.sqlite3",
+          "sha256": "d60edea208ac8cbf348a00d81862df1bfb4b10993c5dd2c0375328c9ac95bf79"
+        },
+        {
+          "bytes": 2005,
+          "path": "e1-t71-preflight.json",
+          "sha256": "1062a954e74af739a79a04d54216853395ab1f102d5ac5ac401351a1742b05c4"
+        },
+        {
+          "bytes": 3122,
+          "path": "e1/e1_001.receipt.json",
+          "sha256": "bbc2db7335f4ab57a2812cba13c1f231d3edbfcf5f8cd5a7da9f44c11021ebe2"
+        },
+        {
+          "bytes": 16295,
+          "path": "e1/e1_001.request.json",
+          "sha256": "b144f2cf20752c94049d1cfcf1af10de36ea0ee9e2818f473e45886e6b785d88"
+        },
+        {
+          "bytes": 53514,
+          "path": "e1/inventory.json",
+          "sha256": "755239cad8adff21a1bf0e4ca934372d1078678e481ec0cfdbaf18af9107f5dd"
+        },
+        {
+          "bytes": 185291,
+          "path": "e1/results.private.json",
+          "sha256": "829b7d42a4be392af3cbee6df6d29fc14ada06104525cf98aa21bfc99bd323a4"
+        }
+      ],
+      "campaign_id": "t6_20260930_v1"
+    },
+    {
+      "artifacts": [
+        {
+          "bytes": 691,
+          "path": "campaign.json",
+          "sha256": "96116f400374529266c6ec28e0c67949a0db5435b058f1cac6449205b2a20347"
+        },
+        {
+          "bytes": 57344,
+          "path": "campaign.sqlite3",
+          "sha256": "b1f58d7d452899b0fa14545813de5e196bd00502ed9b5212cae45107a083b590"
+        },
+        {
+          "bytes": 3936,
+          "path": "e1-t73-preflight.json",
+          "sha256": "41c35731973c3dba65e8ccf3f4aa294eddbfea9e25a59bfad73a51d9915a4392"
+        },
+        {
+          "bytes": 3345,
+          "path": "e1/e1_001.receipt.json",
+          "sha256": "0e370cc4f17a32c3d2c5dda1e59addee47bde7b6ac4beb2e80c0348da1ec983e"
+        },
+        {
+          "bytes": 16263,
+          "path": "e1/e1_001.request.json",
+          "sha256": "a69d5e0bb6d74270259c9551ff3a3cafc04728a839899980c5228388e8ec424b"
+        },
+        {
+          "bytes": 73710,
+          "path": "e1/inventory.json",
+          "sha256": "445d22b6e11f4c39ffc6cf4701eb084a3244b2223a8cc4cb4bd5e76a558f4208"
+        },
+        {
+          "bytes": 185296,
+          "path": "e1/results.private.json",
+          "sha256": "d68392a88bc386a8cc4e044763bff7f23b1395572e109547395b29fe99cada07"
+        },
+        {
+          "bytes": 550,
+          "path": "outcome.aggregate.json",
+          "sha256": "b77e540ae21a9172f73af23cb0331ea1d66602666735eae975b8c997146333e8"
+        }
+      ],
+      "campaign_id": "e1_t73_20261001_v1"
+    }
+  ],
+  "schema": "aria_e1_auto_tool_amendment_v1",
+  "unknown_cost_policy": "retain_and_block_unaccepted",
+  "wire_changes": [
+    {
+      "field": "parallel_tool_calls",
+      "from": false,
+      "to": "omitted"
+    },
+    {
+      "field": "tool_choice",
+      "from": {
+        "function": {
+          "name": "aria_turn_decision"
+        },
+        "type": "function"
+      },
+      "to": "auto"
+    }
+  ]
+}

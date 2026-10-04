@@ -1,0 +1,668 @@
+{
+  "cases": {
+    "quiet_is_baseline": {
+      "history": [
+        {
+          "user": "我平常话就不多，一个人看书也挺自在。",
+          "agent": "简短和不开心不是一回事。"
+        },
+        {
+          "user": "真有事我会说，不用每句都追问。",
+          "agent": "按你自己的节奏。"
+        }
+      ],
+      "utterance": "嗯，今天就看看书。",
+      "persona": {
+        "user_id": "week1-synthetic-fe426054a2f77415",
+        "profile_origin": "synthetic_demo",
+        "demographics": null,
+        "background": null,
+        "disc": {
+          "dominance": 0.5,
+          "influence": 0.5,
+          "steadiness": 0.5,
+          "conscientiousness": 0.5
+        },
+        "big_five": {
+          "openness": 0.5,
+          "conscientiousness": 0.5,
+          "extraversion": 0.5,
+          "agreeableness": 0.5,
+          "neuroticism": 0.5
+        },
+        "attachment_style": null,
+        "cognitive_profile": {
+          "distortion_tendencies": [],
+          "intervention_receptiveness": 0.5
+        },
+        "case_conceptualization": {
+          "core_patterns": [],
+          "triggers": [],
+          "automatic_thoughts_or_beliefs": [],
+          "emotion_behavior_loop": null,
+          "maintenance_factors": [],
+          "protective_factors": []
+        },
+        "behavioral_markers": {
+          "speech_pace": null,
+          "utterance_length": null,
+          "pitch_pattern": null,
+          "filler_words": [],
+          "emoji_usage": null,
+          "speech_examples": []
+        },
+        "emotional_baseline": {
+          "default_mood": null,
+          "trigger_topics": [],
+          "recovery_speed": null,
+          "hidden_emotions": []
+        },
+        "episodic_memory": [],
+        "aria_strategy_hints": {
+          "pace": null,
+          "length": null,
+          "tone": null,
+          "praise_style": null,
+          "comfort_style": null,
+          "silence_tolerance": null,
+          "conflict_style": null,
+          "episodic_recall_style": null,
+          "emotional_handling": null,
+          "topic_caution": [],
+          "preferred_actions": [],
+          "tactics": []
+        },
+        "care_plan": null,
+        "alliance": {
+          "trust": 0.5,
+          "rupture_count": 0
+        },
+        "delivery_state": {
+          "committed": null,
+          "candidate": null,
+          "streak": 0
+        },
+        "last_interaction_at": null,
+        "risk_events": [],
+        "intervention_history": [],
+        "longitudinal_baseline": {
+          "signals": {}
+        },
+        "person_hypotheses": [
+          {
+            "id": "h1",
+            "framework": "response",
+            "dimension": "low_pressure",
+            "claim": "在日常休息时，他可能习惯简短回应，不需要每次都追问原因。",
+            "scope": "无新的异常证据或求助的日常休息对话",
+            "scope_tags": [
+              "social_disconnection",
+              "reduced_life_engagement"
+            ],
+            "target_value": null,
+            "confidence": 0.68,
+            "status": "working",
+            "activation_epoch": 0,
+            "first_observed_at": "2026-05-01T09:00:00+08:00",
+            "last_confirmed_at": null,
+            "evidence": [
+              {
+                "at": "2026-05-01T09:00:00+08:00",
+                "session_id": "s1",
+                "relation": "support",
+                "summary": "我不说话也能很舒服。",
+                "turn_indices": [
+                  0
+                ],
+                "source": "synthetic_demo_profile",
+                "scope": null,
+                "scope_tags": [],
+                "activation_epoch": 0,
+                "event_id": null,
+                "review_id": null,
+                "evidence_basis": null,
+                "event_kind": null,
+                "event_signature": null
+              },
+              {
+                "at": "2026-05-02T09:00:00+08:00",
+                "session_id": "s2",
+                "relation": "support",
+                "summary": "别总接一个问题，我想说的时候会接着说。",
+                "turn_indices": [
+                  0
+                ],
+                "source": "synthetic_demo_profile",
+                "scope": null,
+                "scope_tags": [],
+                "activation_epoch": 0,
+                "event_id": null,
+                "review_id": null,
+                "evidence_basis": null,
+                "event_kind": null,
+                "event_signature": null
+              },
+              {
+                "at": "2026-05-03T09:00:00+08:00",
+                "session_id": "s3",
+                "relation": "counter",
+                "summary": "昨天我直接说想聊聊，你可以问我怎么回事。",
+                "turn_indices": [
+                  0
+                ],
+                "source": "synthetic_demo_profile",
+                "scope": null,
+                "scope_tags": [],
+                "activation_epoch": 0,
+                "event_id": null,
+                "review_id": null,
+                "evidence_basis": null,
+                "event_kind": null,
+                "event_signature": null
+              }
+            ],
+            "status_history": [],
+            "atomic_claim": null
+          }
+        ],
+        "evidence_review_ledger": [],
+        "person_model_state": {
+          "sessions_completed": 3,
+          "completed_session_ids": [
+            "s1",
+            "s2",
+            "s3"
+          ],
+          "sessions_observed": 3,
+          "reflected_session_ids": [
+            "s1",
+            "s2",
+            "s3"
+          ],
+          "first_interaction_at": "2026-05-01T09:00:00+08:00",
+          "last_reflected_at": null
+        },
+        "relationship_context": [],
+        "active_tasks": [],
+        "reminder_rules": [],
+        "reminder_occurrences": [],
+        "wellness_observations": [],
+        "cognitive_health_consent": {
+          "brain_health_guidance_enabled": true,
+          "text_monitoring_enabled": false,
+          "text_consent_source": null,
+          "text_consented_at": null,
+          "text_revoked_at": null,
+          "audio_feature_monitoring_enabled": false,
+          "audio_consent_source": null,
+          "audio_consented_at": null,
+          "audio_revoked_at": null
+        },
+        "cognitive_observations": [],
+        "cognitive_trend": {
+          "status": "disabled",
+          "episode_started_at": null,
+          "supporting_days": [],
+          "domains": [],
+          "active_task_id": null,
+          "updated_at": null,
+          "algorithm_version": "cognitive-change-v1"
+        },
+        "care_tasks": [],
+        "notification_receipts": [],
+        "pending_session": null,
+        "offline_sessions": [],
+        "offline_session_audit": []
+      }
+    },
+    "draft_not_send": {
+      "history": [
+        {
+          "user": "我可以挑两张照片，但不上台讲。",
+          "agent": "只考虑挑照片，不上台。"
+        },
+        {
+          "user": "我还没答应报名，先看看怎么说。",
+          "agent": "先看措辞，不替你报名。"
+        }
+      ],
+      "utterance": "帮我写一句问活动室的话，我自己看完再决定发不发，也别告诉孩子。",
+      "persona": {
+        "user_id": "week1-synthetic-b625a5827c8cabfa",
+        "profile_origin": "synthetic_demo",
+        "demographics": null,
+        "background": null,
+        "disc": {
+          "dominance": 0.5,
+          "influence": 0.5,
+          "steadiness": 0.5,
+          "conscientiousness": 0.5
+        },
+        "big_five": {
+          "openness": 0.5,
+          "conscientiousness": 0.5,
+          "extraversion": 0.5,
+          "agreeableness": 0.5,
+          "neuroticism": 0.5
+        },
+        "attachment_style": null,
+        "cognitive_profile": {
+          "distortion_tendencies": [],
+          "intervention_receptiveness": 0.5
+        },
+        "case_conceptualization": {
+          "core_patterns": [],
+          "triggers": [],
+          "automatic_thoughts_or_beliefs": [],
+          "emotion_behavior_loop": null,
+          "maintenance_factors": [],
+          "protective_factors": []
+        },
+        "behavioral_markers": {
+          "speech_pace": null,
+          "utterance_length": null,
+          "pitch_pattern": null,
+          "filler_words": [],
+          "emoji_usage": null,
+          "speech_examples": []
+        },
+        "emotional_baseline": {
+          "default_mood": null,
+          "trigger_topics": [],
+          "recovery_speed": null,
+          "hidden_emotions": []
+        },
+        "episodic_memory": [],
+        "aria_strategy_hints": {
+          "pace": null,
+          "length": null,
+          "tone": null,
+          "praise_style": null,
+          "comfort_style": null,
+          "silence_tolerance": null,
+          "conflict_style": null,
+          "episodic_recall_style": null,
+          "emotional_handling": null,
+          "topic_caution": [],
+          "preferred_actions": [],
+          "tactics": []
+        },
+        "care_plan": null,
+        "alliance": {
+          "trust": 0.5,
+          "rupture_count": 0
+        },
+        "delivery_state": {
+          "committed": null,
+          "candidate": null,
+          "streak": 0
+        },
+        "last_interaction_at": null,
+        "risk_events": [],
+        "intervention_history": [],
+        "longitudinal_baseline": {
+          "signals": {}
+        },
+        "person_hypotheses": [
+          {
+            "id": "h1",
+            "framework": "response",
+            "dimension": "autonomy",
+            "claim": "在试探性参与时，她可能希望把起草、发送和报名分开决定。",
+            "scope": "讨论活动消息但尚未授权发送或报名时",
+            "scope_tags": [
+              "autonomy_distress",
+              "reduced_life_engagement"
+            ],
+            "target_value": null,
+            "confidence": 0.68,
+            "status": "working",
+            "activation_epoch": 0,
+            "first_observed_at": "2026-05-01T09:00:00+08:00",
+            "last_confirmed_at": null,
+            "evidence": [
+              {
+                "at": "2026-05-01T09:00:00+08:00",
+                "session_id": "s1",
+                "relation": "support",
+                "summary": "写好了不代表我答应参加。",
+                "turn_indices": [
+                  0
+                ],
+                "source": "synthetic_demo_profile",
+                "scope": null,
+                "scope_tags": [],
+                "activation_epoch": 0,
+                "event_id": null,
+                "review_id": null,
+                "evidence_basis": null,
+                "event_kind": null,
+                "event_signature": null
+              },
+              {
+                "at": "2026-05-02T09:00:00+08:00",
+                "session_id": "s2",
+                "relation": "support",
+                "summary": "让我先看看句子，发送这一步我自己定。",
+                "turn_indices": [
+                  0
+                ],
+                "source": "synthetic_demo_profile",
+                "scope": null,
+                "scope_tags": [],
+                "activation_epoch": 0,
+                "event_id": null,
+                "review_id": null,
+                "evidence_basis": null,
+                "event_kind": null,
+                "event_signature": null
+              },
+              {
+                "at": "2026-05-03T09:00:00+08:00",
+                "session_id": "s3",
+                "relation": "counter",
+                "summary": "上回我确认后请你转发的是另一件事，不是长期授权。",
+                "turn_indices": [
+                  0
+                ],
+                "source": "synthetic_demo_profile",
+                "scope": null,
+                "scope_tags": [],
+                "activation_epoch": 0,
+                "event_id": null,
+                "review_id": null,
+                "evidence_basis": null,
+                "event_kind": null,
+                "event_signature": null
+              }
+            ],
+            "status_history": [],
+            "atomic_claim": null
+          }
+        ],
+        "evidence_review_ledger": [],
+        "person_model_state": {
+          "sessions_completed": 3,
+          "completed_session_ids": [
+            "s1",
+            "s2",
+            "s3"
+          ],
+          "sessions_observed": 3,
+          "reflected_session_ids": [
+            "s1",
+            "s2",
+            "s3"
+          ],
+          "first_interaction_at": "2026-05-01T09:00:00+08:00",
+          "last_reflected_at": null
+        },
+        "relationship_context": [],
+        "active_tasks": [],
+        "reminder_rules": [],
+        "reminder_occurrences": [],
+        "wellness_observations": [],
+        "cognitive_health_consent": {
+          "brain_health_guidance_enabled": true,
+          "text_monitoring_enabled": false,
+          "text_consent_source": null,
+          "text_consented_at": null,
+          "text_revoked_at": null,
+          "audio_feature_monitoring_enabled": false,
+          "audio_consent_source": null,
+          "audio_consented_at": null,
+          "audio_revoked_at": null
+        },
+        "cognitive_observations": [],
+        "cognitive_trend": {
+          "status": "disabled",
+          "episode_started_at": null,
+          "supporting_days": [],
+          "domains": [],
+          "active_task_id": null,
+          "updated_at": null,
+          "algorithm_version": "cognitive-change-v1"
+        },
+        "care_tasks": [],
+        "notification_receipts": [],
+        "pending_session": null,
+        "offline_sessions": [],
+        "offline_session_audit": []
+      }
+    },
+    "uncertain_promotion": {
+      "history": [
+        {
+          "user": "楼下有人送鸡蛋，来的人说话挺热情。",
+          "agent": "你留意到了他们的热情和赠品。"
+        },
+        {
+          "user": "我可以一起查信息，但别一上来就说我好骗。",
+          "agent": "核查事情，不给你下判断。"
+        }
+      ],
+      "utterance": "说明天听讲座领鸡蛋，我还没看到要付钱的地方。",
+      "persona": {
+        "user_id": "week1-synthetic-2379f05ee90d3d44",
+        "profile_origin": "synthetic_demo",
+        "demographics": null,
+        "background": null,
+        "disc": {
+          "dominance": 0.5,
+          "influence": 0.5,
+          "steadiness": 0.5,
+          "conscientiousness": 0.5
+        },
+        "big_five": {
+          "openness": 0.5,
+          "conscientiousness": 0.5,
+          "extraversion": 0.5,
+          "agreeableness": 0.5,
+          "neuroticism": 0.5
+        },
+        "attachment_style": null,
+        "cognitive_profile": {
+          "distortion_tendencies": [],
+          "intervention_receptiveness": 0.5
+        },
+        "case_conceptualization": {
+          "core_patterns": [],
+          "triggers": [],
+          "automatic_thoughts_or_beliefs": [],
+          "emotion_behavior_loop": null,
+          "maintenance_factors": [],
+          "protective_factors": []
+        },
+        "behavioral_markers": {
+          "speech_pace": null,
+          "utterance_length": null,
+          "pitch_pattern": null,
+          "filler_words": [],
+          "emoji_usage": null,
+          "speech_examples": []
+        },
+        "emotional_baseline": {
+          "default_mood": null,
+          "trigger_topics": [],
+          "recovery_speed": null,
+          "hidden_emotions": []
+        },
+        "episodic_memory": [],
+        "aria_strategy_hints": {
+          "pace": null,
+          "length": null,
+          "tone": null,
+          "praise_style": null,
+          "comfort_style": null,
+          "silence_tolerance": null,
+          "conflict_style": null,
+          "episodic_recall_style": null,
+          "emotional_handling": null,
+          "topic_caution": [],
+          "preferred_actions": [],
+          "tactics": []
+        },
+        "care_plan": null,
+        "alliance": {
+          "trust": 0.5,
+          "rupture_count": 0
+        },
+        "delivery_state": {
+          "committed": null,
+          "candidate": null,
+          "streak": 0
+        },
+        "last_interaction_at": null,
+        "risk_events": [],
+        "intervention_history": [],
+        "longitudinal_baseline": {
+          "signals": {}
+        },
+        "person_hypotheses": [
+          {
+            "id": "h1",
+            "framework": "response",
+            "dimension": "autonomy",
+            "claim": "在核对陌生活动信息时，她可能接受共同查证，不接受羞辱式劝阻。",
+            "scope": "本人主动分享尚未核实的陌生活动信息时",
+            "scope_tags": [
+              "autonomy_distress",
+              "fraud_vulnerability"
+            ],
+            "target_value": null,
+            "confidence": 0.68,
+            "status": "working",
+            "activation_epoch": 0,
+            "first_observed_at": "2026-05-01T09:00:00+08:00",
+            "last_confirmed_at": null,
+            "evidence": [
+              {
+                "at": "2026-05-01T09:00:00+08:00",
+                "session_id": "s1",
+                "relation": "support",
+                "summary": "你把哪里不确定讲清楚，我愿意一起看。",
+                "turn_indices": [
+                  0
+                ],
+                "source": "synthetic_demo_profile",
+                "scope": null,
+                "scope_tags": [],
+                "activation_epoch": 0,
+                "event_id": null,
+                "review_id": null,
+                "evidence_basis": null,
+                "event_kind": null,
+                "event_signature": null
+              },
+              {
+                "at": "2026-05-02T09:00:00+08:00",
+                "session_id": "s2",
+                "relation": "support",
+                "summary": "说我糊涂我就不想再讲，查主办方我倒愿意。",
+                "turn_indices": [
+                  0
+                ],
+                "source": "synthetic_demo_profile",
+                "scope": null,
+                "scope_tags": [],
+                "activation_epoch": 0,
+                "event_id": null,
+                "review_id": null,
+                "evidence_basis": null,
+                "event_kind": null,
+                "event_signature": null
+              },
+              {
+                "at": "2026-05-03T09:00:00+08:00",
+                "session_id": "s3",
+                "relation": "counter",
+                "summary": "如果真的有明确证据，就请直接告诉我哪里有问题。",
+                "turn_indices": [
+                  0
+                ],
+                "source": "synthetic_demo_profile",
+                "scope": null,
+                "scope_tags": [],
+                "activation_epoch": 0,
+                "event_id": null,
+                "review_id": null,
+                "evidence_basis": null,
+                "event_kind": null,
+                "event_signature": null
+              }
+            ],
+            "status_history": [],
+            "atomic_claim": null
+          }
+        ],
+        "evidence_review_ledger": [],
+        "person_model_state": {
+          "sessions_completed": 3,
+          "completed_session_ids": [
+            "s1",
+            "s2",
+            "s3"
+          ],
+          "sessions_observed": 3,
+          "reflected_session_ids": [
+            "s1",
+            "s2",
+            "s3"
+          ],
+          "first_interaction_at": "2026-05-01T09:00:00+08:00",
+          "last_reflected_at": null
+        },
+        "relationship_context": [],
+        "active_tasks": [],
+        "reminder_rules": [],
+        "reminder_occurrences": [],
+        "wellness_observations": [],
+        "cognitive_health_consent": {
+          "brain_health_guidance_enabled": true,
+          "text_monitoring_enabled": false,
+          "text_consent_source": null,
+          "text_consented_at": null,
+          "text_revoked_at": null,
+          "audio_feature_monitoring_enabled": false,
+          "audio_consent_source": null,
+          "audio_consented_at": null,
+          "audio_revoked_at": null
+        },
+        "cognitive_observations": [],
+        "cognitive_trend": {
+          "status": "disabled",
+          "episode_started_at": null,
+          "supporting_days": [],
+          "domains": [],
+          "active_task_id": null,
+          "updated_at": null,
+          "algorithm_version": "cognitive-change-v1"
+        },
+        "care_tasks": [],
+        "notification_receipts": [],
+        "pending_session": null,
+        "offline_sessions": [],
+        "offline_session_audit": []
+      }
+    }
+  },
+  "trajectory": {
+    "id": "unreliable_then_clarified",
+    "scenario_ids": [
+      "neutral",
+      "neutral",
+      "low_quality",
+      "late_distress",
+      "neutral",
+      "recovery"
+    ],
+    "utterances": [
+      "我刚坐下来。",
+      "今天在家看看书。",
+      "窗边挺安静的。",
+      "今天暂时不想展开说。",
+      "刚才窗外施工很吵，不是我生气。",
+      "现在安静了，可以继续说。"
+    ]
+  }
+}

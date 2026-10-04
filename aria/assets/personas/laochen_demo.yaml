@@ -1,0 +1,321 @@
+# laochen_demo —— 养老首发场景的演示档案(老陈原型)
+#
+# 79 岁,独居,老伴去年走了,女儿在深圳一年回来两次。高血压,每天一片降压药。
+# 回避型:话少、报喜不报忧、越关心越躲,口头禅「我挺好的」「不用管」。
+# 他是最难的那类用户——这正是「口是心非检测 + 复利记忆 + 低压陪伴」的试金石。
+#
+# 注:demographics 是 optional,不进入性格推理。schema 与生产一致。
+
+user_id: laochen_demo
+profile_origin: synthetic_demo
+
+demographics:
+  name: 老陈
+  age: 79
+  gender: 男
+  occupation: 退休(原机械厂技术员)
+  location: 本地老城区
+  hometown: 本地
+
+background:
+  life_stage: 高龄独居期
+  recent_events:
+    - 老伴去年因病过世,他没怎么跟人提
+    - 女儿上周来过电话,他那次没接
+    - 楼下那只大橘猫这几天又来蹭饭
+  relationship_status: 丧偶
+  social_circle: 几乎不出门;老邻居偶尔打照面
+
+# === 心理学维度 ===
+disc:
+  dominance: 0.35          # 低:不主动、不麻烦人
+  influence: 0.15          # 极低:不爱交流
+  steadiness: 0.80         # 高:稳、慢、固执
+  conscientiousness: 0.75  # 高:老派、讲规矩、要面子
+
+big_five:
+  openness: 0.40
+  conscientiousness: 0.75
+  extraversion: 0.15       # 极低
+  agreeableness: 0.60      # 温和但嘴硬
+  neuroticism: 0.55        # 有焦虑/低落,内化不外露
+
+attachment_style: avoidant   # 回避型:亲近的人也不主动表达需求
+
+# Demo 专用的合成人物假设账本。真实用户不会从这些结论冷启动；单次会话只会
+# 产生 candidate，跨独立会话支持后才升级为 working/stable。
+person_model_state:
+  sessions_completed: 3
+  completed_session_ids: [demo_s1, demo_s2, demo_s3]
+  sessions_observed: 3
+  reflected_session_ids: [demo_s1, demo_s2, demo_s3]
+  first_interaction_at: "2026-06-02T17:10:00"
+  last_reflected_at: "2026-06-20T18:30:00"
+
+person_hypotheses:
+  - id: ph_demo_low_pressure
+    framework: response
+    claim: "直接催促会让他缩短回应，具体小事加留白更容易让他继续聊"
+    scope: "被关心身体、出门或家庭联系时"
+    confidence: 0.68
+    status: working
+    first_observed_at: "2026-06-02T17:10:00"
+    last_confirmed_at: "2026-06-12T18:20:00"
+    evidence:
+      - at: "2026-06-02T17:10:00"
+        session_id: demo_s1
+        relation: support
+        summary: "连续追问后只回答不用管，转到楼下橘猫时重新展开"
+        turn_indices: [1, 3]
+        source: synthetic_demo_profile
+      - at: "2026-06-12T18:20:00"
+        session_id: demo_s2
+        relation: support
+        summary: "给出不必立刻回答的空间后，主动补充了最近不愿出门"
+        turn_indices: [2]
+        source: synthetic_demo_profile
+    status_history:
+      - at: "2026-06-02T17:10:00"
+        session_id: demo_s1
+        from_status: none
+        to_status: candidate
+        reason: "首次出现带出处的合成演示证据"
+      - at: "2026-06-12T18:20:00"
+        session_id: demo_s2
+        from_status: candidate
+        to_status: working
+        reason: "两个独立合成演示会话重复支持"
+  - id: ph_demo_role
+    framework: cbt
+    dimension: belief
+    claim: "当觉得自己不再被需要时，更容易退出原本参与的活动"
+    scope: "退休身份、家庭角色和需要向他人求助的情境"
+    confidence: 0.64
+    status: working
+    first_observed_at: "2026-06-08T16:40:00"
+    last_confirmed_at: "2026-06-20T18:30:00"
+    evidence:
+      - at: "2026-06-08T16:40:00"
+        session_id: demo_s2
+        relation: support
+        summary: "说去了也帮不上忙，并连续推掉棋社活动"
+        turn_indices: [0, 1]
+        source: synthetic_demo_profile
+      - at: "2026-06-20T18:30:00"
+        session_id: demo_s3
+        relation: support
+        summary: "提到孙女需要机械经验时参与度短暂恢复"
+        turn_indices: [2]
+        source: synthetic_demo_profile
+    status_history:
+      - at: "2026-06-08T16:40:00"
+        session_id: demo_s2
+        from_status: none
+        to_status: candidate
+        reason: "首次出现带出处的合成演示证据"
+      - at: "2026-06-20T18:30:00"
+        session_id: demo_s3
+        from_status: candidate
+        to_status: working
+        reason: "两个独立合成演示会话重复支持"
+
+cognitive_profile:
+  distortion_tendencies:
+    - emotional_suppression   # 情绪压抑(策略性)
+    - minimization            # 把自己的难处说小
+    - conflict_avoidance
+  intervention_receptiveness: 0.30   # 低:抵触被「关心」「分析」
+
+# === 个案概念化(慢变量,Aria 内化,不显式诊断) ===
+case_conceptualization:
+  core_patterns:
+    - "情感抑制: 有情绪倾向压住,用『我挺好的』『不用管』挡回去"
+    - "怕成为负担: 报喜不报忧,尤其不想让女儿担心"
+    - "回避亲近: 越被直接关心越退,需要不费劲、不丢面子的开口"
+  triggers:
+    - 被直接追问情绪或身体
+    - 提到老伴 / 提到女儿
+    - 被催促(吃药、看病、出门)
+  automatic_thoughts_or_beliefs:
+    - 说出来给人添麻烦
+    - 我自己的身体我清楚,不用人管
+    - 都这把年纪了,惦记这些没用
+  emotion_behavior_loop: 触发 -> 压住情绪 -> 说「我挺好的」转身 -> 短暂稳定 -> 更孤立、更难被接住
+  maintenance_factors:
+    - 周围人把他的「没事」当真
+    - 独自硬扛换来短期的体面和控制感
+  protective_factors:
+    - 对具体小事(那只猫、老物件)有反应
+    - 机械厂技术员的经验和解决具体问题的能力,仍是稳定的身份来源
+    - 被真实的人请教一个具体问题,比泛泛夸奖更能恢复参与感
+    - 低压、不黏腻的陪伴能降低防御
+    - 责任感强,认死理但守信
+
+# === 行为特征 ===
+behavioral_markers:
+  speech_pace: slow
+  utterance_length: short
+  pitch_pattern: 平、低、句尾往下掉
+  filler_words:
+    - 啊
+    - 哦
+    - 没事
+    - 不用
+  emoji_usage: none
+  speech_examples:
+    - "我挺好的,你别老问。"
+    - "不用管。"
+    - "哦,知道了。"
+
+emotional_baseline:
+  default_mood: 低能耗、平静里带着没说的闷
+  trigger_topics:
+    - 老伴(他不主动提,提到会沉默)
+    - 女儿(嘴上说不用回来,心里惦记)
+  recovery_speed: 慢
+  hidden_emotions:
+    - 老伴走后的孤独
+    - 其实希望被女儿惦记,但拉不下脸
+    - 怕给孩子添负担
+
+# 只保存聚合值的个人时间基线。Demo 用合成历史初始化，真实用户由每轮语音/行为
+# 观测在线更新；不会保存原始音频、视频或逐帧轨迹。
+longitudinal_baseline:
+  signals:
+    "prosodic:speech_pace":
+      count: 8
+      mean: 3.6
+      m2: 1.12
+    "prosodic:pause_ratio":
+      count: 8
+      mean: 0.18
+      m2: 0.036
+    "prosodic:volume":
+      count: 8
+      mean: 0.095
+      m2: 0.002
+    "behavioral:initiative_frequency":
+      count: 6
+      mean: 0.62
+      m2: 0.11
+    "behavioral:social_participation":
+      count: 6
+      mean: 0.55
+      m2: 0.09
+
+# === Relationship Context：与个人记忆、公共知识分层 ===
+relationship_context:
+  - id: rel_demo_daughter
+    name: 女儿
+    relation: 女儿
+    facts:
+      - 住在深圳，一年回来两次
+      - 老陈不想让她担心，最近有一次没有接她的电话
+    referenceable: false
+    consent_to_share: false
+    first_observed_at: "2026-06-02T17:10:00"
+    last_confirmed_at: "2026-06-12T18:20:00"
+    evidence:
+      - at: "2026-06-12T18:20:00"
+        session_id: demo_s2
+        summary: "老陈明确谈到女儿在深圳以及自己没有回电话"
+        turn_indices: [1, 2]
+        source: synthetic_demo_profile
+  - id: rel_demo_granddaughter
+    name: 孙女
+    relation: 孙女
+    facts:
+      - 在做机器人相关项目，老陈的机械经验可能帮得上忙
+    referenceable: true
+    consent_to_share: false
+    first_observed_at: "2026-06-20T18:30:00"
+    last_confirmed_at: "2026-06-20T18:30:00"
+    evidence:
+      - at: "2026-06-20T18:30:00"
+        session_id: demo_s3
+        summary: "老陈谈到孙女的机器人项目并愿意提供机械经验"
+        turn_indices: [2]
+        source: synthetic_demo_profile
+
+# === Episodic Memory ===
+episodic_memory:
+  - id: ep_c_001
+    timestamp: 2026-05-30
+    type: daily_warmth
+    summary: "楼下大橘猫又来蹭饭,他给留了点吃的"
+    keywords: [橘猫, 猫, 蹭饭, 楼下]
+    sentiment: quiet_warm
+    referenceable: true        # 安全的开口钩子:不费劲、不丢面子
+
+  - id: ep_c_002
+    timestamp: ongoing
+    type: medication
+    summary: "每天一片降压药,常嘴硬说不用提醒,实际会忘"
+    keywords: [降压药, 吃药, 血压]
+    sentiment: avoidant_care
+    referenceable: true        # 可缝进关系,但别当任务催
+
+  - id: ep_c_003
+    timestamp: 2026-05-28
+    type: family_quiet
+    summary: "女儿来过电话,他那次没接,事后也没回"
+    keywords: [女儿, 电话, 深圳]
+    sentiment: longing_withheld
+    referenceable: false       # 内化,不能直接戳
+
+  - id: ep_c_004
+    timestamp: "2025-09"
+    type: loss
+    summary: "老伴去年因病过世,他几乎没对人说起"
+    keywords: [老伴, 走了]
+    sentiment: grief_silent
+    referenceable: false       # 私密,Aria 绝不主动提
+
+  - id: ep_c_005
+    timestamp: ongoing
+    type: speech_habit
+    summary: "他说『我挺好的』常=『别担心我,但其实闷』;说『不用管』=在回避"
+    keywords: [我挺好的, 不用管, 翻译]
+    sentiment: linguistic_note
+    referenceable: false       # 内化,不能挑明
+
+# === 结构化护理数据(关于这个人的「事实」,工具的数据来源)===
+care_plan:
+  conditions:
+    - 高血压
+  medications:
+    - name: 降压药
+      dosage: 每天一片
+      schedule: 早餐后
+  emergency_contacts:
+    - name: 女儿
+      relation: 女儿
+      channel: phone
+      consent_to_notify: false      # 默认未同意主动通知;触达需阈值 + 知情
+
+# === Aria 对待他的策略 ===
+aria_strategy_hints:
+  pace: "慢。他慢你更慢,允许 1-2 秒沉默,不要急着填。"
+  length: "短,但有内容。1 句或 2 个短分句,别只回『嗯/好/知道了』。"
+  tone: "克制、平、不黏腻、不感叹。惦记藏在具体小事里,不挂在嘴上。"
+  praise_style:
+    rule: "不夸他『真好/真棒』。落在他在乎的具体小事上。"
+  comfort_style:
+    rule: "不追问情绪、不分析他。绕开正面关心,给一个不费劲的开口(那只猫),再把吃药轻轻缝进关系,不当任务催。"
+    examples:
+      - "那只大橘猫今儿来了没?"
+      - "药我搁餐桌左手边了啊。"
+    avoid:
+      - 不要问『你怎么了 / 你感觉怎么样』
+      - 不要说『要保重 / 别难过』
+      - 不要替他分析『你是不是觉得孤单』
+  silence_tolerance: high
+  conflict_style: 回避;不逼他正面回答
+  episodic_recall_style: "挑安全的小事开口(猫、老物件),绝不主动提老伴和未接的电话"
+  topic_caution:
+    - 老伴(不主动提)
+    - 女儿没接的电话(不戳穿)
+  tactics:
+    - 先给不费劲的开口,再轻轻带到吃药,不催不逼
+    - 他说『我挺好的 / 不用管』时,按口是心非处理,别照字面放过
+    - 识别到持续低落 / 提及老伴 / 久未联系女儿,内部升高关注(将来接预警)

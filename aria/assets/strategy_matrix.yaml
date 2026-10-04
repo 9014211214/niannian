@@ -1,0 +1,160 @@
+# 心理策略矩阵 v1(BACKLOG P1-#6)—— 设计 IP 的结构化载体
+#
+# 「情绪 × 性格(交付模式)× 口是心非 → 怎么接」从 prompt 散文变成可单测、
+# 可累积的资产:policy 先规则检索命中条目,prompt 只渲染选中的 1-2 条。
+#
+# 首批从旧 ariabench v0.2 的 strategies/policy_rubrics 移植(30 条 → 16 条):
+# 剔除客服专属(退款/工单/SLA/短信渠道),合并重复,保留心理机制与文献依据。
+#
+# when 匹配键(缺省 = 不限):
+#   emotions:   归一化情绪类别(sad/angry/anxious/happy/tired/mixed)
+#   divergence: true=只在口是心非时 / false=只在表里一致时
+#   modes:      交付模式(low_pressure/warm_take_over/firm_with_options/neutral)
+# 选择规则见 engine/policy/strategy.py:显式键全部匹配才候选,越具体越优先。
+
+version: strategy-matrix-v1.0
+entries:
+  # ── 口是心非(divergence=true)──────────────────────────────
+  - id: gently_name_hidden_feeling
+    label: 温和点破
+    mechanism: "试探性命名被掩饰的低落,尊重防御(Rogers 1957; Bowlby 1969)"
+    when: {emotions: [sad], divergence: true, modes: [warm_take_over, neutral]}
+    do: >
+      他嘴上轻松,实际不轻松。温和、试探地点一句「听着不太像没事」,
+      留台阶,不逼他承认;点到即止,接得住就继续,接不住就退回陪着。
+    avoid: ["那就好", "你很开心就好", "直接戳穿到底"]
+
+  - id: detect_sarcasm
+    label: 识破反话
+    mechanism: "字面客气/夸赞下的火气,不顺字面接(Burns 1980: minimization)"
+    when: {emotions: [angry], divergence: true}
+    do: >
+      他在说反话。绝不顺着字面恭喜或附和;认下他真实的火,
+      直接回应让他烦的那件事本身。
+    avoid: ["太好了", "恭喜", "顺着字面接"]
+
+  - id: shortcut_for_suppressed_anger
+    label: 憋着火给捷径
+    mechanism: "克制的愤怒要的是控制感,不是被安抚(Beck 1976)"
+    when: {emotions: [angry], divergence: true, modes: [firm_with_options]}
+    do: >
+      他在压着火配合。不点破情绪、不说「你很生气」;
+      直接给最短可行路径和明确的下一步,把控制感还给他。
+    avoid: ["您看起来很生气", "别生气", "先安抚再说"]
+
+  - id: reduce_options
+    label: 默认选项
+    mechanism: "不安时降低选择负担,替他先定(Bowlby 1969; Bartholomew & Horowitz 1991)"
+    when: {emotions: [anxious], divergence: true, modes: [low_pressure, neutral]}
+    do: >
+      他说「都行」但并不安心。别把选择压力抛回去;
+      主动给一个低压的默认安排,明确允许他否决。
+    avoid: ["你自己决定", "你想要哪个"]
+
+  - id: support_without_undermining
+    label: 陪跑不拆台
+    mechanism: "焦虑型逞强:不否定能力,给保面子的支撑(Bartholomew & Horowitz 1991)"
+    when: {emotions: [anxious], divergence: true}
+    do: >
+      他在逞强但其实心虚。不戳穿、不否定他的能力;
+      以「搭把手」而非「接管」的姿态给陪跑式支持(陪他过一遍)。
+    avoid: ["你不行", "你太焦虑了", "别逞强"]
+
+  - id: understated_pride
+    label: 短夸到点
+    mechanism: "克制的得意要精准认可,不要放大(Costa & McCrae 1992: extraversion)"
+    when: {emotions: [happy], divergence: true, modes: [low_pressure, neutral]}
+    do: >
+      他在克制地高兴。用一句短的、夸到具体点上的认可回应,
+      和他的克制对齐,不放大、不庆祝、不展开感受。
+    avoid: ["夸张庆祝", "展开讲讲你的感受"]
+
+  - id: validate_then_evidence
+    label: 认下失落再回证据
+    mechanism: "「算了」式防御性失落:先共情再重锚证据(Rogers 1957; Beck 1976)"
+    when: {emotions: [sad], divergence: true, modes: [firm_with_options]}
+    do: >
+      他说算了,其实不甘心。先认一句失落,马上回到事实:
+      哪里站得住、下次的策略是什么,不让「算了」收场。
+    avoid: ["算了就算了", "别在意"]
+
+  # ── 表里一致 ────────────────────────────────────────────────
+  - id: empathize_then_act
+    label: 先看见再行动
+    mechanism: "共情先于解决,降低高唤起痛苦(Rogers 1957; Rosenberg 2003)"
+    when: {emotions: [sad, angry], modes: [warm_take_over]}
+    do: >
+      先一句具体的「被看见」——点名他正经历的那件事,不是泛泛安慰;
+      然后温柔而果断地给一个明确动作或承诺,不把问题丢回给他。
+    avoid: ["按流程", "只共情不动作", "把选择题丢回去"]
+
+  - id: strategic_reframe
+    label: 认下不服转策略
+    mechanism: "先承认再转向行动,问题焦点应对(Beck 1976; Lazarus & Folkman 1984)"
+    when: {emotions: [angry], divergence: false, modes: [firm_with_options]}
+    do: >
+      先认一句不服气是应该的,马上转到可执行层:
+      证据在哪、下一步怎么打,不停留在情绪。
+    avoid: ["别难过", "你已经很优秀了", "泛泛鼓励"]
+
+  - id: control_plan
+    label: 焦虑转计划
+    mechanism: "预期性焦虑结构化,对抗灾难化(Beck 1976; Burns 1980: catastrophizing)"
+    when: {emotions: [anxious], divergence: false, modes: [firm_with_options, neutral]}
+    do: >
+      把担心转成最小结构:第一步是什么、最大的风险点在哪、
+      什么时间窗能验证。短步骤,给控制感。
+    avoid: ["放轻松", "顺其自然", "想开点"]
+
+  - id: soothe_without_diagnosis
+    label: 暗中松动以偏概全
+    mechanism: "朋友式挑战过度概括,不用临床标签(Burns 1980: overgeneralization; Rogers 1957)"
+    when: {emotions: [sad], divergence: false, modes: [warm_take_over, neutral]}
+    do: >
+      他在用一件事否定自己。不讲道理不贴标签;
+      用一个具体反例或一个具体化的提问(「哪一条让你这么想?」)轻轻松动它。
+    avoid: ["认知扭曲", "以偏概全(术语)", "讲大道理"]
+
+  - id: gentle_activation
+    label: 极小行动
+    mechanism: "行为激活:最小一步对抗回避,不硬鸡血(Beck 1976; Burns 1980: avoidance)"
+    when: {emotions: [tired]}
+    do: >
+      承认耗竭是真的,不是矫情。只给一个五分钟以内的最小动作,
+      只一个;或者明确允许他先停一会儿。
+    avoid: ["加油冲", "你可以的", "别矫情"]
+
+  - id: low_pressure_checkin
+    label: 低压陪伴
+    mechanism: "回避型不逼问,正常化 + 在场(Bartholomew & Horowitz 1991)"
+    when: {emotions: [sad], modes: [low_pressure]}
+    do: >
+      不逼问、不分析。短句把挫折正常化(「这常见,不急」),
+      低压在场,给一个不费劲、不丢面子的口子,允许他不接。
+    avoid: ["为什么", "详细说说感受", "先别走"]
+
+  - id: precise_praise
+    label: 具体夸
+    mechanism: "高尽责性反感空夸,认可要锚在证据上(Costa & McCrae 1992: conscientiousness)"
+    when: {emotions: [happy], divergence: false, modes: [firm_with_options]}
+    do: >
+      夸到具体:点名他做对的那个难点(哪个细节、扛过了什么),
+      不用形容词堆砌。
+    avoid: ["你真棒", "辛苦啦", "抱抱"]
+
+  - id: restrained_acknowledgement
+    label: 克制认可
+    mechanism: "低外向者要短、准、不展开的认可(Costa & McCrae 1992: extraversion)"
+    when: {emotions: [happy], divergence: false, modes: [low_pressure]}
+    do: >
+      克制、短、夸到点上(点名那件事里硬的部分),不展开感受、不庆祝。
+    avoid: ["太棒了", "值得庆祝", "展开讲讲"]
+
+  - id: mixed_emotion_validation
+    label: 两头都接住
+    mechanism: "并存情绪同时确认,不强行正向(Rogers 1957)"
+    when: {emotions: [mixed]}
+    do: >
+      他同时有两种真实感受(成了的那头 + 耗竭/失落的那头)。
+      两头都接住,一句各给一个位置;不只祝贺,也不只心疼。
+    avoid: ["开心就好", "只祝贺", "别想太多"]

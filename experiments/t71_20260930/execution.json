@@ -1,0 +1,61 @@
+{
+  "authorized_budget_usd": {
+    "e1": "0.5",
+    "judge": "0.5",
+    "pause_total": "2",
+    "total": "5"
+  },
+  "campaign_id": "t6_20260930_v1",
+  "created_at_utc": "2026-09-30T14:09:15.084862+00:00",
+  "files": [
+    {
+      "bytes": 4483,
+      "path": "docs/E1_EXECUTION_T71.md",
+      "sha256": "ce2ac9171798c7f9c4cb40f1cc43474590e040766abc667c6da05bb2cfb12c0e"
+    },
+    {
+      "bytes": 2141,
+      "path": "experiments/t71_20260930/amendment.json",
+      "sha256": "6b1a0e9e9f6eb7640f42175a4cf59e60fce5137b4d37075d85bfbfd326ed81ac"
+    },
+    {
+      "bytes": 6049,
+      "path": "experiments/t71_20260930/validation.t6.md",
+      "sha256": "aadf7d345d8b33076d9d9f4f651e0861c5e0d2bad22cdc504aa49a7cfcb81cbb"
+    },
+    {
+      "bytes": 15567,
+      "path": "scripts/run_e1_t71.py",
+      "sha256": "f6ba260f794aa634eaf382ef9ba4b8a33e54a91394cabcc6dcc3a72239c21876"
+    },
+    {
+      "bytes": 9220,
+      "path": "scripts/t71_policy.py",
+      "sha256": "3bd6edbc9e4a8baf429421d5da881ab45160846ba17ac638e56d7a221ae0c375"
+    },
+    {
+      "bytes": 14537,
+      "path": "tests/test_e1_t71.py",
+      "sha256": "df3b25063d7f13d78f75878e664464dd8b39a3e3961f4cd73350d3f6cdb3ed56"
+    },
+    {
+      "bytes": 14777,
+      "path": "tests/test_t71_policy.py",
+      "sha256": "e6288e37843b60a5a29e19e15506add286b032c7aa8bcddb686ec9cce265a38f"
+    }
+  ],
+  "id": "t71_20260930_v1",
+  "inherits": {
+    "t6_seal": "f020b5079bdd1c6ccaf68409af0728e99cb305d524ff2f1b16b69cc41e3a7212",
+    "t7_seal": "e49db651619b6ccb23a87efae1c453f28ad5eef2f6d774160ed7ce9e1d741538"
+  },
+  "limitations": [
+    "input_bound_is_a_planning_assumption_not_provider_guarantee",
+    "judge_budget_needs_entire_actual_inventory",
+    "human_calibration_not_completed"
+  ],
+  "model_requests_before_seal": 0,
+  "readiness": "e1_policy_ready_live_metadata_and_credential_required",
+  "schema": "aria_t71_execution_v1",
+  "seal_sha256": "b073aff9657e8889a8e940c7b57e8a5dd247db925fe2e6d02af87dea38d5378d"
+}

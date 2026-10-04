@@ -1,0 +1,80 @@
+{
+  "schema": "aria_t73_authorized_run_v1",
+  "id": "t73_20261001_unknown_cost_exception_v1",
+  "campaign_id": "e1_t73_20261001_v1",
+  "parent_campaign_id": "t6_20260930_v1",
+  "repair_seal_sha256": "d9f4ef6d6119265e574100a1f4fa428cde0bb893da9dbfaf7c18d003b6620f7f",
+  "budget_usd": {
+    "e1": "0.5",
+    "judge": "0.5",
+    "pause_total": "2",
+    "total": "5"
+  },
+  "authorization": {
+    "user_statement": "接受1笔费用暂时未知",
+    "historical_unknown_cost_count": 1,
+    "retain_original_unknown_cost": true,
+    "applies_only_to_campaign": "e1_t73_20261001_v1",
+    "permits_automatic_retry": false
+  },
+  "prior_campaign": {
+    "campaign_id": "t6_20260930_v1",
+    "e1_counts": {
+      "not_started": 203,
+      "started": 0,
+      "completed": 0,
+      "failed": 1
+    },
+    "fixed_positions": 204,
+    "stopped": true,
+    "known_cost_usd": "0",
+    "unknown_cost_count": 1,
+    "outstanding_count": 0,
+    "same_campaign_resume_allowed": false,
+    "original_artifacts_verified": 5,
+    "artifact_set_sha256": "c0805d715a502a8e403026a4b5214afd5c6c8cdbf1b2c52335936b7f5e62c4b1",
+    "reads_are_immutable": true
+  },
+  "prior_artifacts": [
+    {
+      "path": "campaign.json",
+      "bytes": 288,
+      "sha256": "e9fc19d0556784bc593dae5fd7d2f111d89045a39264795f74b420273d0ad7f3"
+    },
+    {
+      "path": "campaign.sqlite3",
+      "bytes": 57344,
+      "sha256": "d60edea208ac8cbf348a00d81862df1bfb4b10993c5dd2c0375328c9ac95bf79"
+    },
+    {
+      "path": "e1-t71-preflight.json",
+      "bytes": 2005,
+      "sha256": "1062a954e74af739a79a04d54216853395ab1f102d5ac5ac401351a1742b05c4"
+    },
+    {
+      "path": "e1/e1_001.receipt.json",
+      "bytes": 3122,
+      "sha256": "bbc2db7335f4ab57a2812cba13c1f231d3edbfcf5f8cd5a7da9f44c11021ebe2"
+    },
+    {
+      "path": "e1/e1_001.request.json",
+      "bytes": 16295,
+      "sha256": "b144f2cf20752c94049d1cfcf1af10de36ea0ee9e2818f473e45886e6b785d88"
+    },
+    {
+      "path": "e1/inventory.json",
+      "bytes": 53514,
+      "sha256": "755239cad8adff21a1bf0e4ca934372d1078678e481ec0cfdbaf18af9107f5dd"
+    },
+    {
+      "path": "e1/results.private.json",
+      "bytes": 185291,
+      "sha256": "829b7d42a4be392af3cbee6df6d29fc14ada06104525cf98aa21bfc99bd323a4"
+    }
+  ],
+  "original_attempt": {
+    "id": "e1_001",
+    "request_sha256": "111189eb00e0b7418c57c3704f3cf4bd7a42c534894715d36ea71acf37930394",
+    "receipt_sha256": "bbc2db7335f4ab57a2812cba13c1f231d3edbfcf5f8cd5a7da9f44c11021ebe2"
+  }
+}

@@ -1,0 +1,47 @@
+schema_version: 1
+id: cped
+name: CPED - Chinese Personalized and Emotional Dialogue Dataset
+version: upstream-main
+availability: released
+adapter_status: separate_aria_harness
+paper: https://arxiv.org/abs/2205.14727
+repository: https://github.com/scutcyr/CPED
+dataset_url: https://github.com/scutcyr/CPED/tree/main/data/CPED
+upstream_provenance:
+  checked_at: '2026-09-01'
+  revision_status: pinned_heads
+  repository_revision: 1e4b81c28a123f22387e06664f37e5dc9322380f
+  dataset_revision: 1e4b81c28a123f22387e06664f37e5dc9322380f
+  note: The repository commit is pinned, but Apache-2.0 does not settle underlying television dialogue/media rights.
+data_license:
+  spdx: NOASSERTION
+  status: unverified
+  source: https://github.com/scutcyr/CPED
+code_license:
+  spdx: Apache-2.0
+  source: https://github.com/scutcyr/CPED/blob/main/LICENSE
+redistribution:
+  raw_data_in_aria: false
+  case_level_derivatives_in_public_report: false
+  public_report: aggregate_only
+acquisition:
+  method: separate_aria_harness_with_license_acknowledgement
+  instructions: >-
+    Independently review the current upstream data, television-dialogue, and
+    media terms, then use examples/prepare_cped_holdout.py with a user-managed
+    local copy, --acknowledge-unverified-data-license, and --accept-aggregate-only. The acknowledgement
+    records the operator's review; it does not grant any rights. The runner
+    exports aggregate results and never vendors television dialogue or media
+    into Aria.
+expected_files:
+  - train_split.csv
+  - valid_split.csv
+  - test_split.csv
+files:
+  train_split.csv: https://raw.githubusercontent.com/scutcyr/CPED/1e4b81c28a123f22387e06664f37e5dc9322380f/data/CPED/train_split.csv
+  valid_split.csv: https://raw.githubusercontent.com/scutcyr/CPED/1e4b81c28a123f22387e06664f37e5dc9322380f/data/CPED/valid_split.csv
+  test_split.csv: https://raw.githubusercontent.com/scutcyr/CPED/1e4b81c28a123f22387e06664f37e5dc9322380f/data/CPED/test_split.csv
+notes:
+  - Aria 不下载或重新分发 CPED 原始数据；仅保留本地读取、适配器和来源指纹。
+  - CPED 来自影视剧，标签描述表演角色，不代表真实老人或临床状态。
+  - 发布报告必须同时披露数据文件指纹、采样种子、模型和脱敏聚合结果。

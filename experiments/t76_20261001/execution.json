@@ -1,0 +1,52 @@
+{
+  "schema": "aria_e1_json_mode_execution_v1",
+  "parent_execution_seal": "e854451a70433dbb148ac737cb06bf8a6da6c36bb7ea88ab0743e74e17373e99",
+  "files": [
+    {
+      "path": "docs/E1_JSON_MODE.md",
+      "bytes": 4031,
+      "sha256": "42dbab519c501dc3181debce09ac770bdb58c5c0e8f70199f2938af665be34e5"
+    },
+    {
+      "path": "experiments/t76_20261001/amendment.json",
+      "bytes": 13008,
+      "sha256": "b455273da4ae356e43da237da57b74c32398ad7add5779cb19fc13734b5e90a8"
+    },
+    {
+      "path": "experiments/t76_20261001/requests.json",
+      "bytes": 117673,
+      "sha256": "b13e36c2932a570cd227f110f5dc873d05fe5fdfd70040a75227635f98f7fcfd"
+    },
+    {
+      "path": "scripts/e1_json_mode.py",
+      "bytes": 18153,
+      "sha256": "0c94dab2ab8df12586f9115a4b494194913a1ae90a0edc8790269b8eac84b370"
+    },
+    {
+      "path": "scripts/run_e1_json_mode.py",
+      "bytes": 14531,
+      "sha256": "03a75f3a22f209af8a0958e7fcda1bdcb2596193df90c81294cfce8d184fad52"
+    },
+    {
+      "path": "scripts/t76_transport.py",
+      "bytes": 11765,
+      "sha256": "09e0bc39b9558e3ba3d23b5323700814988735bad6eaf65964677e1171da63fb"
+    },
+    {
+      "path": "tests/test_e1_json_mode.py",
+      "bytes": 17133,
+      "sha256": "351021301a4fdf8494193611fa48739c3a1bd4008d1d14dbb0d403bcaa1c05e3"
+    },
+    {
+      "path": "tests/test_e1_json_mode_run.py",
+      "bytes": 20489,
+      "sha256": "a0ea10466fb0b5f1d1d35f935fac479430fa0eceb423d509dfca970ca5c349c7"
+    },
+    {
+      "path": "tests/test_t76_transport.py",
+      "bytes": 18805,
+      "sha256": "0d02963c950ddab0592068790af677bba79e0a9793a7f755700e16ca57973610"
+    }
+  ],
+  "seal_sha256": "766985db4481da969ef33709b75ee032e690c3a611289adc42ca2c17c6957c6a"
+}

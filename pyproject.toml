@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aria-eldercare-agent"
+version = "0.1.0"
+description = "Aria — elder companionship with grounded memory and local care workflows."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE", "LICENSES/*.txt", "THIRD_PARTY_NOTICES.md"]
+authors = [{ name = "梁世娟" }]
+keywords = ["companion", "emotion", "memory", "psychology", "agent", "elder-care"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "pydantic>=2",
+    "pyyaml>=6",
+]
+
+[project.scripts]
+aria-web = "aria.cli:web_main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.6"]
+secure = ["cryptography>=42"]
+
+# Explicit model clients use stdlib urllib; no media services are bundled.
+
+[tool.setuptools.packages.find]
+include = ["aria*"]
+
+[tool.setuptools.package-data]
+aria = [
+    "assets/personas/*.yaml",
+    "assets/*.yaml",
+    "assets/voice/*.html",
+    "assets/voice/*.md",
+    "bench/cases/*.yaml",
+    "bench/datasets/*.yaml",
+    "scenes/companion_elder/*.yaml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]

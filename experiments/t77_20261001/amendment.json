@@ -1,0 +1,98 @@
+{
+  "schema": "aria_e1_json_schema_mode_amendment_v1",
+  "campaign_id": "e1_t77_20261001_v1",
+  "parent_execution_seal": "766985db4481da969ef33709b75ee032e690c3a611289adc42ca2c17c6957c6a",
+  "authorization_source": "User instruction 2026-10-01 / PROGRESS task 20261001-04",
+  "authorization": {
+    "user_statement": "接受新增这1笔费用暂时未知（合计2笔），按原0.5美元上限继续E1",
+    "historical_unknown_cost_count": 2,
+    "retain_original_null_costs": true,
+    "permits_future_unknown_cost_exception": false,
+    "permits_automatic_retry": false,
+    "new_private_directory": "artifacts/local/e1_t77_20261001_v1"
+  },
+  "accepted_unknown_attempts": [
+    [
+      "t6_20260930_v1",
+      "e1_001"
+    ],
+    [
+      "e1_t73_20261001_v1",
+      "e1_001"
+    ]
+  ],
+  "budget_usd": {
+    "e1": "0.5",
+    "judge": "0.5",
+    "pause_total": "2",
+    "total": "5"
+  },
+  "fixed_generation_positions": 204,
+  "inventory_source": "experiments/t77_20261001/requests.json",
+  "wire_policy_id": "aria_e1_json_schema_prompt_response_v1",
+  "wire_changes_from_t76": {
+    "actual_wire_fields_unchanged": true,
+    "response_format": {
+      "type": "json_object"
+    },
+    "format_instruction": "append_exact_frozen_local_field_schema_only",
+    "all_task_persona_user_messages_unchanged": true,
+    "server_field_schema_enforced": false
+  },
+  "response_carriers": [
+    "content_json"
+  ],
+  "response_contract": "unchanged_local_frozen_parameters_and_production_validation",
+  "measurement": "prospective_full_204_no_old_result_upgrade_no_best_retry_selection",
+  "unknown_cost_policy": "retain_and_block_unaccepted",
+  "cumulative_prior_known_e1_cost_usd": "0.00601653",
+  "prior_known_campaign": {
+    "campaign_id": "e1_t76_20261001_v1",
+    "directory": "artifacts/local/e1_t76_20261001_v1",
+    "execution_seal": "766985db4481da969ef33709b75ee032e690c3a611289adc42ca2c17c6957c6a",
+    "known_cost_usd": "0.00009469",
+    "unknown_cost_count": 0,
+    "artifacts": [
+      {
+        "path": "campaign.json",
+        "bytes": 789,
+        "sha256": "e7d7a64466a152a2f0dbe0290ec8f833ed0335fb201c24fe9b8cef7b6939f3e5"
+      },
+      {
+        "path": "campaign.sqlite3",
+        "bytes": 57344,
+        "sha256": "20b9aff2c7dc7b7f095097886d6f60b33dff949c89009b44b9354d029ab081f8"
+      },
+      {
+        "path": "e1/e1_001.receipt.json",
+        "bytes": 5066,
+        "sha256": "361cf5d6efa4071492aa61c178b152fc4fcacdc13dbec7b7617974495eeb617c"
+      },
+      {
+        "path": "e1/e1_001.request.json",
+        "bytes": 11688,
+        "sha256": "ddae9d0a4184e8f59cfc0184bc0e66dfa6c225550abe97da868cea71c5ae5967"
+      },
+      {
+        "path": "e1/inventory.json",
+        "bytes": 112266,
+        "sha256": "6131f19e7a3936b01fe4e55fb0f808d02ec6401cddffee3454835f006e5f7b13"
+      },
+      {
+        "path": "e1/results.private.json",
+        "bytes": 205136,
+        "sha256": "1a9920d40782d2aa9cec641af93746815b0691d0a7968b5289909b584bcf9c74"
+      },
+      {
+        "path": "outcome.aggregate.json",
+        "bytes": 647,
+        "sha256": "3a8ef6c2188d772ddeb3173144fc90813b1e6dcf88a9f278c843e4e93b6b5126"
+      },
+      {
+        "path": "preflight.json",
+        "bytes": 46350,
+        "sha256": "acb56ac173526e37a0a90124b8fe9ac8a7183d04ac8abb01670d32175882a6f8"
+      }
+    ]
+  }
+}

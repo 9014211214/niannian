@@ -1,0 +1,14 @@
+[
+  {
+    "label": "neutral",
+    "sha256": "7aa31bfc8928b8910727ccaf0c3f9df96de4dd95af69543da4e1db00baae1fd7"
+  },
+  {
+    "label": "unknown",
+    "sha256": "7aa31bfc8928b8910727ccaf0c3f9df96de4dd95af69543da4e1db00baae1fd7"
+  },
+  {
+    "label": "happy",
+    "sha256": "5414755d79953f72352a20a18384b2c8a1d3407dda7ad02bf7dfeda320e55616"
+  }
+]

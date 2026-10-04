@@ -1,0 +1,22 @@
+{
+  "schema": "aria_t74_exact_continuation_v1",
+  "compatibility_seal_sha256": "24bc1b9373b8ee80e4dbf61a43988b258dd035c488d6bf4d365ef09a66e03192",
+  "files": [
+    {
+      "path": "experiments/t74_20261001/authorized_run.json",
+      "bytes": 4196,
+      "sha256": "5bf40e509d0ea4030a22e16e257c00ab450a35506f2dcaeb26db3abef631585e"
+    },
+    {
+      "path": "scripts/run_e1_authorized.py",
+      "bytes": 4324,
+      "sha256": "4dd2e0c29a316e8f5ca81b26be06381c56c5e635d0ae02906b7acb18f8356c93"
+    },
+    {
+      "path": "tests/test_e1_authorized.py",
+      "bytes": 15865,
+      "sha256": "cc4b8d704ddab6b3441b0403fff5079bb2291d268a108b14d98bccb35a0a4f12"
+    }
+  ],
+  "seal_sha256": "490ac7fc64b800024fe4d4d12891c239754cb2d8049e7106c0ff1c777c308351"
+}

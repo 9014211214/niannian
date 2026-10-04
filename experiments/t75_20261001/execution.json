@@ -1,0 +1,37 @@
+{
+  "files": [
+    {
+      "bytes": 3386,
+      "path": "docs/E1_JSON_CARRIER.md",
+      "sha256": "75cbcbfca0ed7a720605cafabecf880b32e56b9091f29ffe14afe5748c2edb73"
+    },
+    {
+      "bytes": 6632,
+      "path": "experiments/t75_20261001/amendment.json",
+      "sha256": "7003e480b2678961e1f24ae3e0c9e190a5a264e166add17b4e71413fec0cdea5"
+    },
+    {
+      "bytes": 13382,
+      "path": "scripts/e1_json_carrier.py",
+      "sha256": "53eadce0939838e320be76f29d38ff8f2760035ff2490b9d4e132d7ca773a3d1"
+    },
+    {
+      "bytes": 13353,
+      "path": "scripts/run_e1_carrier.py",
+      "sha256": "812b858df5b28bc0036627266df2be21c78cd9be8d61b50e9e55d362689560bc"
+    },
+    {
+      "bytes": 26042,
+      "path": "tests/test_e1_carrier_run.py",
+      "sha256": "04c924f0e861c9ab643e9c2a88219aca67999d4008750bacf95e36d89a6abfde"
+    },
+    {
+      "bytes": 17530,
+      "path": "tests/test_e1_json_carrier.py",
+      "sha256": "ded3337e42c2a8af9979fc96a534e01aec9f941ce4f4a8c949305fed22c42634"
+    }
+  ],
+  "parent_authorization_seal": "490ac7fc64b800024fe4d4d12891c239754cb2d8049e7106c0ff1c777c308351",
+  "schema": "aria_e1_dual_carrier_execution_v1",
+  "seal_sha256": "e854451a70433dbb148ac737cb06bf8a6da6c36bb7ea88ab0743e74e17373e99"
+}

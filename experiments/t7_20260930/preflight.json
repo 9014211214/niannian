@@ -1,0 +1,20 @@
+{
+  "e1_requests": 204,
+  "model_requests": 0,
+  "full_reserved_cost_usd": "0.2244",
+  "stage_limit_usd": "0.5",
+  "max_input_token_plan_bound": 24979,
+  "provider_hard_token_bound_verified": false,
+  "live_metadata_checked": false,
+  "blocking_reasons": ["provider_input_token_bound_unverified", "parameter_support_unverified_parallel_tool_calls"],
+  "metadata": {
+    "checked_at_utc": "2026-09-30T02:50:26.767089+00:00",
+    "sources": [
+      {"url": "https://openrouter.ai/api/v1/models", "response_sha256": "64dd6f531d57ab2d4f2bc756d76fd318267924d3ad2dd921873928ff04f5f25d"},
+      {"url": "https://openrouter.ai/api/v1/models/qwen/qwen3.7-flash/endpoints", "response_sha256": "f3f227acf0fafb4e4ddc8564bfdd836f57a2f1205b1019d5e31f9e0862c0571e"}
+    ],
+    "authenticated": false,
+    "inference_requests": 0
+  },
+  "ready_to_send": false
+}

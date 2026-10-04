@@ -1,0 +1,64 @@
+{
+  "campaign_id": "t6_20260930_v1",
+  "created_at_utc": "2026-09-30T02:57:45.512695+00:00",
+  "files": [
+    {
+      "bytes": 6124,
+      "path": "docs/E1_EXECUTION.md",
+      "sha256": "c83d17365130e7bf9dddd335732a76f95f893d29771faabf9b3636ca3dfd1749"
+    },
+    {
+      "bytes": 846,
+      "path": "experiments/t7_20260930/preflight.json",
+      "sha256": "df882825d90fe7aa3e70230f3a90e0866fc23110d35a32e52a84350fd59680a7"
+    },
+    {
+      "bytes": 27081,
+      "path": "scripts/run_e1_experiment.py",
+      "sha256": "2dc2d5f00390f6cba613cbdfb54c67e998cbf71872258dde17311a808e7f13ec"
+    },
+    {
+      "bytes": 28683,
+      "path": "scripts/t7_judge.py",
+      "sha256": "45ce070bbc53f64b0d814c657ff47cbd717b5d23eabd044e128f0cbbcc0edc4f"
+    },
+    {
+      "bytes": 25790,
+      "path": "scripts/t7_ledger.py",
+      "sha256": "2a650734980f0eb728ff95dffbeab04ebba1d53a2d91fd747aaadc3c78b4faae"
+    },
+    {
+      "bytes": 22854,
+      "path": "scripts/t7_transport.py",
+      "sha256": "318080e5b326dccaae499f1981a44a72f8b746bf1bca7a4c195704e7526e8c13"
+    },
+    {
+      "bytes": 22903,
+      "path": "tests/test_e1_execution.py",
+      "sha256": "f2cde4876a8b2369f38e578cd4af6234cc31808137721d801b41e5e81370227a"
+    },
+    {
+      "bytes": 19213,
+      "path": "tests/test_t7_judge.py",
+      "sha256": "bc8291737f9f4febfab56cf813c9f6111835d5049a5083db48b0ee8a7e5e0b81"
+    },
+    {
+      "bytes": 14214,
+      "path": "tests/test_t7_ledger.py",
+      "sha256": "2237b1eebe2dbcf62b234ed8fcd6b9e24a906f6b139d91ca73fbe25d1ec3c5ea"
+    },
+    {
+      "bytes": 22409,
+      "path": "tests/test_t7_transport.py",
+      "sha256": "c90d59f21db395bed96e2811fc95a1b0307ab09864a560279de86ef28b11aa33"
+    }
+  ],
+  "model_requests_at_seal": 0,
+  "readiness": "blocked_before_credentials",
+  "readiness_receipt": "experiments/t7_20260930/preflight.json",
+  "release_boundary": "execution_software_only_no_model_effect_claim",
+  "schema": "aria_t7_execution_v1",
+  "seal_sha256": "e49db651619b6ccb23a87efae1c453f28ad5eef2f6d774160ed7ce9e1d741538",
+  "t6_seal_sha256": "f020b5079bdd1c6ccaf68409af0728e99cb305d524ff2f1b16b69cc41e3a7212",
+  "token_bound_evidence": "unverified_local_estimate_not_provider_guarantee"
+}

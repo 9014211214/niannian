@@ -1,0 +1,58 @@
+{
+  "schema": "aria_t73_wire_repair_seal_v1",
+  "id": "t73_20261001_v1",
+  "inherits": {
+    "t6_seal": "f020b5079bdd1c6ccaf68409af0728e99cb305d524ff2f1b16b69cc41e3a7212",
+    "t7_seal": "e49db651619b6ccb23a87efae1c453f28ad5eef2f6d774160ed7ce9e1d741538",
+    "t71_seal": "b073aff9657e8889a8e940c7b57e8a5dd247db925fe2e6d02af87dea38d5378d",
+    "t72_seal": "814e433fff3ace7a7524b831e9e25567938be8429fbb986d164290a32cc99e33"
+  },
+  "files": [
+    {
+      "path": "docs/E1_EXECUTION_T73.md",
+      "bytes": 4524,
+      "sha256": "c74effcfd346266b017a03f4ff5ab628e81293ae49b75b0791a3110401d76f1a"
+    },
+    {
+      "path": "experiments/t73_20261001/amendment.json",
+      "bytes": 1349,
+      "sha256": "268ac2d34af17a6cf79a0eea0680e3cc16314d7ecb807597db3cf387e4614f9d"
+    },
+    {
+      "path": "experiments/t73_20261001/requests.json",
+      "bytes": 78345,
+      "sha256": "f85c5b87bf4765b1d636a5508ceea5989bcb57cc5296b2c503ca718961457b39"
+    },
+    {
+      "path": "scripts/check_e1_t73.py",
+      "bytes": 8222,
+      "sha256": "207994ebbd880517c98061ece5b1992f7e0581649fabee6618003480f10fa8fc"
+    },
+    {
+      "path": "scripts/t73_execution.py",
+      "bytes": 2734,
+      "sha256": "bc890939a9e7dde25527cae99e4f4772fffc26fa6adba13d9c441adec12e36be"
+    },
+    {
+      "path": "scripts/t73_policy.py",
+      "bytes": 9467,
+      "sha256": "c3bcc20ad465659c2715fb02a5477cdce4fddaacea095bea32a63c4dc406445e"
+    },
+    {
+      "path": "tests/test_e1_t73.py",
+      "bytes": 5882,
+      "sha256": "1b42b181ada4fd8e8e83660bf60f9655ce50de8f268836b6cfc20b8eb23acb6c"
+    },
+    {
+      "path": "tests/test_t73_execution.py",
+      "bytes": 10327,
+      "sha256": "0b4e4f40bf5d721b8d9dbfeacf6178c8387107f4203ad767f1200b46a45a4da0"
+    },
+    {
+      "path": "tests/test_t73_policy.py",
+      "bytes": 10777,
+      "sha256": "3c9c2c34bf1e0250c7eb3e0d76d2377ac3d38e271f70798a11358b233053e315"
+    }
+  ],
+  "seal_sha256": "d9f4ef6d6119265e574100a1f4fa428cde0bb893da9dbfaf7c18d003b6620f7f"
+}

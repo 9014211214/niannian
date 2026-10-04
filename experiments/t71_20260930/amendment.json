@@ -1,0 +1,45 @@
+{
+  "schema": "aria_t71_amendment_v1",
+  "id": "t71_20260930_v1",
+  "campaign_id": "t6_20260930_v1",
+  "authorization_source": "User instruction 2026-09-30 and PROGRESS task 20260930-05 / MINIMAL_RELEASE_CHECKLIST T7.1; no extra total budget",
+  "inherits": {
+    "t6_seal": "f020b5079bdd1c6ccaf68409af0728e99cb305d524ff2f1b16b69cc41e3a7212",
+    "t7_seal": "e49db651619b6ccb23a87efae1c453f28ad5eef2f6d774160ed7ce9e1d741538"
+  },
+  "budget_usd": {
+    "e1": "0.5",
+    "judge": "0.5",
+    "pause_total": "2",
+    "total": "5"
+  },
+  "input_bound": {
+    "method": "full_canonical_payload_utf8_bytes_plus_template_allowance",
+    "template_tokens": 8192,
+    "assumption": "Byte-level token coverage is a planning assumption; Claude tokenizer and provider framing are not publicly verified. This is not a provider billing guarantee.",
+    "post_request": "Stop if usage.prompt_tokens exceeds the per-request bound; retain known cost and unknown outcomes; no retries."
+  },
+  "parameter_exception": {
+    "field": "parallel_tool_calls",
+    "value": false,
+    "support": "unverified",
+    "compensation": "Send frozen field unchanged; require exactly one native aria_turn_decision result; otherwise stop."
+  },
+  "document_revision": {
+    "path": "docs/VALIDATION.md",
+    "original_reference": "experiments/t71_20260930/validation.t6.md",
+    "original_sha256": "aadf7d345d8b33076d9d9f4f651e0861c5e0d2bad22cdc504aa49a7cfcb81cbb",
+    "current_sha256": "b28f08849d55a224f009203054322fcefae90f29fca83e76b840f002c5e9f057",
+    "current_bytes": 6175,
+    "scope": "Task05 budget authorization sentence only; original T6 retained."
+  },
+  "unchanged": [
+    "204 generation positions and payload hashes",
+    "raw204/delivered204/pair27 denominators",
+    "judge prompts and all scoring gates",
+    "40 committed human sample positions",
+    "T6 and T7 source originals",
+    "no E2, TTS, notifications, account API or publication"
+  ],
+  "environment_credential_policy": "OPENROUTER_API_KEY environment only by default; local .env reading needs explicit user permission and never logs its value."
+}

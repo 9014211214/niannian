@@ -1,0 +1,199 @@
+{
+  "accepted_unknown_attempts": [
+    [
+      "t6_20260930_v1",
+      "e1_001"
+    ],
+    [
+      "e1_t73_20261001_v1",
+      "e1_001"
+    ]
+  ],
+  "authorization": {
+    "historical_unknown_cost_count": 2,
+    "new_private_directory": "artifacts/local/e1_t75_20261001_v1",
+    "permits_automatic_retry": false,
+    "permits_future_unknown_cost_exception": false,
+    "retain_original_null_costs": true,
+    "user_statement": "接受新增这1笔费用暂时未知（合计2笔），按原0.5美元上限继续E1"
+  },
+  "authorization_source": "User instruction 2026-10-01 / PROGRESS task 20261001-04",
+  "budget_usd": {
+    "e1": "0.5",
+    "judge": "0.5",
+    "pause_total": "2",
+    "total": "5"
+  },
+  "campaign_id": "e1_t75_20261001_v1",
+  "fixed_generation_positions": 204,
+  "inventory_source": "experiments/t74_20261001/requests.json",
+  "measurement": "prospective_full_204_no_old_result_upgrade_no_best_retry_selection",
+  "parent_authorization_seal": "490ac7fc64b800024fe4d4d12891c239754cb2d8049e7106c0ff1c777c308351",
+  "prior_known_campaign": {
+    "artifacts": [
+      {
+        "bytes": 489,
+        "path": "campaign.json",
+        "sha256": "07420b2c271094b5847f71130cf2883398717493735654a092386d8032b3e773"
+      },
+      {
+        "bytes": 57344,
+        "path": "campaign.sqlite3",
+        "sha256": "2f1434856d3add220dcd34aae559ad761f8c389202068f2b5eeb75a2e9c1127e"
+      },
+      {
+        "bytes": 14692,
+        "path": "e1/e1_001.receipt.json",
+        "sha256": "d82dfca571f2820bf2ac68ee2cb2b595520f74cda994ae6d8fa8d185bbf3d79f"
+      },
+      {
+        "bytes": 16181,
+        "path": "e1/e1_001.request.json",
+        "sha256": "dc8aa039c31966e041ebfedb994401e1a546eec0e5e8d98b9b5c8a9f99e8b887"
+      },
+      {
+        "bytes": 14658,
+        "path": "e1/e1_002.receipt.json",
+        "sha256": "f1852c703c12a19009f988460b6ac84c5523fa1c5305aa388ec89c84c46f2782"
+      },
+      {
+        "bytes": 17036,
+        "path": "e1/e1_002.request.json",
+        "sha256": "30d4d870d56c82133c372e4a149e3ab703ca9ef1bcfca31f4a9e10016e5d95ce"
+      },
+      {
+        "bytes": 14745,
+        "path": "e1/e1_003.receipt.json",
+        "sha256": "db939303b9783b95004573460f66aba64b9d2328b61ea1e7b76b33666ee73801"
+      },
+      {
+        "bytes": 19367,
+        "path": "e1/e1_003.request.json",
+        "sha256": "32a0951acd7ae9859e4d0dfeac72a80ae87328fa3137bdf4b9d0c36b04fb0cff"
+      },
+      {
+        "bytes": 14861,
+        "path": "e1/e1_004.receipt.json",
+        "sha256": "9da9d33a88334840e6889d96312e2b4df225d739298148d28b03c4b3c5674d29"
+      },
+      {
+        "bytes": 19515,
+        "path": "e1/e1_004.request.json",
+        "sha256": "693a2223ad914e5547a421f760bb181aa42309858042f39a93dc4aeb2f0d8cad"
+      },
+      {
+        "bytes": 14867,
+        "path": "e1/e1_005.receipt.json",
+        "sha256": "8c953eb5d49e967da116a256e53bcb8c4d193c4a7fca094b6c73d9ec68fa1a99"
+      },
+      {
+        "bytes": 20055,
+        "path": "e1/e1_005.request.json",
+        "sha256": "24949a7cdde0826dfca09f6319ea4c5dfa526db68d25217a344bd31dd63a3e44"
+      },
+      {
+        "bytes": 14615,
+        "path": "e1/e1_006.receipt.json",
+        "sha256": "f1e4bb3e494799c23743603bdb62f9f73a7dcea00040645848c26fd3de7e40c9"
+      },
+      {
+        "bytes": 17027,
+        "path": "e1/e1_006.request.json",
+        "sha256": "61f616fbb3eace26cc9302ff49c5d20ca273b521877eed4cb30225f458c91a28"
+      },
+      {
+        "bytes": 15483,
+        "path": "e1/e1_007.receipt.json",
+        "sha256": "88490378e65162265525ea76677a48f63c1b02d0873660482df7767eba9dc05b"
+      },
+      {
+        "bytes": 19349,
+        "path": "e1/e1_007.request.json",
+        "sha256": "8ce02bd1509a5e5da3d7655df487e47b6a65601bc369f18376a3bb582b742805"
+      },
+      {
+        "bytes": 15730,
+        "path": "e1/e1_008.receipt.json",
+        "sha256": "89a9ff19294a733c13675592e813cb56cfdb00b839ede665963cbe2866bc3813"
+      },
+      {
+        "bytes": 19497,
+        "path": "e1/e1_008.request.json",
+        "sha256": "ea845e81d3174f1b48758f5e943c18a78e75aa03c121054bfe152f1b03d5864e"
+      },
+      {
+        "bytes": 15750,
+        "path": "e1/e1_009.receipt.json",
+        "sha256": "9633d6fdf7d3d90384490144e985a8a769154902b5b21977cba594b57c3aa827"
+      },
+      {
+        "bytes": 20037,
+        "path": "e1/e1_009.request.json",
+        "sha256": "a61ea1241229c8a606a935f0e6113ebbe7c3adfee60c5c59b165c8904994b9bb"
+      },
+      {
+        "bytes": 14022,
+        "path": "e1/e1_010.receipt.json",
+        "sha256": "9906a176cbd31dea3a9a7b152cf38221a552677f9d7ef78f850a0a70aea8d39c"
+      },
+      {
+        "bytes": 16196,
+        "path": "e1/e1_010.request.json",
+        "sha256": "2a40bc8bf3d97ed226629e231137976a97c35d72243ec29453091d1bee12b5ae"
+      },
+      {
+        "bytes": 14681,
+        "path": "e1/e1_011.receipt.json",
+        "sha256": "45744a65680fae9bb9238d72152d197f2f95b2f88bd5f285f23333e479a7679a"
+      },
+      {
+        "bytes": 19406,
+        "path": "e1/e1_011.request.json",
+        "sha256": "cb4129317ab1e795ba096a3750150a2d297142824fdfd9cb7716c1d96fd018c0"
+      },
+      {
+        "bytes": 5104,
+        "path": "e1/e1_012.receipt.json",
+        "sha256": "5450d13e05a460f7b61156c9abe6f912eb3eaaa7b5f0e346985f205397bffe52"
+      },
+      {
+        "bytes": 19554,
+        "path": "e1/e1_012.request.json",
+        "sha256": "272b0286cc0f15627e6cbcdccb01e0399521292766bbbfe5517ea41e3d9ed263"
+      },
+      {
+        "bytes": 73710,
+        "path": "e1/inventory.json",
+        "sha256": "932162003ecbf0cd2d48770443804e146ea81c2a5cdf04126a73e6b6d1021105"
+      },
+      {
+        "bytes": 339482,
+        "path": "e1/results.private.json",
+        "sha256": "1267261914c69ce573c66280cff7eeeaf5356fbcb51d5ec0ba74826cdf71b723"
+      },
+      {
+        "bytes": 493,
+        "path": "outcome.aggregate.json",
+        "sha256": "2aab575f737bff8024941fd2e4e55a2da05499c37c416ef070bae725f2f404d9"
+      },
+      {
+        "bytes": 37780,
+        "path": "preflight.json",
+        "sha256": "737b584900faa16dc38c2682632339ba75b52a8464438aeb7b4f79146cf9d3e7"
+      }
+    ],
+    "campaign_id": "e1_t74_20261001_v1",
+    "directory": "artifacts/local/e1_t74_20261001_v1",
+    "execution_seal": "490ac7fc64b800024fe4d4d12891c239754cb2d8049e7106c0ff1c777c308351",
+    "known_cost_usd": "0.00171618",
+    "unknown_cost_count": 0
+  },
+  "response_carriers": [
+    "native_tool",
+    "content_json"
+  ],
+  "response_contract": "unchanged_tool_parameters_and_production_validation",
+  "schema": "aria_e1_dual_carrier_amendment_v1",
+  "unknown_cost_policy": "retain_and_block_unaccepted",
+  "wire_changes_from_t74": []
+}

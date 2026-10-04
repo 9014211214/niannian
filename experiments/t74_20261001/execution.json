@@ -1,0 +1,67 @@
+{
+  "schema": "aria_e1_auto_tool_execution_v1",
+  "parent_execution_seal": "ce932d135b4504b18e9627ff2d12817be8bf77ed9a012762bf2a456835ccbfa6",
+  "files": [
+    {
+      "path": "docs/E1_CALL_COMPATIBILITY.md",
+      "bytes": 4266,
+      "sha256": "f1b01dcfe9d70e29f510792705e48cc2537c116d5f0ac20d727c3c699180b519"
+    },
+    {
+      "path": "experiments/t74_20261001/amendment.json",
+      "bytes": 3862,
+      "sha256": "37f42425238fb3f8e327baee63d2307ca00231e3629ead346987150ec2827ecb"
+    },
+    {
+      "path": "experiments/t74_20261001/requests.json",
+      "bytes": 80597,
+      "sha256": "6fcd19266af8e321cc4df19f90f437130450d25dd23f4ea6d5251e96d4948306"
+    },
+    {
+      "path": "scripts/check_e1_tool_choice.py",
+      "bytes": 7893,
+      "sha256": "c8bd25a370b937a2831018bb1c76e55bf9cbaccb038fd26bfc3a32cd883f978c"
+    },
+    {
+      "path": "scripts/e1_compat.py",
+      "bytes": 12680,
+      "sha256": "c5c1ebc3d7299c4658cba5520ee4d1a75852ef1333b191e39ac91aa96a62edd7"
+    },
+    {
+      "path": "scripts/run_e1_compat.py",
+      "bytes": 12937,
+      "sha256": "87cc7304b0d17d22e30ad4c74800c9f6dad2ca22d010ccac3dce5f1d9e90aaa7"
+    },
+    {
+      "path": "scripts/t74_transport.py",
+      "bytes": 6312,
+      "sha256": "64097ab0d374df90b3298858801f1a4f631c6b8032d0f6d600d69783b191d109"
+    },
+    {
+      "path": "tests/test_e1_compat.py",
+      "bytes": 9172,
+      "sha256": "954093647e36889b1a54d307233b3465c2adf2881495ff859cbba677cb4eca3f"
+    },
+    {
+      "path": "tests/test_e1_tool_choice.py",
+      "bytes": 8326,
+      "sha256": "8b4e576040ef8b54c6b6d7cf0d99f4e8e2c01f8636c2f8aae2c0414a510af4b4"
+    },
+    {
+      "path": "tests/test_t74_execution.py",
+      "bytes": 17652,
+      "sha256": "d84eb99d780e0e59163c13765f9a8b31f99912e50877b775cb81ef5fc9579597"
+    },
+    {
+      "path": "tests/test_t74_run.py",
+      "bytes": 17818,
+      "sha256": "707a41b1e6d1c5b96ae341bdf4f6bc4e402e988893cc3a60310f1f0d85043c5b"
+    },
+    {
+      "path": "tests/test_t74_transport.py",
+      "bytes": 10765,
+      "sha256": "ccf9e8a25c4ca4b5e141619a84d095c0d2ee44213f53117332680109c08d1544"
+    }
+  ],
+  "seal_sha256": "24bc1b9373b8ee80e4dbf61a43988b258dd035c488d6bf4d365ef09a66e03192"
+}

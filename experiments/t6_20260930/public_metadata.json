@@ -1,0 +1,519 @@
+{
+  "source_url": "https://openrouter.ai/api/v1/models",
+  "checked_at_utc": "2026-09-30T00:31:06.758516+00:00",
+  "response_sha256": "baf64cf5394eb5e3dd5b011feb4aacfdadcd00a7bfbc443954bdc7f215e30d19",
+  "models": [
+    {
+      "id": "qwen/qwen3.7-flash",
+      "canonical_slug": "qwen/qwen3.7-flash-20260727",
+      "pricing": {
+        "prompt": "0.00000003",
+        "completion": "0.00000013",
+        "input_cache_read": "0.000000006",
+        "input_cache_write": "0.000000038",
+        "overrides": [
+          {
+            "min_prompt_tokens": 32000,
+            "prompt": "0.0000001",
+            "completion": "0.0000004",
+            "input_cache_read": "0.00000002",
+            "input_cache_write": "0.000000125"
+          },
+          {
+            "min_prompt_tokens": 256000,
+            "prompt": "0.0000002",
+            "completion": "0.0000008",
+            "input_cache_read": "0.00000004",
+            "input_cache_write": "0.00000025"
+          }
+        ]
+      },
+      "context_length": 1000000,
+      "supported_parameters": [
+        "include_reasoning",
+        "logprobs",
+        "max_tokens",
+        "presence_penalty",
+        "reasoning",
+        "response_format",
+        "seed",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_logprobs",
+        "top_p"
+      ],
+      "reasoning": {
+        "mandatory": false,
+        "default_enabled": true,
+        "supports_max_tokens": true
+      },
+      "top_provider": {
+        "context_length": 1000000,
+        "max_completion_tokens": 65536,
+        "is_moderated": false
+      },
+      "default_parameters": {
+        "temperature": null,
+        "top_p": null,
+        "top_k": null,
+        "frequency_penalty": null,
+        "presence_penalty": null,
+        "repetition_penalty": null
+      },
+      "links": {
+        "details": "/api/v1/models/qwen/qwen3.7-flash-20260727/endpoints"
+      }
+    },
+    {
+      "id": "anthropic/claude-sonnet-5",
+      "canonical_slug": "anthropic/claude-sonnet-5-20260630",
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000002",
+        "input_cache_write": "0.0000025",
+        "input_cache_write_1h": "0.000004"
+      },
+      "context_length": 1000000,
+      "supported_parameters": [
+        "include_reasoning",
+        "max_completion_tokens",
+        "max_tokens",
+        "reasoning",
+        "reasoning_effort",
+        "response_format",
+        "stop",
+        "structured_outputs",
+        "tool_choice",
+        "tools",
+        "verbosity"
+      ],
+      "reasoning": {
+        "mandatory": false,
+        "default_enabled": true,
+        "supported_efforts": [
+          "max",
+          "xhigh",
+          "high",
+          "medium",
+          "low"
+        ],
+        "default_effort": "high"
+      },
+      "top_provider": {
+        "context_length": 1000000,
+        "max_completion_tokens": 128000,
+        "is_moderated": true
+      },
+      "default_parameters": {},
+      "links": {
+        "details": "/api/v1/models/anthropic/claude-sonnet-5-20260630/endpoints"
+      }
+    }
+  ],
+  "missing_ids": [],
+  "authenticated": false,
+  "inference_requests": 0,
+  "selected_endpoints": [
+    {
+      "source_url": "https://openrouter.ai/api/v1/models/qwen/qwen3.7-flash/endpoints",
+      "checked_at_utc": "2026-09-30T00:32:54.979284+00:00",
+      "response_sha256": "1fb8da6219cbaca3262a8d4ff12a60310267cfd260e790fb75758e239321b229",
+      "data": {
+        "id": "qwen/qwen3.7-flash",
+        "name": "Qwen: Qwen3.7 Flash",
+        "endpoints": [
+          {
+            "name": "Alibaba | qwen/qwen3.7-flash-20260727",
+            "provider_name": "Alibaba",
+            "tag": "alibaba",
+            "model_name": "Qwen: Qwen3.7 Flash",
+            "model_id": "qwen/qwen3.7-flash",
+            "status": 0,
+            "pricing": {
+              "prompt": "0.00000003",
+              "completion": "0.00000013",
+              "input_cache_read": "0.000000006",
+              "input_cache_write": "0.000000038",
+              "discount": 0,
+              "overrides": [
+                {
+                  "min_prompt_tokens": 32000,
+                  "prompt": "0.0000001",
+                  "completion": "0.0000004",
+                  "input_cache_read": "0.00000002",
+                  "input_cache_write": "0.000000125"
+                },
+                {
+                  "min_prompt_tokens": 256000,
+                  "prompt": "0.0000002",
+                  "completion": "0.0000008",
+                  "input_cache_read": "0.00000004",
+                  "input_cache_write": "0.00000025"
+                }
+              ]
+            },
+            "supported_parameters": [
+              "reasoning",
+              "include_reasoning",
+              "max_tokens",
+              "temperature",
+              "top_p",
+              "seed",
+              "presence_penalty",
+              "response_format",
+              "logprobs",
+              "top_logprobs",
+              "tools",
+              "tool_choice"
+            ],
+            "quantization": "unknown",
+            "context_length": 1000000,
+            "max_completion_tokens": 65536
+          }
+        ]
+      }
+    },
+    {
+      "source_url": "https://openrouter.ai/api/v1/models/anthropic/claude-sonnet-5/endpoints",
+      "checked_at_utc": "2026-09-30T00:32:55.475213+00:00",
+      "response_sha256": "702bdf3a1198bd7aa95bfeaf9bc9fa9a10105f7e217a767f4216ad24c6ca4777",
+      "data": {
+        "id": "anthropic/claude-sonnet-5",
+        "name": "Anthropic: Claude Sonnet 5",
+        "endpoints": [
+          {
+            "name": "Claude Platform on AWS | anthropic/claude-sonnet-5-20260630",
+            "provider_name": "Claude Platform on AWS",
+            "tag": "claude-on-aws",
+            "model_name": "Anthropic: Claude Sonnet 5",
+            "model_id": "anthropic/claude-sonnet-5",
+            "status": 0,
+            "pricing": {
+              "prompt": "0.000002",
+              "completion": "0.00001",
+              "web_search": "0.01",
+              "input_cache_read": "0.0000002",
+              "input_cache_write": "0.0000025",
+              "input_cache_write_1h": "0.000004",
+              "discount": 0
+            },
+            "supported_parameters": [
+              "max_tokens",
+              "stop",
+              "reasoning",
+              "include_reasoning",
+              "tool_choice",
+              "tools",
+              "structured_outputs",
+              "response_format",
+              "verbosity",
+              "reasoning_effort"
+            ],
+            "quantization": "unknown",
+            "context_length": 1000000,
+            "max_completion_tokens": 128000
+          },
+          {
+            "name": "Azure | anthropic/claude-sonnet-5-20260630",
+            "provider_name": "Azure",
+            "tag": "azure/global",
+            "model_name": "Anthropic: Claude Sonnet 5",
+            "model_id": "anthropic/claude-sonnet-5",
+            "status": 0,
+            "pricing": {
+              "prompt": "0.000002",
+              "completion": "0.00001",
+              "web_search": "0.01",
+              "input_cache_read": "0.0000002",
+              "input_cache_write": "0.0000025",
+              "input_cache_write_1h": "0.000004",
+              "discount": 0
+            },
+            "supported_parameters": [
+              "reasoning",
+              "include_reasoning",
+              "structured_outputs",
+              "max_tokens",
+              "max_completion_tokens",
+              "tools",
+              "tool_choice",
+              "response_format",
+              "verbosity",
+              "stop",
+              "reasoning_effort"
+            ],
+            "quantization": "unknown",
+            "context_length": 1000000,
+            "max_completion_tokens": 128000
+          },
+          {
+            "name": "Google | anthropic/claude-sonnet-5-20260630",
+            "provider_name": "Google",
+            "tag": "google-vertex/global",
+            "model_name": "Anthropic: Claude Sonnet 5",
+            "model_id": "anthropic/claude-sonnet-5",
+            "status": 0,
+            "pricing": {
+              "prompt": "0.000002",
+              "completion": "0.00001",
+              "web_search": "0.01",
+              "input_cache_read": "0.0000002",
+              "input_cache_write": "0.0000025",
+              "input_cache_write_1h": "0.000004",
+              "discount": 0
+            },
+            "supported_parameters": [
+              "max_tokens",
+              "stop",
+              "reasoning",
+              "include_reasoning",
+              "tools",
+              "tool_choice",
+              "response_format",
+              "verbosity",
+              "structured_outputs",
+              "reasoning_effort"
+            ],
+            "quantization": "unknown",
+            "context_length": 1000000,
+            "max_completion_tokens": 128000
+          },
+          {
+            "name": "Amazon Bedrock | anthropic/claude-sonnet-5-20260630",
+            "provider_name": "Amazon Bedrock",
+            "tag": "amazon-bedrock/global",
+            "model_name": "Anthropic: Claude Sonnet 5",
+            "model_id": "anthropic/claude-sonnet-5",
+            "status": 0,
+            "pricing": {
+              "prompt": "0.000002",
+              "completion": "0.00001",
+              "web_search": "0.01",
+              "input_cache_read": "0.0000002",
+              "input_cache_write": "0.0000025",
+              "input_cache_write_1h": "0.000004",
+              "discount": 0
+            },
+            "supported_parameters": [
+              "reasoning",
+              "include_reasoning",
+              "max_tokens",
+              "stop",
+              "tools",
+              "tool_choice",
+              "response_format",
+              "verbosity",
+              "reasoning_effort"
+            ],
+            "quantization": "unknown",
+            "context_length": 1000000,
+            "max_completion_tokens": 128000
+          },
+          {
+            "name": "Anthropic | anthropic/claude-sonnet-5-20260630",
+            "provider_name": "Anthropic",
+            "tag": "anthropic",
+            "model_name": "Anthropic: Claude Sonnet 5",
+            "model_id": "anthropic/claude-sonnet-5",
+            "status": 0,
+            "pricing": {
+              "prompt": "0.000002",
+              "completion": "0.00001",
+              "web_search": "0.01",
+              "input_cache_read": "0.0000002",
+              "input_cache_write": "0.0000025",
+              "input_cache_write_1h": "0.000004",
+              "discount": 0
+            },
+            "supported_parameters": [
+              "max_tokens",
+              "stop",
+              "reasoning",
+              "include_reasoning",
+              "tools",
+              "tool_choice",
+              "structured_outputs",
+              "response_format",
+              "verbosity",
+              "reasoning_effort"
+            ],
+            "quantization": "unknown",
+            "context_length": 1000000,
+            "max_completion_tokens": 128000
+          },
+          {
+            "name": "Amazon Bedrock | anthropic/claude-sonnet-5-20260630",
+            "provider_name": "Amazon Bedrock",
+            "tag": "amazon-bedrock/eu-west-1",
+            "model_name": "Anthropic: Claude Sonnet 5",
+            "model_id": "anthropic/claude-sonnet-5",
+            "status": 0,
+            "pricing": {
+              "prompt": "0.0000022",
+              "completion": "0.000011",
+              "web_search": "0.01",
+              "input_cache_read": "0.00000022",
+              "input_cache_write": "0.00000275",
+              "input_cache_write_1h": "0.0000044",
+              "discount": 0
+            },
+            "supported_parameters": [
+              "reasoning",
+              "include_reasoning",
+              "max_tokens",
+              "stop",
+              "tools",
+              "tool_choice",
+              "response_format",
+              "verbosity",
+              "reasoning_effort"
+            ],
+            "quantization": "unknown",
+            "context_length": 1000000,
+            "max_completion_tokens": 128000
+          },
+          {
+            "name": "Azure | anthropic/claude-sonnet-5-20260630",
+            "provider_name": "Azure",
+            "tag": "azure/us",
+            "model_name": "Anthropic: Claude Sonnet 5",
+            "model_id": "anthropic/claude-sonnet-5",
+            "status": 0,
+            "pricing": {
+              "prompt": "0.0000022",
+              "completion": "0.000011",
+              "web_search": "0.01",
+              "input_cache_read": "0.00000022",
+              "input_cache_write": "0.00000275",
+              "input_cache_write_1h": "0.0000044",
+              "discount": 0
+            },
+            "supported_parameters": [
+              "reasoning",
+              "include_reasoning",
+              "structured_outputs",
+              "max_tokens",
+              "max_completion_tokens",
+              "tools",
+              "tool_choice",
+              "response_format",
+              "verbosity",
+              "stop",
+              "reasoning_effort"
+            ],
+            "quantization": "unknown",
+            "context_length": 1000000,
+            "max_completion_tokens": 128000
+          },
+          {
+            "name": "Google | anthropic/claude-sonnet-5-20260630",
+            "provider_name": "Google",
+            "tag": "google-vertex/us",
+            "model_name": "Anthropic: Claude Sonnet 5",
+            "model_id": "anthropic/claude-sonnet-5",
+            "status": 0,
+            "pricing": {
+              "prompt": "0.0000022",
+              "completion": "0.000011",
+              "web_search": "0.01",
+              "input_cache_read": "0.00000022",
+              "input_cache_write": "0.00000275",
+              "input_cache_write_1h": "0.0000044",
+              "discount": 0
+            },
+            "supported_parameters": [
+              "max_tokens",
+              "stop",
+              "reasoning",
+              "include_reasoning",
+              "tool_choice",
+              "tools",
+              "response_format",
+              "verbosity",
+              "structured_outputs",
+              "reasoning_effort"
+            ],
+            "quantization": "unknown",
+            "context_length": 1000000,
+            "max_completion_tokens": 128000
+          },
+          {
+            "name": "Google | anthropic/claude-sonnet-5-20260630",
+            "provider_name": "Google",
+            "tag": "google-vertex/europe",
+            "model_name": "Anthropic: Claude Sonnet 5",
+            "model_id": "anthropic/claude-sonnet-5",
+            "status": 0,
+            "pricing": {
+              "prompt": "0.0000022",
+              "completion": "0.000011",
+              "web_search": "0.01",
+              "input_cache_read": "0.00000022",
+              "input_cache_write": "0.00000275",
+              "input_cache_write_1h": "0.0000044",
+              "discount": 0
+            },
+            "supported_parameters": [
+              "max_tokens",
+              "stop",
+              "reasoning",
+              "include_reasoning",
+              "tool_choice",
+              "tools",
+              "response_format",
+              "verbosity",
+              "structured_outputs",
+              "reasoning_effort"
+            ],
+            "quantization": "unknown",
+            "context_length": 1000000,
+            "max_completion_tokens": 128000
+          },
+          {
+            "name": "Amazon Bedrock | anthropic/claude-sonnet-5-20260630",
+            "provider_name": "Amazon Bedrock",
+            "tag": "amazon-bedrock/us-east-1",
+            "model_name": "Anthropic: Claude Sonnet 5",
+            "model_id": "anthropic/claude-sonnet-5",
+            "status": 0,
+            "pricing": {
+              "prompt": "0.0000022",
+              "completion": "0.000011",
+              "web_search": "0.01",
+              "input_cache_read": "0.00000022",
+              "input_cache_write": "0.00000275",
+              "input_cache_write_1h": "0.0000044",
+              "discount": 0
+            },
+            "supported_parameters": [
+              "reasoning",
+              "include_reasoning",
+              "max_tokens",
+              "stop",
+              "tools",
+              "tool_choice",
+              "response_format",
+              "verbosity",
+              "reasoning_effort"
+            ],
+            "quantization": "unknown",
+            "context_length": 1000000,
+            "max_completion_tokens": 128000
+          }
+        ]
+      }
+    }
+  ],
+  "upstream_cped": {
+    "source_url": "https://api.github.com/repos/scutcyr/CPED/commits/main",
+    "checked_at_utc": "2026-09-30T00:32:56.269435+00:00",
+    "response_sha256": "ea1f7af0e41cec6cf2b9ffd04cbd8277ea1ebc055b738913e5935644071f21f6",
+    "data": {
+      "commit_sha": "1e4b81c28a123f22387e06664f37e5dc9322380f",
+      "commit_date": "2022-07-07T12:15:10Z"
+    }
+  }
+}
