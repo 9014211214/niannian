@@ -1,7 +1,6 @@
-"""Actual retained bytes, zero replay dispatches, then one local online fixture."""
+"""Synthetic retained bytes, zero replay dispatches, then one local online fixture."""
 from copy import deepcopy
 import json
-from pathlib import Path
 import socket
 
 import pytest
@@ -9,12 +8,13 @@ import pytest
 from aria.engine.policy import minimal_calls
 from scripts import run_e1br_received_continuation as revision
 from _reservation_fixtures import fixture_reservation_policy
+from tests._e1br_entry_fixtures import synthetic_entry_root
 
 
 def test_received_original_restore_then_only_new_s2_online_request(tmp_path, monkeypatch):
-    root = Path(__file__).resolve().parents[1]
     monkeypatch.setattr(socket, "create_connection", lambda *a, **k: pytest.fail("no network"))
     monkeypatch.setattr(socket.socket, "connect", lambda *a, **k: pytest.fail("no network"))
+    root = synthetic_entry_root(tmp_path, monkeypatch)
     entry = revision.build_engine(root)
     output = tmp_path / "c"
     monkeypatch.setattr(entry, "campaign", lambda _: output)
@@ -92,4 +92,5 @@ def test_received_original_restore_then_only_new_s2_online_request(tmp_path, mon
     assert reached[0]["profile"]["offline_session_audit"][-1]["outcome"] == "reflection_failed"
     assert (folder / "memory-s1.first.json").read_bytes() == entry.retained_prefix["originals"]["memory-s1.first.json"]
     assert entry.export_protocol(frozen)["secondary_positions"] == 0
-    assert len(revision.parent_originals(root)) == 1071
+    assert revision.parent_originals(root)
+    assert all(path.is_relative_to(root) for path in revision.parent_originals(root))

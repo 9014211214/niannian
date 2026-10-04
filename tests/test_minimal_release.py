@@ -378,7 +378,7 @@ def test_v5_execution_tools_included_but_old_v4_scope_stays_verifiable(source, t
 
 
 def test_e1br_authored_tools_include_no_private_campaign_or_ledger(source, tmp_path, monkeypatch):
-    for name in release.V6_POLICY_FILES:
+    for name in release.V6_POLICY_FILES | release.V7_POLICY_FILES:
         path = source / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# Authored E1b-R fixture\n", encoding="utf-8")
@@ -386,6 +386,7 @@ def test_e1br_authored_tools_include_no_private_campaign_or_ledger(source, tmp_p
         "artifacts/local/e1br-formal-v1/campaign.json",
         "artifacts/local/e1br-formal-v1/ledger.sqlite3",
         "artifacts/local/tasks/20261004-07/user-approval.json",
+        "artifacts/local/tasks/20261004-07/checkpoint-originals.manifest.json",
         "experiments/e1br-formal-v1/raw_response.json",
         "experiments/e1br-formal-v1/fees.json",
         "scripts/unreviewed_e1br_tool.py", "docs/unreviewed_e1br_notes.md",
@@ -405,9 +406,9 @@ def test_e1br_authored_tools_include_no_private_campaign_or_ledger(source, tmp_p
     target = tmp_path / "e1br-current.zip"
     release.build_release(source, target)
     with zipfile.ZipFile(target) as packed:
-        assert release.V6_POLICY_FILES <= set(packed.namelist())
+        assert release.V6_POLICY_FILES | release.V7_POLICY_FILES <= set(packed.namelist())
         assert not set(excluded) & set(packed.namelist())
-    assert release.verify_release(target)["policy_version"] == "aria-minimal-source-6"
+    assert release.verify_release(target)["policy_version"] == release.POLICY_VERSION
 
 
 def test_v5_archive_retains_original_scope_without_new_e1br_files(source, tmp_path):
@@ -422,6 +423,41 @@ def test_v5_archive_retains_original_scope_without_new_e1br_files(source, tmp_pa
     before = target.read_bytes()
     assert release.verify_release(target)["policy_version"] == "aria-minimal-source-5"
     assert target.read_bytes() == before
+
+
+def test_v6_archive_keeps_original_scope_and_excludes_checkpoint_tools(source, tmp_path):
+    for name in release.V6_POLICY_FILES:
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# Authored v6 fixture\n", encoding="utf-8")
+    _, contents, manifest = release.inspect_source(source)
+    manifest["policy_version"] = release.V6_POLICY_VERSION
+    target = tmp_path / "retained-v6.zip"
+    with zipfile.ZipFile(target, "w") as packed:
+        for name, data in contents.items():
+            packed.writestr(name, data)
+        packed.writestr("RELEASE_MANIFEST.json", release._manifest_bytes(manifest))
+        packed.writestr("RELEASE_SCOPE.md", release.V6_SCOPE_TEXT)
+    before = target.read_bytes()
+    assert release.verify_release(target)["policy_version"] == "aria-minimal-source-6"
+    assert target.read_bytes() == before
+
+
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION}))
+@pytest.mark.parametrize("added", sorted(release.V7_POLICY_FILES))
+def test_checkpoint_files_cannot_enter_older_archive_policy(source, tmp_path, policy, added):
+    _, contents, manifest = release.inspect_source(source)
+    contents[added] = b"# Authored checkpoint fixture\n"
+    manifest["policy_version"] = policy
+    manifest["files"].append({"path": added, "bytes": len(contents[added]), "sha256": release._digest(contents[added])})
+    target = tmp_path / "wrong-old-checkpoint-policy.zip"
+    with zipfile.ZipFile(target, "w") as packed:
+        for name, data in contents.items():
+            packed.writestr(name, data)
+        packed.writestr("RELEASE_MANIFEST.json", release._manifest_bytes(manifest))
+        packed.writestr("RELEASE_SCOPE.md", release.V6_SCOPE_TEXT)
+    with pytest.raises(release.ReleaseError, match="archive_policy_member_rejected"):
+        release.verify_release(target)
 
 
 @pytest.mark.parametrize("policy", [release.LEGACY_POLICY_VERSION, release.PREVIOUS_POLICY_VERSION,

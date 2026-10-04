@@ -8,6 +8,7 @@ They do not authorize retries or change historical accounting.
 from __future__ import annotations
 
 import http.client
+import hashlib
 import json
 import math
 import re
@@ -107,6 +108,125 @@ _HTTP_DATE = re.compile(
     r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
     r"(?: [1-9]|[0-9]{2}) [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4})\Z"
 )
+
+# Opt-in E1b-R evidence; never contains provider messages or identifier values.
+ERROR_AUDIT_SCHEMA = "e1br_error_envelope_audit_v1"
+_ERROR_META_KEYS = frozenset({"error", "id", "request_id", "usage", "user_id"})
+_MODEL_CHANNEL_KEYS = frozenset({"choices", "content", "message", "messages", "output", "outputs",
+    "response", "completion", "text", "delta", "tool_calls", "function_call", "refusal",
+    "reasoning", "reasoning_details"})
+_USER_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
+
+
+def error_envelope_shape(data: Any) -> dict:
+    """Classify only fixed key names and types; unknown names/values stay local."""
+    obj = type(data) is dict
+    keys = set(data) if obj else set()
+    error = data.get("error") if obj else None
+    code = error.get("code") if type(error) is dict else None
+    code_status = ("absent_or_null" if code is None else "eligible" if type(code) is int
+                   and (code in {400, 408, 429} or 500 <= code <= 599)
+                   else "authentication_or_permission" if type(code) is int and code in {401, 403}
+                   else "other")
+    user_status = "absent"
+    if obj and "user_id" in data:
+        user = data["user_id"]
+        user_status = ("null" if user is None else "bounded_identifier" if type(user) is str
+                       and _USER_ID.fullmatch(user) else "invalid")
+    finite = False
+    if obj:
+        try:
+            json.dumps(data, allow_nan=False)
+        except (ValueError, TypeError, RecursionError):
+            pass
+        else:
+            finite = True
+    return {"object": obj, "known_top_keys": sorted(keys & (_ERROR_META_KEYS | _MODEL_CHANNEL_KEYS)),
+        "unknown_top_key_count": len(keys - _ERROR_META_KEYS - _MODEL_CHANNEL_KEYS),
+        "model_content_keys": sorted(keys & _MODEL_CHANNEL_KEYS), "finite": finite,
+        "error_object": type(error) is dict, "error_code_status": code_status, "user_id_status": user_status}
+
+
+def _error_audit_reasons(audit: dict) -> list[str]:
+    reasons = []
+    source, status = audit["source"], audit["http_status"]
+    if (source == "http_error_bytes" and not (status == 429 or 500 <= status <= 599)
+            or source == "parsed_response_canonical" and status != 200):
+        reasons.append("http_status_not_eligible")
+    if not audit["read_complete"]:
+        reasons.append("capture_not_complete")
+    if not audit["close_ok"]:
+        reasons.append("body_close_failed")
+    if audit["body_status"] == "empty" and source == "http_error_bytes":
+        return reasons
+    if audit["body_status"] != "parsed" or not audit["object"]:
+        reasons.append("not_parsed_object")
+    if audit["unknown_top_key_count"]:
+        reasons.append("unknown_top_keys")
+    if audit["model_content_keys"]:
+        reasons.append("model_content_channel_present")
+    if not audit["finite"]:
+        reasons.append("nonfinite_or_unserializable")
+    if not audit["error_object"]:
+        reasons.append("error_object_required")
+    if audit["error_code_status"] not in ({"eligible", "absent_or_null"}
+            if source == "http_error_bytes" else {"eligible"}):
+        reasons.append("error_code_not_eligible")
+    if audit["user_id_status"] == "invalid":
+        reasons.append("user_id_metadata_invalid")
+    return reasons
+
+
+def error_envelope_audit(data: Any, *, source: str, http_status: int, body_status: str,
+                         captured: bytes | None, read_complete: bool, close_ok: bool) -> dict:
+    audit = {"schema": ERROR_AUDIT_SCHEMA, "source": source, "http_status": http_status,
+        "body_status": body_status, "captured_sha256": hashlib.sha256(captured).hexdigest() if captured is not None else None,
+        "captured_bytes": len(captured) if captured is not None else None,
+        "read_complete": read_complete, "close_ok": close_ok, **error_envelope_shape(data)}
+    audit["rejection_reasons"] = _error_audit_reasons(audit)
+    return audit
+
+
+def validate_error_envelope_audit(audit: Any) -> None:
+    """Closed, content-free row schema; diagnostics never grant proof alone."""
+    expected = {"schema", "source", "http_status", "body_status", "captured_sha256", "captured_bytes",
+        "read_complete", "close_ok", "object", "known_top_keys", "unknown_top_key_count", "model_content_keys",
+        "finite", "error_object", "error_code_status", "user_id_status", "rejection_reasons"}
+    if (type(audit) is not dict or set(audit) != expected or audit["schema"] != ERROR_AUDIT_SCHEMA
+            or audit["source"] not in {"http_error_bytes", "parsed_response_canonical"}
+            or type(audit["http_status"]) is not int or not 100 <= audit["http_status"] <= 599
+            or audit["body_status"] not in _BODY_STATUSES
+            or any(type(audit[k]) is not bool for k in ("read_complete", "close_ok", "object", "finite", "error_object"))
+            or type(audit["unknown_top_key_count"]) is not int or audit["unknown_top_key_count"] < 0
+            or audit["error_code_status"] not in {"absent_or_null", "eligible", "authentication_or_permission", "other"}
+            or audit["user_id_status"] not in {"absent", "null", "bounded_identifier", "invalid"}):
+        raise ValueError("invalid_error_envelope_audit")
+    for name, allowed in (("known_top_keys", _ERROR_META_KEYS | _MODEL_CHANNEL_KEYS), ("model_content_keys", _MODEL_CHANNEL_KEYS)):
+        value = audit[name]
+        if (type(value) is not list or any(type(k) is not str or k not in allowed for k in value)
+                or value != sorted(set(value))):
+            raise ValueError("invalid_error_envelope_audit")
+    digest, size = audit["captured_sha256"], audit["captured_bytes"]
+    if (digest is None) != (size is None) or digest is not None and (
+            type(digest) is not str or not re.fullmatch(r"[a-f0-9]{64}", digest)
+            or type(size) is not int or size < 0
+            or audit["source"] == "http_error_bytes" and size > MAX_ERROR_BODY_BYTES + 1):
+        raise ValueError("invalid_error_envelope_audit")
+    if (audit["model_content_keys"] != sorted(set(audit["known_top_keys"]) & _MODEL_CHANNEL_KEYS)
+            or audit["unknown_top_key_count"] > (size or 0)
+            or not audit["object"] and (audit["known_top_keys"] or audit["unknown_top_key_count"] or audit["finite"])
+            or audit["error_object"] and "error" not in audit["known_top_keys"]
+            or not audit["error_object"] and audit["error_code_status"] != "absent_or_null"
+            or (audit["user_id_status"] == "absent") != ("user_id" not in audit["known_top_keys"])
+            or audit["read_complete"] and (digest is None or audit["body_status"] in {"read_failed", "oversized", "non_bytes"})
+            or audit["body_status"] == "empty" and audit["read_complete"] and (
+                size != 0 or digest != hashlib.sha256(b"").hexdigest() or audit["object"])
+            or audit["body_status"] == "parsed" and (not audit["object"] or not size)
+            or audit["source"] == "parsed_response_canonical" and (
+                audit["body_status"] != "parsed" or not audit["read_complete"] or not audit["close_ok"])
+            or type(audit["rejection_reasons"]) is not list
+            or audit["rejection_reasons"] != _error_audit_reasons(audit)):
+        raise ValueError("invalid_error_envelope_audit")
 
 
 def safe_generation_id(value: Any) -> str | None:
@@ -568,7 +688,8 @@ def _native_provider_error(data: Any, result: dict) -> None:
 
 def observe_http_error(exc: urllib.error.HTTPError, *, observed_at: float | int | None = None,
                        recovery_evidence: dict | None = None,
-                       no_content_evidence: dict | None = None) -> tuple[dict, dict]:
+                       no_content_evidence: dict | None = None,
+                       envelope_audit: dict | None = None) -> tuple[dict, dict]:
     """Consume at most limit+1 bytes, retaining only finite metadata and usage.
 
     Duplicate keys, incomplete bodies, oversized bodies and invalid envelopes
@@ -588,12 +709,31 @@ def observe_http_error(exc: urllib.error.HTTPError, *, observed_at: float | int 
         result.update(_generation_header_candidates(headers))
         result.update(_retry_after_observation(headers, observed_at=observed_at))
     data = None
+    captured = None
+    read_complete = False
+    audited = type(no_content_evidence) is dict or type(envelope_audit) is dict
     try:
         try:
             raw = exc.read(MAX_ERROR_BODY_BYTES + 1)
         except Exception as read_exc:
             result["body_read_error_kind"] = _read_error_kind(read_exc)
         else:
+            if isinstance(raw, bytes):
+                captured = raw[:MAX_ERROR_BODY_BYTES + 1]
+            if audited and isinstance(raw, bytes) and len(raw) <= MAX_ERROR_BODY_BYTES:
+                # A short read alone does not prove EOF. Keep the probe bounded
+                # and do not parse a valid JSON prefix followed by unread data.
+                try:
+                    tail = exc.read(1)
+                except Exception:
+                    tail = None
+                if type(tail) is bytes:
+                    captured = (raw + tail)[:MAX_ERROR_BODY_BYTES + 1]
+                read_complete = tail == b""
+                length_status, length = _single_header(headers, "Content-Length")
+                if length_status != "absent":
+                    read_complete = read_complete and length_status == "present" and bool(
+                        re.fullmatch(r"[0-9]{1,8}", length or "")) and int(length) == len(raw)
             if not isinstance(raw, bytes):
                 result["body_status"] = "non_bytes"
             elif len(raw) > MAX_ERROR_BODY_BYTES:
@@ -630,24 +770,15 @@ def observe_http_error(exc: urllib.error.HTTPError, *, observed_at: float | int 
             and type(data.get("error")) is dict and type(data["error"].get("code")) is int
             and data["error"]["code"] == 429):
         recovery_evidence.update(schema="http429_error_envelope_v1", complete_error_envelope=True, no_model_answer=True)
-    finite_error = False
-    if type(no_content_evidence) is dict and type(data) is dict:
-        try:
-            json.dumps(data, allow_nan=False)
-        except (ValueError, TypeError, RecursionError):
-            pass
-        else:
-            code = data.get("error", {}).get("code") if type(data.get("error")) is dict else None
-            finite_error = code is None or type(code) is int and (code in {400, 408, 429} or 500 <= code <= 599)
-    if (type(no_content_evidence) is dict and type(exc.code) is int
-            and (exc.code == 429 or 500 <= exc.code <= 599)
-            and not result.get("body_close_failed")
-            and (result["body_status"] == "empty" or (
-                result["body_status"] == "parsed" and type(data) is dict
-                and set(data) <= {"error", "id", "request_id", "usage"}
-                and type(data.get("error")) is dict and finite_error))):
-        no_content_evidence.update(schema="e1br_no_content_v1", kind="http_error",
-                                   http_status=exc.code, body_status=result["body_status"])
+    if audited:
+        audit = error_envelope_audit(data, source="http_error_bytes", http_status=exc.code,
+            body_status=result["body_status"], captured=captured, read_complete=read_complete,
+            close_ok=not result.get("body_close_failed", False))
+        if type(envelope_audit) is dict:
+            envelope_audit.update(audit)
+        if type(no_content_evidence) is dict and not audit["rejection_reasons"]:
+            no_content_evidence.update(schema="e1br_no_content_v1", kind="http_error",
+                                       http_status=exc.code, body_status=result["body_status"])
     return result, safe_usage(data)
 
 

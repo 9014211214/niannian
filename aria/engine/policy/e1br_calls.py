@@ -19,7 +19,10 @@ from .online_decision import protocol_version
 from .online_json import parse_json_decision
 from .reserved_calls import ReservedCallGuard, validate_reservation_policy
 from .request_pacing import monotonic_value, wait_until
-from .response_observability import _nonnegative_number, observe_http_error, validate_observation
+from .response_observability import (
+    _nonnegative_number, error_envelope_audit, error_envelope_shape, observe_http_error,
+    validate_error_envelope_audit, validate_observation,
+)
 from .transport_failure import validate_transport_failure
 
 SCHEMA = "e1br_no_content_retry_v1"
@@ -38,21 +41,23 @@ def _key(row):
 
 def _upstream_error_only(data):
     # An error plus choices/content is never evidence of no model answer.
-    if (type(data) is not dict or not set(data) <= {"error", "id", "request_id", "usage"}
-            or type(data.get("error")) is not dict):
-        return False
-    code = data["error"].get("code")
-    try:
-        json.dumps(data, allow_nan=False)
-    except (ValueError, TypeError, RecursionError):
-        return False
-    return type(code) is int and (code in {400, 408, 429} or 500 <= code <= 599)
+    shape = error_envelope_shape(data)
+    return (shape["object"] and shape["error_object"] and shape["finite"]
+            and not shape["unknown_top_key_count"] and not shape["model_content_keys"]
+            and shape["user_id_status"] != "invalid" and shape["error_code_status"] == "eligible")
 
 
 def no_content_failure(row):
     if (row.get("status") != "failed" or row.get("validation_error") not in {None, "provider_error_envelope"}):
         return False
     evidence = row.get("no_content_evidence")
+    if "error_envelope_audit" in row:
+        try:
+            validate_error_envelope_audit(row["error_envelope_audit"])
+        except (ValueError, TypeError, KeyError):
+            return False
+        if row["error_envelope_audit"]["rejection_reasons"]:
+            return False
     if type(evidence) is dict and evidence.get("schema") == "e1br_no_content_v1":
         if evidence.get("kind") == "http_error":
             return (set(evidence) == {"schema", "kind", "http_status", "body_status"}
@@ -146,6 +151,15 @@ def validate_e1br_records(rows, *, stage, registration_sha256):
             raise ValueError("invalid_e1br_accounting")
         if row.get("observation"):
             validate_observation(row["observation"])
+        if "error_envelope_audit" in row:
+            audit = row["error_envelope_audit"]
+            validate_error_envelope_audit(audit)
+            expected_source = "http_error_bytes" if row.get("failure_phase") == "http_status" else "parsed_response_canonical"
+            if (audit["http_status"] != row.get("http_status") or audit["source"] != expected_source
+                    or audit["body_status"] != row.get("observation", {}).get("body_status")
+                    or audit["close_ok"] == bool(row.get("observation", {}).get("body_close_failed"))
+                    or "no_content_evidence" in row and audit["rejection_reasons"]):
+                raise ValueError("e1br_error_envelope_audit_binding_changed")
         if "transport_failure" in row:
             validate_transport_failure(row["transport_failure"])
         prior = groups[_key(row)]
@@ -316,9 +330,10 @@ class E1BRCallGuard(ReservedCallGuard):
                 "online_decision_version": protocol_version(payload["messages"]) if client.role == "online_fast" else None}
 
     def _observe_http_failure(self, exc):
-        evidence = {}
-        observation, usage = observe_http_error(exc, no_content_evidence=evidence)
-        return observation, usage, ({"no_content_evidence": evidence} if evidence else {})
+        evidence, audit = {}, {}
+        observation, usage = observe_http_error(exc, no_content_evidence=evidence, envelope_audit=audit)
+        return observation, usage, {"error_envelope_audit": audit,
+            **({"no_content_evidence": evidence} if evidence else {})}
 
     def _finish(self, row):
         # Error envelopes can contain billable usage too. They never bypass
@@ -337,6 +352,14 @@ class E1BRCallGuard(ReservedCallGuard):
         super()._finish(row)
 
     def _record_receipt(self, client, row, data):
+        if "error" in data:
+            # This is a canonical parsed envelope, explicitly not original HTTP
+            # bytes. The ordinary envelope validator already rejected duplicate
+            # keys; the audit only retains hashes, counts and fixed categories.
+            captured = json.dumps(data, sort_keys=True, ensure_ascii=True).encode("utf-8")
+            row["error_envelope_audit"] = error_envelope_audit(data,
+                source="parsed_response_canonical", http_status=200, body_status="parsed",
+                captured=captured, read_complete=True, close_ok=True)
         if _upstream_error_only(data):
             row["no_content_evidence"] = {"schema": "e1br_no_content_v1", "kind": "upstream_error", "error_code": data["error"]["code"]}
         super()._record_receipt(client, row, data)

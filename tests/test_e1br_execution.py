@@ -1,12 +1,11 @@
 """Representative formal-entry segments with an injected, network-free transport.
 
-Real fictional prefix originals are read-only. All new ledgers and authorization
-fixtures live in pytest's temporary directory; this is no model effect result.
+Synthetic prefix originals, ledgers and authorization fixtures live in pytest's
+temporary directory; no local real experiment artifacts are required.
 """
 from collections import Counter
 from copy import deepcopy
 import json
-from pathlib import Path
 import socket
 
 import pytest
@@ -14,6 +13,7 @@ import pytest
 from scripts import run_e1br as revision
 from aria.engine.policy import minimal_calls
 from tests.test_e1br_calls import http_error
+from tests._e1br_entry_fixtures import synthetic_entry_root
 
 
 def test_exact_logical_inventory_and_rebinding_rejection():
@@ -35,9 +35,9 @@ def test_exact_logical_inventory_and_rebinding_rejection():
 
 @pytest.mark.parametrize("kind,physical", [("format_correction", 2), ("exhausted_reflection", 3), ("truncated_content", 1)])
 def test_formal_retained_prefix_first_reflection_then_next_session(tmp_path, monkeypatch, kind, physical):
-    root = Path(__file__).resolve().parents[1]
     monkeypatch.setattr(socket, "create_connection", lambda *a, **k: pytest.fail("network forbidden"))
     monkeypatch.setattr(socket.socket, "connect", lambda *a, **k: pytest.fail("network forbidden"))
+    root = synthetic_entry_root(tmp_path, monkeypatch)
     entry = revision.build_engine(root)
     output = tmp_path / "c"
     monkeypatch.setattr(entry, "campaign", lambda _: output)

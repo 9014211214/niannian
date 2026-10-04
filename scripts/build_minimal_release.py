@@ -17,12 +17,13 @@ import tempfile
 import zipfile
 
 
-POLICY_VERSION = "aria-minimal-source-6"
+POLICY_VERSION = "aria-minimal-source-7"
+V6_POLICY_VERSION = "aria-minimal-source-6"
 V5_POLICY_VERSION = "aria-minimal-source-5"
 V4_POLICY_VERSION = "aria-minimal-source-4"
 PREVIOUS_POLICY_VERSION = "aria-minimal-source-3"
 LEGACY_POLICY_VERSION = "aria-minimal-source-2"
-SUPPORTED_POLICIES = frozenset({POLICY_VERSION, V5_POLICY_VERSION, V4_POLICY_VERSION, PREVIOUS_POLICY_VERSION, LEGACY_POLICY_VERSION})
+SUPPORTED_POLICIES = frozenset({POLICY_VERSION, V6_POLICY_VERSION, V5_POLICY_VERSION, V4_POLICY_VERSION, PREVIOUS_POLICY_VERSION, LEGACY_POLICY_VERSION})
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_BYTES = 64 * 1024 * 1024
 LEGACY_MEDIA_FILES = frozenset({"docs/media/minimal-stage.png", "docs/media/minimal-local-preview.mp4"})
@@ -84,6 +85,11 @@ V6_POLICY_FILES = frozenset({
     "scripts/run_e1br_received_continuation.py", "scripts/e1br_received_body.py",
     "docs/E1BR_RECEIVED_CONTINUATION.md",
 })
+V7_POLICY_FILES = frozenset({
+    "scripts/e1br_checkpoint.py", "scripts/run_e1br_checkpoint_continuation.py",
+    "scripts/e1br_checkpoint_guard.py", "docs/E1BR_CHECKPOINT_CONTINUATION.md",
+    "scripts/ci_tests.py",
+})
 FIXED_FILES = frozenset({
     "README.md", "README.zh.md", "LICENSE", "THIRD_PARTY_NOTICES.md", ".env.example",
     "SECURITY.md", "CONTRIBUTING.md", "pyproject.toml", "MANIFEST.in", "AGENTS.md",
@@ -103,7 +109,7 @@ FIXED_FILES = frozenset({
     "aria/scenes/companion_elder/elder_kb.yaml",
     "aria/assets/voice/minimal.html", "aria/assets/voice/care.html",
     "aria/assets/voice/README.md", "tests/fixtures/followthrough_synthetic.json",
-}) | NEW_POLICY_FILES | V4_POLICY_FILES | V5_POLICY_FILES | V6_POLICY_FILES
+}) | NEW_POLICY_FILES | V4_POLICY_FILES | V5_POLICY_FILES | V6_POLICY_FILES | V7_POLICY_FILES
 REQUIRED_FILES = frozenset({
     "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "pyproject.toml",
     "aria/cli.py", "aria/runtime.py", "aria/voice/minimal.py",
@@ -190,13 +196,22 @@ V5_SCOPE_TEXT = V4_SCOPE_TEXT.replace(
     "no model spending permission and makes no experiment result claim. "
     "Prior version 4 archives retain their original scope. ",
 )
-SCOPE_TEXT = V5_SCOPE_TEXT.replace(
+V6_SCOPE_TEXT = V5_SCOPE_TEXT.replace(
     "No preview PNG/MP4 or other media is included by policy version 5. ",
     "No preview PNG/MP4 or other media is included by policy version 6. "
     "Version 6 adds only the explicitly named authored E1b-R entry, "
     "qualification, assessment and received-body continuation tools, and their execution contracts. Private "
     "campaigns, model responses, approvals and spending ledgers remain excluded. "
     "Prior version 5 archives retain their original scope. ",
+)
+SCOPE_TEXT = V6_SCOPE_TEXT.replace(
+    "No preview PNG/MP4 or other media is included by policy version 6. ",
+    "No preview PNG/MP4 or other media is included by policy version 7. "
+    "Version 7 adds the explicitly named authored checkpoint reconstruction "
+    "and continuation entry/guard tools plus their contract, and the CI test "
+    "partition/coverage verifier. Retained responses, "
+    "private manifests and campaign ledgers remain excluded. Tool inclusion "
+    "does not authorize paid execution. Prior version 6 archives retain their original scope. ",
 )
 
 
@@ -216,11 +231,13 @@ def _allowed(relative: str, policy: str = POLICY_VERSION) -> bool:
             or relative != value.as_posix() or ":" in relative
             or any(part in SKIP_DIRS for part in value.parts)):
         return False
-    if relative in V4_POLICY_FILES and policy not in {V4_POLICY_VERSION, V5_POLICY_VERSION, POLICY_VERSION}:
+    if relative in V4_POLICY_FILES and policy not in {V4_POLICY_VERSION, V5_POLICY_VERSION, V6_POLICY_VERSION, POLICY_VERSION}:
         return False
-    if relative in V5_POLICY_FILES and policy not in {V5_POLICY_VERSION, POLICY_VERSION}:
+    if relative in V5_POLICY_FILES and policy not in {V5_POLICY_VERSION, V6_POLICY_VERSION, POLICY_VERSION}:
         return False
-    if relative in V6_POLICY_FILES and policy != POLICY_VERSION:
+    if relative in V6_POLICY_FILES and policy not in {V6_POLICY_VERSION, POLICY_VERSION}:
+        return False
+    if relative in V7_POLICY_FILES and policy != POLICY_VERSION:
         return False
     if relative in FIXED_FILES and not (policy == LEGACY_POLICY_VERSION and relative in NEW_POLICY_FILES):
         return True
@@ -459,6 +476,7 @@ def verify_release(value: str | Path) -> dict:
                  PREVIOUS_POLICY_VERSION: PREVIOUS_SCOPE_TEXT,
                  V4_POLICY_VERSION: V4_SCOPE_TEXT,
                  V5_POLICY_VERSION: V5_SCOPE_TEXT,
+                 V6_POLICY_VERSION: V6_SCOPE_TEXT,
                  POLICY_VERSION: SCOPE_TEXT}[policy]
         if archive.read("RELEASE_SCOPE.md") != scope.encode("utf-8"):
             raise ReleaseError("archive_scope_changed")
