@@ -37,6 +37,8 @@ SOURCE_ENTRY_FILES = {
     "scripts/run_e1br_format_continuation.py", "scripts/e1br_format_checkpoint.py",
     "scripts/e1br_format_runtime.py", "scripts/e1br_format_legacy.py",
     "scripts/e1br_format_qualification.py",
+    "scripts/e1c_execution.py", "scripts/e1c_calls.py", "scripts/e1c_qualification.py",
+    "scripts/e1c_scoring.py", "scripts/run_e1c.py",
 }
 
 
