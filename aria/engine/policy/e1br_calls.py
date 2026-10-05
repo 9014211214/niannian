@@ -240,6 +240,10 @@ class E1BRCallGuard(ReservedCallGuard):
     def _validate_history(self, rows):
         return validate_e1br_records(rows, stage=self.stage, registration_sha256=self.registration_sha256)
 
+    def terminal_primary_failure(self, row):
+        """Versioned experiment extension; ordinary E1b-R never accepts one."""
+        return False
+
     def _snapshot(self):
         if self._db.execute("SELECT contract FROM e1br_policy WHERE id=1").fetchone() != (self._contract,):
             raise ValueError("e1br_contract_changed")
@@ -256,9 +260,11 @@ class E1BRCallGuard(ReservedCallGuard):
             reason = reason or "unresolved_request"
         elif any("cost" not in row["usage"] and not no_content_failure(row) for row in rows):
             reason = reason or "provider_cost_unknown"
-        elif any(row["status"] == "failed" and not no_content_failure(row) and not secondary_failure(row) for row in rows):
+        elif any(row["status"] == "failed" and not no_content_failure(row) and not secondary_failure(row)
+                 and not self.terminal_primary_failure(row) for row in rows):
             reason = reason or "request_failed"
         elif any(group[-1]["status"] == "failed" and group[-1]["role"] != "reflection"
+                 and not self.terminal_primary_failure(group[-1])
                  and sum("infrastructure_retry_of_request_id" in r for r in group) >= 2 for group in groups.values()):
             reason = reason or "infrastructure_retries_exhausted"
         elif len(rows) >= self.max_requests:
@@ -307,7 +313,9 @@ class E1BRCallGuard(ReservedCallGuard):
             # A primary no-content failure must be resolved at its own position.
             for group in self._validate_history(state["attempts"]).values():
                 last = group[-1]
-                if last["role"] != "reflection" and last["status"] == "failed" and _key(last) != (scope["operation_id"], scope["session_id"], client.role):
+                if (last["role"] != "reflection" and last["status"] == "failed"
+                        and not self.terminal_primary_failure(last)
+                        and _key(last) != (scope["operation_id"], scope["session_id"], client.role)):
                     raise MinimalCallStopped("unresolved_primary_position")
             reservation = self._reserve(client, request, payload, state)
             row = {"request_id": uuid.uuid4().hex, **scope, "logical_operation_id": scope["operation_id"],

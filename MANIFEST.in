@@ -21,6 +21,8 @@ include scripts/run_e1br.py scripts/e1br_qualification.py scripts/e1br_assessmen
 include scripts/run_e1br_received_continuation.py scripts/e1br_received_body.py
 include scripts/e1br_checkpoint.py scripts/run_e1br_checkpoint_continuation.py
 include scripts/e1br_checkpoint_guard.py scripts/ci_tests.py
+include scripts/run_e1br_format_continuation.py scripts/e1br_format_checkpoint.py
+include scripts/e1br_format_runtime.py scripts/e1br_format_legacy.py scripts/e1br_format_qualification.py
 include scripts/ctest_rehearsal.py scripts/run_ctest.py
 include scripts/run_ctest_repair.py
 include aria/bench/cases/e1b_v1_draft.yaml

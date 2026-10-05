@@ -559,6 +559,7 @@ class E1bRunner:
     """
 
     reflection_capture_class = _ReflectionCapture
+    runner_version = VERSION
 
     def __init__(self, suite: E1bSuite, *, root: str | Path,
                  app_factory: Callable[[Path], MinimalWebApp], seed: int,
@@ -572,7 +573,7 @@ class E1bRunner:
             raise ValueError("real calls cannot be labeled software fixtures")
         self.suite, self.root, self.factory = suite, Path(root).resolve(), app_factory
         self.seed, self.evidence_kind, self.gate = seed, evidence_kind, operation_gate
-        self.plan = synthetic_emotion_plan(suite, seed)
+        self.plan = self._emotion_plan(suite, seed)
         self.root.mkdir(parents=True, exist_ok=True)
         self.journal = self.root / "operations.jsonl"
         if self.journal.exists():
@@ -582,7 +583,7 @@ class E1bRunner:
         self._shared_guard = None
         self._shared_guard_identity = None
         self._sequence = 0
-        self._journal({"event": "created", "runner_version": VERSION,
+        self._journal({"event": "created", "runner_version": self.runner_version,
                        "source_sha256": suite.source_sha256, "seed": seed,
                        "evidence_kind": evidence_kind, "synthetic_emotion": True,
                        "frozen": False, "main_gate": "not_evaluated"})
@@ -592,6 +593,9 @@ class E1bRunner:
             "readings": [{"case_id": case_id, "session": session, "turn": turn, "reading": reading}
                          for (case_id, session, turn), reading in self.plan.items()],
         })
+
+    def _emotion_plan(self, suite, seed):
+        return synthetic_emotion_plan(suite, seed)
 
     def _journal(self, row: dict):
         with self.journal.open("a", encoding="utf-8", newline="\n") as handle:
@@ -685,6 +689,14 @@ class E1bRunner:
         if persona.cognitive_health_consent.text_monitoring_enabled:
             raise E1bRunStopped("C1 must remain disabled in E1b")
 
+    def _a0_profile(self, persona, case, shared_sessions):
+        # E1b keeps its original second-session, single-source control.
+        return strip_a0_preference_sources(
+            persona, session_id=shared_sessions[2], turn_index=case.pref_turn)
+
+    def _report_metadata(self, case, phase):
+        return {}
+
     def run_case(self, case_id: str, *, phase: str = "main", repeats: int = 3) -> dict:
         if phase not in {"main", "prescreen"} or type(repeats) is not int or repeats != 3:
             raise ValueError("registered layout requires main/prescreen and exactly three repeats")
@@ -693,11 +705,12 @@ class E1bRunner:
             raise ValueError("unknown case")
         case_root = self.root / phase / case.id
         case_root.mkdir(parents=True, exist_ok=False)
-        report = {"version": VERSION, "case_id": case.id, "phase": phase,
+        report = {"version": self.runner_version, "case_id": case.id, "phase": phase,
                   "evidence_kind": self.evidence_kind, "synthetic_emotion": True,
                   "frozen": False, "effects": "not_evaluated", "shared": None,
                   "branches": [], "scored_reply_count": 0}
-        shared_profile, preference_session = None, None
+        report.update(self._report_metadata(case, phase))
+        shared_profile, shared_sessions = None, {}
         if phase == "main":
             app = self._new_app(case_root / "shared")
             try:
@@ -713,8 +726,7 @@ class E1bRunner:
                     finally:
                         app.proposal_capture = None
                         app.reflection_capture = None
-                    if number == 2:
-                        preference_session = session_id
+                    shared_sessions[number] = session_id
                 # Deliberately confirm every proposed item, even wrong ones.
                 # Matching an expected answer here would bias the experiment.
                 proposals = [row.id for row in app._profile().stated_preferences if row.status == "proposed"]
@@ -739,8 +751,8 @@ class E1bRunner:
                     if shared_profile is not None:
                         branch_profile = shared_profile.model_copy(deep=True)
                         if arm == "A0":
-                            branch_profile, removed = strip_a0_preference_sources(
-                                branch_profile, session_id=preference_session, turn_index=case.pref_turn)
+                            branch_profile, removed = self._a0_profile(
+                                branch_profile, case, shared_sessions)
                         self._assert_profile(branch_profile)
                         # Only persona data travels across the fork. No care DB,
                         # cost ledger, active session or app run ID is copied.

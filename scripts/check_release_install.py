@@ -34,6 +34,9 @@ SOURCE_ENTRY_FILES = {
     "scripts/run_e1br_received_continuation.py", "scripts/e1br_received_body.py",
     "scripts/e1br_checkpoint.py", "scripts/run_e1br_checkpoint_continuation.py",
     "scripts/e1br_checkpoint_guard.py", "scripts/ci_tests.py",
+    "scripts/run_e1br_format_continuation.py", "scripts/e1br_format_checkpoint.py",
+    "scripts/e1br_format_runtime.py", "scripts/e1br_format_legacy.py",
+    "scripts/e1br_format_qualification.py",
 }
 
 

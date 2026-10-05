@@ -24,6 +24,7 @@ from .reply_contract import (
 )
 
 ONLINE_DECISION_VERSION = "online_turn_decision_v1"
+ONLINE_ID_NAMESPACE_VERSION = "online_json_id_namespaces_v1"
 # v2: 字段顺序改为“状态 → 情绪 → 轻量 MWM 推演 → 选择 → 计划 → response”，
 # 让回复在推演之后生成；推演只能引用离线画像/假设与当前原话，不重算人格。
 # v1 保留原样，供历史复现与对照臂使用。
@@ -491,6 +492,33 @@ def online_decision_tool_spec(version: str = ONLINE_DECISION_VERSION) -> dict:
     }
 
 
+def online_id_namespace_contract(version: str, interventions: list[dict]) -> str:
+    """Keep state enum and server-owned intervention IDs in separate fields."""
+    schema = online_decision_tool_spec(version)["function"]["parameters"]
+    state_ids = schema["properties"]["state_signals"]["items"]["properties"]["id"]["enum"]
+    # The caller reuses the SAME server-rendered candidates already shown in
+    # the prompt. Do not mine user/history text for either namespace.
+    intervention_ids = [item["id"] for item in interventions]
+    def compact(value):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return (
+        "\n\n## 字段ID命名空间：" + ONLINE_ID_NAMESPACE_VERSION
+        + "\n$.state_signals[].id 是当轮状态ID，合法值全集直接来自本次Schema："
+        + compact(state_ids)
+        + "。只能逐字使用这个集合中的字符串，不能填沟通/干预策略ID、中文名称或组合词。"
+        + "\n$.selected_intervention_id 是沟通/干预策略ID；本轮仍只从上文当前可选干预中选择，"
+        "该列表的ID为：" + compact(intervention_ids)
+        + "；没有可选干预时仍按原合同给空字符串。"
+        + ("v2中$.deliberation.options[].intervention_id也属于同一个可选干预列表。"
+           if version == ONLINE_DECISION_VERSION_V2 else "")
+        + "\n状态和策略属于不同命名空间；字段之间不能搬值，也不能按拼写相近映射或改名。"
+        "已选择策略不代表已经证明任何状态。状态仍只依据原话证据独立判断；"
+        "无充分证据仍按原合同给state_signals空数组，不为凑字段新增状态。"
+        "本段只区分字段，不指定本轮该选哪个状态或策略，不提供心理答案；"
+        "返回后仍执行原完整校验，非法字段不会被删除或改写为通过。"
+    )
+
+
 def single_pass_messages(
     messages: list[dict],
     ctx: EngineContext,
@@ -587,6 +615,7 @@ def single_pass_messages(
         "\n不以‘没事就好’关闭持续变化，不把持续退出说成‘歇着挺好’，也不强迫参与。"
         "沟通方向 id 绝不是工具名。情绪/症状本身不授权。"
     )
+    shared_tail += online_id_namespace_contract(version, interventions)
     if format_style == "schema_guided":
         # Replace only our newly constructed format wording, never quoted data.
         shared_tail = shared_tail.replace(
