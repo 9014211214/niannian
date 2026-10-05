@@ -7,6 +7,12 @@ approached, keep the evidence behind that understanding, and respect their choic
 It combines continuous conversation, revisable person hypotheses, and a small care
 workflow. Personality frameworks guide communication; they are not diagnoses.
 
+Model effectiveness has **not passed acceptance**. In the completed E1b-R run,
+all 14 proposed communication preferences were rejected before confirmation, so
+the intended preference-use effect was not measured. See the
+[fixed result and diagnosis](docs/E1BR_RESULTS_2026_10_05.md). Later repairs need
+their own model evidence; software tests do not establish a benefit to elders.
+
 ## Run locally
 
 Requires Python 3.10 or newer. From this directory, on Windows:
@@ -94,4 +100,4 @@ no real E2 was run. Later product changes do not inherit E1's model conclusions.
 
 First-party code is [MIT](LICENSE), subject to file-specific notices. See
 [third-party notices](THIRD_PARTY_NOTICES.md). External datasets and personal data
-are not included. A source archive is not permission to deploy or publish.
+are not included. Model services and external datasets retain their own terms.

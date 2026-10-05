@@ -36,14 +36,14 @@
       "sha256": "152c7e8ecf4696031efc0be19e8a6dcd8788c2733027f34bf92606f12d4407f0"
     },
     {
-      "bytes": 5046,
+      "bytes": 5432,
       "path": "README.md",
-      "sha256": "7deb387d93e546fd5fd8333dbb3f414567d43d656cd9576b7cb44f0884b7ecd4"
+      "sha256": "23d4149e5abce9fc283a924168a1bc413b22ff75553b69f7c1498047f3f78c25"
     },
     {
-      "bytes": 4464,
+      "bytes": 4795,
       "path": "README.zh.md",
-      "sha256": "5b9be4ec9f18aa1414bcd4970e7eec7e8a6385443853271e35809042df8d0d44"
+      "sha256": "326e3645ae18d107d80cba967ba151da8386280adb2134ea7610dd02a7d61162"
     },
     {
       "bytes": 6145,
@@ -276,9 +276,9 @@
       "sha256": "7258f2001421513e1bbfa61f50b87a7311d12ef3cfda36b4ac24012d26f5e99d"
     },
     {
-      "bytes": 22567,
+      "bytes": 23069,
       "path": "aria/engine/memory/consolidator.py",
-      "sha256": "9f07bea3196a16c3fa9abaddaa339179c91966522cf4a17181d03b606343dde2"
+      "sha256": "484bb45e554e647874825ee3a4e76e110b7a5318d70e7d7fcb855af51e998b02"
     },
     {
       "bytes": 3825,
@@ -316,9 +316,9 @@
       "sha256": "5fe771d41f6911130b8c787e4ee65078d8c7b1545920c85d77715173964caac2"
     },
     {
-      "bytes": 15954,
+      "bytes": 23908,
       "path": "aria/engine/memory/stated_preferences.py",
-      "sha256": "19bd5108441101981fca332d345f2196258e7e4e86ca74da4fefe7debfeb2d3b"
+      "sha256": "c784bba935147830af56b69997c6da8360ce4d38b11a9f3325cef7bd820fa5cb"
     },
     {
       "bytes": 18715,
@@ -716,19 +716,24 @@
       "sha256": "71e52f392e3584e88e79888daafaba98eedc868f172244c71bb72beda7ba67a0"
     },
     {
+      "bytes": 9116,
+      "path": "docs/E1BR_RESULTS_2026_10_05.md",
+      "sha256": "16fa852a3ce6d2a5992b8c389ad127a5d239f99af52a4da126375dc571e471d1"
+    },
+    {
       "bytes": 40765,
       "path": "docs/E1B_EXECUTION.md",
       "sha256": "e71eae9751dfb166980df255e35010d7e9288cee5a9135b01ede6e70b6ae2cd6"
     },
     {
-      "bytes": 6490,
+      "bytes": 6512,
       "path": "docs/E1C_EXECUTION.md",
-      "sha256": "f8fce5cd72789af986647f5d07213aad7e94b65aa4f127950e0ad0f96f6d6964"
+      "sha256": "b11d8140a4983b40532c4d5e23ceb70bb5483ec554d2468644805e0a1e61d982"
     },
     {
-      "bytes": 6438,
+      "bytes": 6448,
       "path": "docs/E1C_PAID_EXECUTION.md",
-      "sha256": "15e5d6e31891f0a7afd2d104b10f837445eca60cc97edbd5fe0868fcaaf3b351"
+      "sha256": "c01f1a9f9b26b734c738ad85963ed2574c51d1d85dcc7e4f48f09b2ae17d6ff9"
     },
     {
       "bytes": 4266,
@@ -776,9 +781,9 @@
       "sha256": "9d2ab2361ea276f0c560ab9064eab18e4ae53a54d06b9181a6c0f9716e3c0d11"
     },
     {
-      "bytes": 3054,
+      "bytes": 3501,
       "path": "docs/EVIDENCE.md",
-      "sha256": "cda2095302e1f02293ac35b94f8d120370d28b35847a8c46d2389de399e298a8"
+      "sha256": "57d20c9aa8fe3bac07585713599132f2a21549c1af60fc3e8900b05fe271d687"
     },
     {
       "bytes": 11326,
@@ -791,9 +796,9 @@
       "sha256": "b627e627d69f9e510fcba229951449ca6b06cd5e2905352c9bb6c055c1f1ce3c"
     },
     {
-      "bytes": 6036,
+      "bytes": 6250,
       "path": "docs/MINIMAL_RELEASE_CHECKLIST.md",
-      "sha256": "40356c9ab089c2699a24c381b4adb8d894e0285257ad771ca9311315910720ac"
+      "sha256": "2d9b85e26640c82371843c00698032fef413dd25ed12a75fb286ed639c33f81a"
     },
     {
       "bytes": 8851,
@@ -801,19 +806,19 @@
       "sha256": "5df547af19f87d1abef65f9b775d809c2013bb6173dfe16fcdae5ed379f8908d"
     },
     {
-      "bytes": 52815,
+      "bytes": 55817,
       "path": "docs/PROGRESS.md",
-      "sha256": "6372aa18a83bf7f4b8f9918527faa56f01b9162576d560827cff5ff46efa3c73"
+      "sha256": "00cd68dbd0bd6afd17f634ab977bc3e11a6a883c6a9792a01c77d5c5bc4c30e6"
     },
     {
-      "bytes": 9290,
+      "bytes": 9404,
       "path": "docs/RELEASE_SECURITY_AUDIT.md",
-      "sha256": "0015d80f8f6dfed4f3dc62832f04b875a9d37425ed365f27ef226a9f6fb8fc41"
+      "sha256": "55cb639a92c33580efa5a0b9e8d48f955871e00afa15a61ed9facceae18ad5f9"
     },
     {
-      "bytes": 13449,
+      "bytes": 16520,
       "path": "docs/STATED_PREFERENCE.md",
-      "sha256": "0ae89edce786446771b81f7838ce12121491e6ddb90522fb0ab85b04c869e89b"
+      "sha256": "25914c803cc4f13b39def825f97ac3f8b388c9352e4cdaa787c7e4c44e842df7"
     },
     {
       "bytes": 33766,
@@ -1001,9 +1006,9 @@
       "sha256": "2eb06951ed495482955e038ec05162591fd9b7bb65ca9dd0bda863a657deea27"
     },
     {
-      "bytes": 32981,
+      "bytes": 33964,
       "path": "scripts/build_minimal_release.py",
-      "sha256": "b944d3538ad0ba74807410e0bb98b0fbd7304e3edafc27d7015d85f87e8aa077"
+      "sha256": "f02e97be421bd77e1306ab4802ab4ff5d16b09d12b2da95517febbbebf3a8cac"
     },
     {
       "bytes": 12119,
@@ -1021,9 +1026,9 @@
       "sha256": "c8bd25a370b937a2831018bb1c76e55bf9cbaccb038fd26bfc3a32cd883f978c"
     },
     {
-      "bytes": 15425,
+      "bytes": 15464,
       "path": "scripts/check_release_install.py",
-      "sha256": "468faf4c782f9b4f84b55e84d37d371683764b62645a5913e29a5e46098bb549"
+      "sha256": "a125ce088200e2897cbe2adada45099a71325b0f2266b96442ea5dae545cbdcf"
     },
     {
       "bytes": 8529,
@@ -1476,9 +1481,9 @@
       "sha256": "741292c02c6d2cd907db078889396c8029929d0e784748cc11223947979dca2e"
     },
     {
-      "bytes": 8777,
+      "bytes": 9669,
       "path": "tests/test_cognitive_memory_protocol.py",
-      "sha256": "c0f6ad529cdca3b37d739ff8d96fd99189fca3527ac703d19a30608868ea51b8"
+      "sha256": "f3a756b46970c2374820d696bdb9a48b27f768e3b4b9a5d42dafbe18b74ebe50"
     },
     {
       "bytes": 7755,
@@ -1996,9 +2001,9 @@
       "sha256": "8e73be88dd5e044993b7f7f39caf85cb6fa50b60be24569db2c3aad2787e3400"
     },
     {
-      "bytes": 32771,
+      "bytes": 34907,
       "path": "tests/test_minimal_release.py",
-      "sha256": "c87723cfc108633a63b7a54197e4b0afd01f4614e0ec74c9393fb345c3e5ca0a"
+      "sha256": "fafc3f6869e0993cdb5c84137699490e244483b07a02d4ae4f15571472fa5cc5"
     },
     {
       "bytes": 8107,
@@ -2116,6 +2121,11 @@
       "sha256": "0d860c7ae78a7d815672164bd6a33093fdf732fb15bd514e996e22aacf38974e"
     },
     {
+      "bytes": 12327,
+      "path": "tests/test_preference_conditional_contract.py",
+      "sha256": "2797511ba1e774bc90c755d4450f91f477532646402eec39d09ee2afcf94fa75"
+    },
+    {
       "bytes": 10132,
       "path": "tests/test_prefeval.py",
       "sha256": "69b779165120c1111c2a7f0baa2e4f5a612611bccf8482d4d5c67fb251861bca"
@@ -2136,9 +2146,9 @@
       "sha256": "d4d5f41d58e55f6f60f6d47d4aa4e2470f88ffd7764d69f3de43f269f034e5e6"
     },
     {
-      "bytes": 4143,
+      "bytes": 4611,
       "path": "tests/test_r1_source_boundaries.py",
-      "sha256": "e72f276b5b1806f78d68d916613f4612fa79422c82439d479f94227df5f4cfaa"
+      "sha256": "1da4859b321015b1337ec6711bc8b317b4ee9ce2063660b116c4598cf22c5c15"
     },
     {
       "bytes": 14447,
@@ -2387,7 +2397,7 @@
     }
   ],
   "model_requests": 0,
-  "policy_version": "aria-minimal-source-11",
+  "policy_version": "aria-minimal-source-12",
   "scope": "selected_current_source_only_not_git_history_or_runtime_data",
   "synthetic_password_fixture_exemptions": [
     {

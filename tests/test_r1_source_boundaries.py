@@ -16,10 +16,18 @@ def extract(text, instruction, *, quote=None):
 
 @pytest.mark.parametrize("step", ["一步", "下一步", "第一步"])
 def test_telling_the_owner_an_operation_step_is_not_disclosure(step):
-    instruction = f"告诉我{step}"
-    rows, rejected = extract(f"请你先{instruction}，等我说好了再继续。", instruction)
+    instruction = f"请你先告诉我{step}，等我说好了再继续。"
+    rows, rejected = extract(instruction, instruction)
     assert not rejected and len(rows) == 1
     assert rows[0].do == instruction and rows[0].status == "proposed"
+
+
+@pytest.mark.parametrize("step", ["一步", "下一步", "第一步"])
+def test_owner_step_quote_cannot_drop_the_wait_condition(step):
+    # The previous software probe selected only the consequent. The current
+    # contract deliberately rejects that crop while retaining its full form.
+    rows, rejected = extract(f"请你先告诉我{step}，等我说好了再继续。", f"告诉我{step}")
+    assert not rows and rejected == ["preference_condition_not_preserved"]
 
 
 @pytest.mark.parametrize("boundary", ["，", ",", "。", ".", "；", ";", "！", "？", "\n"])

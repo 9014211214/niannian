@@ -30,20 +30,63 @@ _REPORTED_OR_HYPOTHETICAL = re.compile(
     r"|假如|假设|比如|例如|举个例子"
 )
 _OWNER_STEP_TELL = re.compile(r"告诉我(?:下一步|第一步|一步)")
-_RECIPIENT_SPEECH = re.compile(r"(?:跟|向|对|给)(" + _CLAUSE_BODY + r"{1,16}?)(?:提|说|讲|透露|展示|出示)")
+_OWNER_DIALOGUE_TELL = re.compile(r"告诉(?:我|你|您)(?=$|[，,。.!！?？;；:：\n])")
+_RECIPIENT_SPEECH = re.compile(r"(?:跟(?!上)|向|对|给)(" + _CLAUSE_BODY + r"{1,16}?)(?:提(?!示)|说(?!明)|讲|透露|展示|出示|听|看)")
 _OUTBOUND_TRANSFER = re.compile(r"发给|发到|转发|发送|转给")
 _NEGATED_REQUEST = re.compile(
     r"(?:别(?!人)|不要|不用|不必|不想|不希望|不需要|不愿意|没必要|无需|用不着|不准|不许|不能)"
     + _CLAUSE_BODY + r"{0,8}(?:先问|告诉我(?:下一步|第一步|一步))"
 )
 _UNSAFE_ADVICE = re.compile(r"(?:停药|加药|减药|药量|剂量|双倍|忽略.{0,8}(?:风险|危险|规则)|跳过.{0,8}(?:核验|确认|权限))")
+_MEDICAL_RULE_CONTEXT = re.compile(r"药片|吃药|用药|开的药|医嘱|就医|复诊|急救|就诊")
+_SOURCE_META_CONTEXT = re.compile(
+    r"昨天|前天|曾经|发生的事|那是.{0,8}的事|来自|转述|引述|练习册|台词|对白|说明书|读过|读到|念的句子"
+    r"|撤回|不确认|不再用|不要再用|别再.{0,8}记|不是.{0,8}(?:要求|意思)|以前你|过去你"
+)
 _TRAIT_OR_CAUSE = re.compile(r"disc|big[ _]?five|cbt|依恋|内向|外向|神经质|人格|性格|诊断|抑郁症|焦虑症|缺乏安全感|导致", re.I)
+_COMMUNICATION_ACTION = r"(?:问|说|讲|教|催|劝|回答|回应|倾听|解释|建议|纠正|打断|提示|提醒|听|聊|插话|提意见|想办法|叫你|告诉)"
+_CONDITIONAL_COMMUNICATION = re.compile(
+    # The owner specifies a condition, followed by an action for this dialogue.
+    # These are grammatical relations, not topic phrases from evaluation cases.
+    r"(?:(?:等|等到)我" + _CLAUSE_BODY + r"{1,30}?[，,]"
+    r"|(?:等|等到)我" + _CLAUSE_BODY + r"{1,30}?(?:完|好|清楚|明白|出来|结束|时|后|了)"
+    r"|(?:当|如果|在)?我" + _CLAUSE_BODY + r"{1,30}?(?:时|后|之后|以后))"
+    r"[，, ]*(?:你|您)?(?:再|才)(?:给我|跟我|向我|对我)?"
+    r"(?P<action>" + _COMMUNICATION_ACTION + r")"
+)
+_CONDITIONAL_DENIAL = re.compile(
+    r"不想|不希望|不需要|不愿意|不赞成|不同意|不是|不再|不要|不用|不必|不准|不许|不能"
+    r"|别(?:等|按|照)|不这样|不这么|不是我的|不算|不是这个意思"
+    r"|你会|您会|会不会|是否|能否|[?？\"“”‘’「」『』]|(?:吗|么)[。.!！ ]*$"
+)
+_REPORTED_CONDITIONAL = re.compile(
+    r"(?:^|[。.!！?？;；\n])\s*(?!(?:我|你|您|等|当|如果|在|请|麻烦|先|只|让))"
+    r"[\u3400-\u9fff]{1,8}(?:说|表示|要求|希望|认为|建议|告诉)"
+)
+_DIRECT_REQUEST = re.compile(
+    r"^(?:(?:请|麻烦)(?:你|您)?(?:先|一次|慢|逐)"
+    r"|(?:你|您)(?:先|只|说|讲)|(?:先|只)(?:给|问|听|说|讲|让|等)"
+    r"|让我|" + _CLAUSE_BODY + r"{1,8}也先让我)"
+)
+_OWNER_CONDITION = re.compile(
+    # In '先问我再安排', 我 is the object of 问, not a condition clause.
+    r"等我|等到我|我" + _CLAUSE_BODY + r"{1,35}(?:再|才)|只在|仅限|只有"
+    r"|(?:之后|以后|后)(?:再|才)|(?:再|才)" + _COMMUNICATION_ACTION
+)
+_PERSON_DIRECTED_ACTION = re.compile(
+    r"(?:(?:^|[，,；;])(?:你|您)?(?:先|再|才|只)?(?:别|不要)?|(?:再|才))"
+    r"(?:问(?:问)?|教|催|劝|打断|提醒|提示|回答|回应|倾听|纠正)"
+)
+_OWNER_OBJECT = re.compile(
+    r"(?:[，,。.!！?？;；\s]|$)|我(?=$|[，,。.!！?？;；\s])"
+    r"|我(?:怎么|如何|哪里|何时|什么时候|是否|是不是|是什么|能不能|行不行|要不要|想不想|愿不愿意|想说|最(?:在意|关心)什么)"
+)
 
 
 def _sharing_or_permission(text: str) -> bool:
-    # Only an explicit step addressed to 'me' is carved out; 'tell my daughter'
-    # and every other disclosure/permission marker retain their old rejection.
-    bounded = _OWNER_STEP_TELL.sub("", text)
+    # 'Tell me' and 'I tell you' remain inside this dialogue. A recipient such
+    # as 'my daughter' must not be mistaken for the owner pronoun prefix.
+    bounded = _OWNER_DIALOGUE_TELL.sub("", _OWNER_STEP_TELL.sub("", text))
     return (
         any(word in bounded for word in _NO_PERMISSION)
         or bool(_OUTBOUND_TRANSFER.search(text))
@@ -57,9 +100,70 @@ def _safe_user_instruction(text: str) -> bool:
         _sharing_or_permission(text)
         or _REPORTED_OR_HYPOTHETICAL.search(text)
         or _UNSAFE_ADVICE.search(text)
+        or _MEDICAL_RULE_CONTEXT.search(text)
+        or _SOURCE_META_CONTEXT.search(text)
         or _TRAIT_OR_CAUSE.search(text)
         or _NEGATED_REQUEST.search(text)
     )
+
+
+def _conditional_instruction(instruction: str, full_source: str) -> bool:
+    """Recognise a bounded owner condition without discarding its qualifiers.
+
+    A model-selected consequent ('再讲步骤') alone is not an instruction here.
+    Require an entire source sentence, then retain the complete source turn in
+    the stored evidence. Unclear/negated questions cannot become proposals.
+    """
+    if (_CONDITIONAL_DENIAL.search(full_source) or _REPORTED_CONDITIONAL.search(full_source)
+            or not _owner_action_targets(instruction)):
+        return False
+    complete_sentence = (instruction.strip().rstrip("。.!！?？;；\n")
+                         == full_source.strip().rstrip("。.!！?？;；\n"))
+    match = _CONDITIONAL_COMMUNICATION.search(instruction)
+    if not complete_sentence or match is None:
+        return False
+    # A leading topic may constrain the request ('整理相册时，...'). A quoted
+    # phrase inside a description ('我读过等我...') is not an owner request.
+    prefix = instruction[:match.start()].strip()
+    return bool(re.fullmatch(
+        r"(?:我希望|我更喜欢|请你)?(?:" + _CLAUSE_BODY + r"{1,30}时[，,]\s*)?", prefix
+    ))
+
+
+def _owner_action_targets(instruction: str) -> bool:
+    # The pronoun must end or begin an unambiguous question-content operator.
+    # Never guess whether an arbitrary following noun is the owner's relative,
+    # employer, classmate, etc. ('我老板' does not end the recipient at '我').
+    for action in _PERSON_DIRECTED_ACTION.finditer(instruction):
+        if not _OWNER_OBJECT.match(instruction[action.end():]):
+            return False
+    return True
+
+
+def _bounded_direct_scope(instruction: str, full_source: str, supplied_scope: object) -> str | None:
+    """Accept a complete directive suffix only when its prefix stays as scope.
+
+    The model may split a topic from its instruction, but cannot omit anything
+    after it or lose words from the topic (including 'today' and 'only here').
+    This is a conservative proposal grammar, not general Chinese understanding.
+    """
+    if (not (_DIRECT_REQUEST.search(instruction) or _conditional_instruction(instruction, instruction))
+            or not re.search(_COMMUNICATION_ACTION, instruction)
+            or _CONDITIONAL_DENIAL.search(full_source)
+            or _REPORTED_CONDITIONAL.search(full_source)
+            or not _owner_action_targets(instruction)
+            or full_source.count(instruction) != 1):
+        return None
+    prefix, suffix = full_source.split(instruction)
+    if suffix.strip("。.!！;；\n \t"):
+        return None
+    if prefix:
+        if (not prefix.endswith(("，", ",")) or not isinstance(supplied_scope, str)
+                or not supplied_scope or supplied_scope not in prefix
+                or len(prefix.rstrip("，,")) > 60):
+            return None
+        return prefix.rstrip("，,")
+    return "仅限完整原话所述情境"
 
 
 def _now() -> str:
@@ -90,7 +194,7 @@ def _instruction_scope(instruction: str, quotes: list[PreferenceQuote]) -> str:
     if instruction == "交流时放慢节奏，不催促本人回答或行动":
         return "本人提出放慢交流或不要催促的当前情境"
     # Retain the actual context instead of inventing a broad reusable scope.
-    return "仅限原话所述情境：" + quotes[0].text[:49]
+    return "仅限完整原话所述情境"
 
 
 def _quote(raw: object, ctx: EngineContext) -> PreferenceQuote | None:
@@ -162,12 +266,39 @@ def extract_preference_rows(rows: object, ctx: EngineContext, persona: PersonaPr
         if not all(_safe_user_instruction(ctx.turns[row.turn_index].user) for row in quotes):
             rejected.append("preference_full_user_context_unsafe")
             continue
+        if any(len(ctx.turns[row.turn_index].user) > 240 for row in quotes):
+            rejected.append("preference_full_user_context_too_long")
+            continue
         instruction = raw.get("do")
+        direct_scope = None
+        if isinstance(instruction, str):
+            for row in quotes:
+                if instruction in row.text:
+                    direct_scope = _bounded_direct_scope(
+                        instruction, ctx.turns[row.turn_index].user, raw.get("scope")
+                    )
+                    if direct_scope is not None:
+                        break
+        conditional = isinstance(instruction, str) and any(
+            instruction in row.text
+            and _conditional_instruction(instruction, ctx.turns[row.turn_index].user)
+            for row in quotes
+        )
+        if (conditional or direct_scope is not None) and len(quotes) != 1:
+            rejected.append("preference_multiple_instruction_contexts")
+            continue
+        if (any(_OWNER_CONDITION.search(ctx.turns[row.turn_index].user)
+                or _CONDITIONAL_COMMUNICATION.search(ctx.turns[row.turn_index].user) for row in quotes)
+                and not conditional and direct_scope is None):
+            rejected.append("preference_condition_not_preserved")
+            continue
         if (not isinstance(instruction, str) or not 1 <= len(instruction) <= 60
                 or _sharing_or_permission(instruction) or any(_sharing_or_permission(row.text) for row in quotes)
+                or not _owner_action_targets(instruction)
                 or _TRAIT_OR_CAUSE.search(instruction)
-                or not any(_REQUEST.search(row.text) for row in quotes)
-                or not (re.search(r"问|交流|沟通|说|讲|教|催|劝|回答|回应|倾听", instruction)
+                or not (conditional or direct_scope is not None or any(_REQUEST.search(row.text) for row in quotes))
+                or not (conditional or direct_scope is not None
+                        or re.search(r"问|交流|沟通|说|讲|教|催|劝|回答|回应|倾听", instruction)
                         or _OWNER_STEP_TELL.search(instruction))):
             rejected.append("preference_not_safe_explicit_instruction")
             continue
@@ -181,7 +312,13 @@ def extract_preference_rows(rows: object, ctx: EngineContext, persona: PersonaPr
         # Do not let an extracted scope invent an unrelated setting. A quoted
         # scope is accepted; otherwise the bounded generic communication scope.
         scope = raw.get("scope")
-        if not isinstance(scope, str) or not any(scope and scope in row.text for row in quotes):
+        if direct_scope is not None:
+            scope = direct_scope
+        elif conditional:
+            # The exact conditional instruction remains complete in `do` and
+            # evidence. A model cannot replace it with a broader quoted topic.
+            scope = "仅限完整原话所述情境"
+        elif not isinstance(scope, str) or not any(scope and scope in row.text for row in quotes):
             scope = _instruction_scope(instruction, quotes)
         now = _now()
         identity = f"{ctx.session_id}|{quotes[0].turn_index}|{instruction}"
@@ -189,6 +326,10 @@ def extract_preference_rows(rows: object, ctx: EngineContext, persona: PersonaPr
         if preference_id in existing or any(row.id == preference_id for row in result):
             continue  # Never reactivate a declined/withdrawn record on replay.
         confirmed = _confirmation(raw.get("confirmation"), quotes, instruction, ctx)
+        # Keep the complete owner turn, including qualifiers that were outside
+        # the selected quote. Never silently truncate evidence to fit the model.
+        full_quotes = [PreferenceQuote(session_id=row.session_id, turn_index=row.turn_index,
+                                      text=ctx.turns[row.turn_index].user) for row in quotes]
         history = [PreferenceTransition(at=now, to="proposed", source=source)]
         if confirmed:
             history.append(PreferenceTransition(at=now, from_status="proposed", to="confirmed", source="conversation", quote=confirmed))
@@ -196,7 +337,7 @@ def extract_preference_rows(rows: object, ctx: EngineContext, persona: PersonaPr
             result.append(StatedPreference(
                 id=preference_id, do=instruction, scope=scope,
                 not_implies=["不代表所有场景都适用", "不代表同意执行任何现实动作"],
-                quotes=quotes, confirmation=confirmed,
+                quotes=full_quotes, confirmation=confirmed,
                 status="confirmed" if confirmed else "proposed", supersedes=supersedes,
                 history=history, extraction_source=source, created_at=now, updated_at=now,
             ))

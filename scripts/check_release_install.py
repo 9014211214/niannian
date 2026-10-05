@@ -29,6 +29,7 @@ ASSETS = (
 )
 LICENSE_FILES = {"LICENSE", "Apache-2.0.txt", "THIRD_PARTY_NOTICES.md"}
 SOURCE_ENTRY_FILES = {
+    "docs/E1BR_RESULTS_2026_10_05.md",
     "scripts/run_e1b_main_continuation.py", "scripts/e1b_main_continuation.py",
     "scripts/run_e1br.py", "scripts/e1br_qualification.py", "scripts/e1br_assessment.py",
     "scripts/run_e1br_received_continuation.py", "scripts/e1br_received_body.py",

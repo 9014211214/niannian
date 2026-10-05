@@ -273,7 +273,7 @@ class LLMExtractor:
                 '"relationships":[{"name":"","relation":"","facts":['
                 '{"value":"","evidence_quote":"逐字用户原话","turn_index":0}],'
                 '"referenceable":false}],"stated_preferences":['
-                '{"do":"本人明确希望的做法，60字内，优先直接引用原话",'
+                '{"do":"本人明确要求的交流做法，60字内，必须逐字引用quotes中的连续原话，不改写",'
                 '"scope":"本人说明的适用场景","quotes":[{"turn_index":0,"text":"逐字用户原话"}],'
                 '"confirmation":{"turn_index":1,"text":"本人后续完整肯定答复"},'
                 '"supersedes":null}]'
@@ -291,6 +291,10 @@ class LLMExtractor:
                 "存款/账户、证件或联系方式）一律 referenceable=false。"
                 "不要输出 consent_to_share，系统永远不会因模型抽取自动授权分享。"
                 "相处说明只记录本人明确要求怎样交流，不是人格标签、因果推测或分享通知权限。"
+                "do须保留原话里的条件、先后顺序和适用范围；条件式请求应引用完整请求句，"
+                "不能只截取条件之后的动作，不能从本人反对、第三人转述或假设举例中提取。"
+                "quotes保留该轮完整本人原话（最多240字）；不能为了满足60字上限丢掉限定，"
+                "无法完整表达就不提取。scope只能来自原话，不能扩大场景。"
                 "confirmation只有在助理先复述同一做法并问是否这样记下、本人随后完整肯定时才给出，"
                 "否则为null。不能用助理原话或自己的总结充当本人证据；不得扩大原话范围。"
                 "没有符合条件的相处说明就给空数组。"

@@ -50,8 +50,8 @@ def test_enabled_primary_example_is_one_object_with_four_arrays():
 
 
 def test_disabled_system_keeps_pre_repair_bytes_and_legacy_envelopes():
-    # Preserve the historical C1-off prompt after removing only the separately
-    # approved general JSON-escaping addition; C1 must not leak into this path.
+    # Preserve both historical hashes by mechanically reversing the separately
+    # approved JSON and R1 literal-request deltas; C1 must not leak here.
     expected = "ec916ec8599b1bfc4cd7c69ce23e08ea9e80ea2971526bab804462a6553a0c86"
     addition = (
         "[memory_json_escaping_v2]只输出一个完整、合法的 JSON 对象，不加 Markdown 围栏或说明文字。"
@@ -59,6 +59,14 @@ def test_disabled_system_keeps_pre_repair_bytes_and_legacy_envelopes():
         "evidence_quote 也必须转义，但 JSON 解码后的引文必须保持用户原话逐字不变。"
         "不要为了凑齐结构而编造事实或偏好；无适用内容的数组使用空数组。"
     )
+    preference_addition = (
+        "do须保留原话里的条件、先后顺序和适用范围；条件式请求应引用完整请求句，"
+        "不能只截取条件之后的动作，不能从本人反对、第三人转述或假设举例中提取。"
+        "quotes保留该轮完整本人原话（最多240字）；不能为了满足60字上限丢掉限定，"
+        "无法完整表达就不提取。scope只能来自原话，不能扩大场景。"
+    )
+    preference_old_do = "本人明确希望的做法，60字内，优先直接引用原话"
+    preference_new_do = "本人明确要求的交流做法，60字内，必须逐字引用quotes中的连续原话，不改写"
     ctx = EngineContext(user_id="owner", scene_id="companion_elder")
     ctx.add_turn("我喜欢纸风车。", "我听着。")
     for payload in ({"episodes": [], "relationships": []}, []):
@@ -67,8 +75,10 @@ def test_disabled_system_keeps_pre_repair_bytes_and_legacy_envelopes():
         extractor.extract(ctx, PersonaProfile(user_id="owner"))
         system = client.calls[0][0]["content"]
         assert system.count(addition) == 1
-        assert hashlib.sha256(system.replace(addition, "", 1).encode()).hexdigest() == expected
-        assert hashlib.sha256(system.encode()).hexdigest() == "d796b7028fa0380e87b5e2619350b288007878ab7c41738a47486a86487925b8"
+        assert system.count(preference_addition) == system.count(preference_new_do) == 1
+        historical = system.replace(preference_addition, "", 1).replace(preference_new_do, preference_old_do, 1)
+        assert hashlib.sha256(historical.replace(addition, "", 1).encode()).hexdigest() == expected
+        assert hashlib.sha256(historical.encode()).hexdigest() == "d796b7028fa0380e87b5e2619350b288007878ab7c41738a47486a86487925b8"
         assert "cognitive_observations" not in system
         assert extractor.last_status == "ok"
 
