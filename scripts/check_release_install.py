@@ -39,6 +39,11 @@ SOURCE_ENTRY_FILES = {
     "scripts/e1br_format_qualification.py",
     "scripts/e1c_execution.py", "scripts/e1c_calls.py", "scripts/e1c_qualification.py",
     "scripts/e1c_scoring.py", "scripts/run_e1c.py",
+    "scripts/run_e1br_memory_continuation.py", "scripts/e1br_memory_checkpoint.py",
+    "scripts/e1br_memory_runtime.py", "scripts/e1br_memory_legacy.py",
+    "scripts/e1br_memory_qualification.py", "docs/E1BR_MEMORY_CONTINUATION.md",
+    "scripts/e1br_prewrite_checkpoint.py", "scripts/e1br_prewrite_runtime.py",
+    "scripts/run_e1br_prewrite_continuation.py", "docs/E1BR_PREWRITE_CONTINUATION.md",
 }
 
 

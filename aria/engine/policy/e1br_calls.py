@@ -80,9 +80,10 @@ def no_content_failure(row):
             and failure.get("opener_call") == "invoked" and failure.get("response_object") == "not_observed")
 
 
-def secondary_failure(row):
+def secondary_failure(row, *, no_content_check=None):
+    check = no_content_failure if no_content_check is None else no_content_check
     return row.get("role") == "reflection" and row.get("status") == "failed" and (
-        no_content_failure(row) or ("cost" in row.get("usage", {})
+        check(row) or ("cost" in row.get("usage", {})
             and row.get("validation_error") in _SECONDARY_FAILURES))
 
 
@@ -132,7 +133,8 @@ def validate_e1br_reservations(rows, policy):
             raise ValueError("invalid_e1br_retained_reservation")
 
 
-def validate_e1br_records(rows, *, stage, registration_sha256):
+def validate_e1br_records(rows, *, stage, registration_sha256, no_content_check=None):
+    check = no_content_failure if no_content_check is None else no_content_check
     groups = defaultdict(list)
     for row in rows:
         if (row.get("e1b_stage") != stage or row.get("registration_sha256") != registration_sha256
@@ -167,7 +169,7 @@ def validate_e1br_records(rows, *, stage, registration_sha256):
         retries = sum("infrastructure_retry_of_request_id" in item for item in prior)
         if same:
             parent = same[-1]
-            if (not no_content_failure(parent) or retries >= 2
+            if (not check(parent) or retries >= 2
                     or row.get("infrastructure_retry_of_request_id") != parent["request_id"]
                     or row.get("request_sha256") != parent["request_sha256"]
                     or row.get("model") != parent["model"]
@@ -238,7 +240,14 @@ class E1BRCallGuard(ReservedCallGuard):
         self._authority()
 
     def _validate_history(self, rows):
-        return validate_e1br_records(rows, stage=self.stage, registration_sha256=self.registration_sha256)
+        return validate_e1br_records(rows, stage=self.stage, registration_sha256=self.registration_sha256,
+                                      no_content_check=self._no_content_failure)
+
+    def _no_content_failure(self, row):
+        return no_content_failure(row)
+
+    def _secondary_failure(self, row):
+        return secondary_failure(row, no_content_check=self._no_content_failure)
 
     def terminal_primary_failure(self, row):
         """Versioned experiment extension; ordinary E1b-R never accepts one."""
@@ -258,9 +267,9 @@ class E1BRCallGuard(ReservedCallGuard):
             reason = reason or "stop_requested"
         elif any(row["status"] == "pending" for row in rows):
             reason = reason or "unresolved_request"
-        elif any("cost" not in row["usage"] and not no_content_failure(row) for row in rows):
+        elif any("cost" not in row["usage"] and not self._no_content_failure(row) for row in rows):
             reason = reason or "provider_cost_unknown"
-        elif any(row["status"] == "failed" and not no_content_failure(row) and not secondary_failure(row)
+        elif any(row["status"] == "failed" and not self._no_content_failure(row) and not self._secondary_failure(row)
                  and not self.terminal_primary_failure(row) for row in rows):
             reason = reason or "request_failed"
         elif any(group[-1]["status"] == "failed" and group[-1]["role"] != "reflection"
@@ -274,7 +283,7 @@ class E1BRCallGuard(ReservedCallGuard):
         state.update(stopped=bool(reason), stop_reason=reason,
             e1br={"schema": SCHEMA, "infrastructure_retries_used": sum("infrastructure_retry_of_request_id" in r for r in rows),
                   "logical_product_steps": len(logical_attempts(state)),
-                  "reflection_secondary_failures": sum(secondary_failure(r) for r in logical_attempts(state))})
+                  "reflection_secondary_failures": sum(self._secondary_failure(r) for r in logical_attempts(state))})
         return state
 
     def _begin(self, client, request, *, pacing=None, expected_prior_request=None):
@@ -304,7 +313,7 @@ class E1BRCallGuard(ReservedCallGuard):
             extra = {}
             if same:
                 parent = same[-1]
-                if not no_content_failure(parent) or count >= 2 or parent["request_sha256"] != hashlib.sha256(request.data).hexdigest():
+                if not self._no_content_failure(parent) or count >= 2 or parent["request_sha256"] != hashlib.sha256(request.data).hexdigest():
                     raise MinimalCallStopped("duplicate_model_operation")
                 extra["infrastructure_retry_of_request_id"] = parent["request_id"]
                 count += 1
@@ -407,7 +416,7 @@ class E1BRCallGuard(ReservedCallGuard):
                     last = rows[-1]
                     group = [r for r in rows if _key(r) == _key(last)]
                     retries = sum("infrastructure_retry_of_request_id" in r for r in group)
-                    if no_content_failure(last) and retries < 2:
+                    if self._no_content_failure(last) and retries < 2:
                         observation = last.get("observation", {})
                         if observation.get("retry_after_status") == "accepted":
                             try:
@@ -422,7 +431,7 @@ class E1BRCallGuard(ReservedCallGuard):
                                 self.halt()
                                 raise
                         continue
-                    if secondary_failure(last):
+                    if self._secondary_failure(last):
                         self._local.secondary_terminal = (id(client), last["request_id"])
                     raise
 
@@ -433,4 +442,4 @@ class E1BRCallGuard(ReservedCallGuard):
         state = self.snapshot()
         return (not state["stopped"] and bool(state["attempts"])
                 and state["attempts"][-1]["request_id"] == marker[1]
-                and secondary_failure(state["attempts"][-1]))
+                and self._secondary_failure(state["attempts"][-1]))

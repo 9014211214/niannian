@@ -79,7 +79,9 @@ def run_detector(directory: Path) -> dict:
     completed = subprocess.run(
         [sys.executable, "-m", "detect_secrets", "scan", "--all-files", "--no-verify", "."],
         cwd=directory, capture_output=True, timeout=180, check=False,
-        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        # detect-secrets reads files with open()'s default encoding. Windows
+        # locale decoding can silently classify UTF-8 Chinese source as binary.
+        env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
     )
     if completed.returncode:
         raise AuditError("detect_secrets_failed")

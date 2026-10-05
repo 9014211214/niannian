@@ -79,7 +79,9 @@ def schema_field_contract(version: str) -> str:
             "number写JSON数值，boolean写true或false，都不加引号；enum仅取列出的完整值，"
             "不能连带中文说明。数组非空时每一项都满足其子字段约束。"
             "current_affect.divergence即使possible为false也必须含confidence和pattern；"
-            "communication_plan必须含pace、support_order、boundary三个字符串。"
+            "communication_plan必须含pace、support_order、boundary三个字符串；"
+            "support_order和boundary必须分别写出非空且非纯空白的当轮先后安排和沟通行动边界，不能用空字符串代替。"
+            "即使没有新增行动，也如实说明本轮回应方式及行动边界；不要据此编造人物、情绪、权限或行动。"
             "生成前核对所有嵌套必填字段，不把核对过程写入输出。\n"
             + "\n".join(lines))
 

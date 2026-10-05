@@ -264,7 +264,10 @@ class LLMExtractor:
         messages = [
             {"role": "system", "content": (
                 "你负责会后事实抽取，不做人格诊断。基于对话只抽取用户明确表达、"
-                "值得长期记住的事实，不推测关系或心理。输出 JSON："
+                "值得长期记住的事实，不推测关系或心理。[memory_json_escaping_v2]只输出一个完整、合法的 JSON 对象，不加 Markdown 围栏或说明文字。"
+                "所有字符串中的双引号、反斜杠、换行等字符必须按 JSON 语法转义；"
+                "evidence_quote 也必须转义，但 JSON 解码后的引文必须保持用户原话逐字不变。"
+                "不要为了凑齐结构而编造事实或偏好；无适用内容的数组使用空数组。输出 JSON："
                 '{"episodes":[{"summary":"","keywords":[],"referenceable":false,'
                 '"evidence_quote":"逐字用户原话","turn_index":0}],'
                 '"relationships":[{"name":"","relation":"","facts":['

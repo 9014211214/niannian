@@ -378,7 +378,7 @@ def test_v5_execution_tools_included_but_old_v4_scope_stays_verifiable(source, t
 
 
 def test_e1br_authored_tools_include_no_private_campaign_or_ledger(source, tmp_path, monkeypatch):
-    for name in release.V6_POLICY_FILES | release.V7_POLICY_FILES | release.V8_POLICY_FILES | release.V9_POLICY_FILES:
+    for name in release.V6_POLICY_FILES | release.V7_POLICY_FILES | release.V8_POLICY_FILES | release.V9_POLICY_FILES | release.V10_POLICY_FILES | release.V11_POLICY_FILES:
         path = source / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# Authored E1b-R fixture\n", encoding="utf-8")
@@ -393,6 +393,9 @@ def test_e1br_authored_tools_include_no_private_campaign_or_ledger(source, tmp_p
         "artifacts/local/e1br-formal-v4/visible-first.json",
         "artifacts/local/e1c-formal-v1/first-submission.json",
         "scripts/unreviewed_e1c_tool.py", "docs/unreviewed_e1c_questions.md",
+        "artifacts/local/e1br-formal-v6/main/first.json",
+        "artifacts/local/tasks/20261005-03/v5-close/v5-closed-originals-v1.manifest.json",
+        "scripts/unreviewed_prewrite_tool.py",
     )
     for name in excluded:
         path = source / name
@@ -409,7 +412,7 @@ def test_e1br_authored_tools_include_no_private_campaign_or_ledger(source, tmp_p
     target = tmp_path / "e1br-current.zip"
     release.build_release(source, target)
     with zipfile.ZipFile(target) as packed:
-        assert release.V6_POLICY_FILES | release.V7_POLICY_FILES | release.V8_POLICY_FILES | release.V9_POLICY_FILES <= set(packed.namelist())
+        assert release.V6_POLICY_FILES | release.V7_POLICY_FILES | release.V8_POLICY_FILES | release.V9_POLICY_FILES | release.V10_POLICY_FILES | release.V11_POLICY_FILES <= set(packed.namelist())
         assert not set(excluded) & set(packed.namelist())
     assert release.verify_release(target)["policy_version"] == release.POLICY_VERSION
 
@@ -446,7 +449,7 @@ def test_v6_archive_keeps_original_scope_and_excludes_checkpoint_tools(source, t
     assert target.read_bytes() == before
 
 
-@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V8_POLICY_VERSION, release.V7_POLICY_VERSION}))
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V10_POLICY_VERSION, release.V9_POLICY_VERSION, release.V8_POLICY_VERSION, release.V7_POLICY_VERSION}))
 @pytest.mark.parametrize("added", sorted(release.V7_POLICY_FILES))
 def test_checkpoint_files_cannot_enter_older_archive_policy(source, tmp_path, policy, added):
     _, contents, manifest = release.inspect_source(source)
@@ -499,7 +502,7 @@ def test_v7_archive_keeps_exact_scope_without_format_tools(source, tmp_path):
     assert target.read_bytes() == before
 
 
-@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V8_POLICY_VERSION}))
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V10_POLICY_VERSION, release.V9_POLICY_VERSION, release.V8_POLICY_VERSION}))
 @pytest.mark.parametrize("added", sorted(release.V8_POLICY_FILES))
 def test_format_and_e1c_contract_files_cannot_enter_older_policy(source, tmp_path, policy, added):
     _, contents, manifest = release.inspect_source(source)
@@ -538,7 +541,7 @@ def test_v8_archive_keeps_exact_scope_without_e1c_execution_tools(source, tmp_pa
     }
 
 
-@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION}))
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V10_POLICY_VERSION, release.V9_POLICY_VERSION}))
 @pytest.mark.parametrize("added", sorted(release.V9_POLICY_FILES))
 def test_e1c_execution_tools_cannot_enter_older_archive_policy(source, tmp_path, policy, added):
     _, contents, manifest = release.inspect_source(source)
@@ -551,5 +554,84 @@ def test_e1c_execution_tools_cannot_enter_older_archive_policy(source, tmp_path,
             packed.writestr(name, data)
         packed.writestr("RELEASE_MANIFEST.json", release._manifest_bytes(manifest))
         packed.writestr("RELEASE_SCOPE.md", release.V8_SCOPE_TEXT)
+    with pytest.raises(release.ReleaseError, match="archive_policy_member_rejected"):
+        release.verify_release(target)
+
+
+def test_v9_archive_keeps_exact_scope_without_memory_continuation(source, tmp_path):
+    for name in release.V9_POLICY_FILES:
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# Disclosed software-only v9 fixture\n", encoding="utf-8")
+    _, contents, manifest = release.inspect_source(source)
+    manifest["policy_version"] = release.V9_POLICY_VERSION
+    target = tmp_path / "retained-v9.zip"
+    with zipfile.ZipFile(target, "w") as packed:
+        for name, data in contents.items():
+            packed.writestr(name, data)
+        packed.writestr("RELEASE_MANIFEST.json", release._manifest_bytes(manifest))
+        packed.writestr("RELEASE_SCOPE.md", release.V9_SCOPE_TEXT)
+    before = target.read_bytes()
+    assert release.verify_release(target)["policy_version"] == "aria-minimal-source-9"
+    assert target.read_bytes() == before
+    assert release.V10_POLICY_FILES == {
+        "scripts/run_e1br_memory_continuation.py", "scripts/e1br_memory_checkpoint.py",
+        "scripts/e1br_memory_runtime.py", "scripts/e1br_memory_legacy.py",
+        "scripts/e1br_memory_qualification.py", "docs/E1BR_MEMORY_CONTINUATION.md",
+    }
+
+
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V10_POLICY_VERSION}))
+@pytest.mark.parametrize("added", sorted(release.V10_POLICY_FILES))
+def test_memory_continuation_cannot_enter_older_policy(source, tmp_path, policy, added):
+    _, contents, manifest = release.inspect_source(source)
+    contents[added] = b"# Disclosed software-only memory-continuation fixture\n"
+    manifest["policy_version"] = policy
+    manifest["files"].append({"path": added, "bytes": len(contents[added]), "sha256": release._digest(contents[added])})
+    target = tmp_path / "wrong-old-memory-policy.zip"
+    with zipfile.ZipFile(target, "w") as packed:
+        for name, data in contents.items():
+            packed.writestr(name, data)
+        packed.writestr("RELEASE_MANIFEST.json", release._manifest_bytes(manifest))
+        packed.writestr("RELEASE_SCOPE.md", release.V9_SCOPE_TEXT)
+    with pytest.raises(release.ReleaseError, match="archive_policy_member_rejected"):
+        release.verify_release(target)
+
+
+def test_v10_archive_keeps_exact_scope_without_prewrite_tools(source, tmp_path):
+    for name in release.V10_POLICY_FILES:
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# Disclosed software-only v10 fixture\n", encoding="utf-8")
+    _, contents, manifest = release.inspect_source(source)
+    manifest["policy_version"] = release.V10_POLICY_VERSION
+    target = tmp_path / "retained-v10.zip"
+    with zipfile.ZipFile(target, "w") as packed:
+        for name, data in contents.items():
+            packed.writestr(name, data)
+        packed.writestr("RELEASE_MANIFEST.json", release._manifest_bytes(manifest))
+        packed.writestr("RELEASE_SCOPE.md", release.V10_SCOPE_TEXT)
+    before = target.read_bytes()
+    assert release.verify_release(target)["policy_version"] == "aria-minimal-source-10"
+    assert target.read_bytes() == before
+    assert release.V11_POLICY_FILES == {
+        "scripts/e1br_prewrite_checkpoint.py", "scripts/e1br_prewrite_runtime.py",
+        "scripts/run_e1br_prewrite_continuation.py", "docs/E1BR_PREWRITE_CONTINUATION.md",
+    }
+
+
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION}))
+@pytest.mark.parametrize("added", sorted(release.V11_POLICY_FILES))
+def test_prewrite_continuation_cannot_enter_older_policy(source, tmp_path, policy, added):
+    _, contents, manifest = release.inspect_source(source)
+    contents[added] = b"# Disclosed software-only prewrite-continuation fixture\n"
+    manifest["policy_version"] = policy
+    manifest["files"].append({"path": added, "bytes": len(contents[added]), "sha256": release._digest(contents[added])})
+    target = tmp_path / "wrong-old-prewrite-policy.zip"
+    with zipfile.ZipFile(target, "w") as packed:
+        for name, data in contents.items():
+            packed.writestr(name, data)
+        packed.writestr("RELEASE_MANIFEST.json", release._manifest_bytes(manifest))
+        packed.writestr("RELEASE_SCOPE.md", release.V10_SCOPE_TEXT)
     with pytest.raises(release.ReleaseError, match="archive_policy_member_rejected"):
         release.verify_release(target)

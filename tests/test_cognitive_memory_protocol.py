@@ -50,8 +50,15 @@ def test_enabled_primary_example_is_one_object_with_four_arrays():
 
 
 def test_disabled_system_keeps_pre_repair_bytes_and_legacy_envelopes():
-    # Captured from the existing C1-off system before this protocol repair.
+    # Preserve the historical C1-off prompt after removing only the separately
+    # approved general JSON-escaping addition; C1 must not leak into this path.
     expected = "ec916ec8599b1bfc4cd7c69ce23e08ea9e80ea2971526bab804462a6553a0c86"
+    addition = (
+        "[memory_json_escaping_v2]只输出一个完整、合法的 JSON 对象，不加 Markdown 围栏或说明文字。"
+        "所有字符串中的双引号、反斜杠、换行等字符必须按 JSON 语法转义；"
+        "evidence_quote 也必须转义，但 JSON 解码后的引文必须保持用户原话逐字不变。"
+        "不要为了凑齐结构而编造事实或偏好；无适用内容的数组使用空数组。"
+    )
     ctx = EngineContext(user_id="owner", scene_id="companion_elder")
     ctx.add_turn("我喜欢纸风车。", "我听着。")
     for payload in ({"episodes": [], "relationships": []}, []):
@@ -59,7 +66,9 @@ def test_disabled_system_keeps_pre_repair_bytes_and_legacy_envelopes():
         extractor = LLMExtractor(client)
         extractor.extract(ctx, PersonaProfile(user_id="owner"))
         system = client.calls[0][0]["content"]
-        assert hashlib.sha256(system.encode()).hexdigest() == expected
+        assert system.count(addition) == 1
+        assert hashlib.sha256(system.replace(addition, "", 1).encode()).hexdigest() == expected
+        assert hashlib.sha256(system.encode()).hexdigest() == "d796b7028fa0380e87b5e2619350b288007878ab7c41738a47486a86487925b8"
         assert "cognitive_observations" not in system
         assert extractor.last_status == "ok"
 

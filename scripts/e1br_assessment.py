@@ -66,7 +66,8 @@ def assess(root):
             and binding["policy_sha256"] == evaluation.digest(frozen["metadata"]["policy"]),
             "e1br_budget_binding_changed")
         result["ledger_sha256"] = verifier._ledger(root, state, frozen)
-        verifier._require(validate_e1br_ledger(base / "allowance.sqlite3", stage="main",
+        retry_validator = getattr(entry, "validate_retry_ledger", validate_e1br_ledger)
+        verifier._require(retry_validator(base / "allowance.sqlite3", stage="main",
             registration_sha256=frozen["seal_sha256"], max_requests=revision.MAX_WIRE_REQUESTS,
             reservation_policy=frozen["metadata"]["policy"]) == state["attempts"],
             "e1br_retry_policy_or_records_changed")

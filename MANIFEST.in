@@ -67,3 +67,8 @@ prune artifacts/local
 prune prefeval-source
 prune benchmark_dataset
 prune error_type
+include scripts/run_e1br_memory_continuation.py scripts/e1br_memory_checkpoint.py
+include scripts/e1br_memory_runtime.py scripts/e1br_memory_legacy.py scripts/e1br_memory_qualification.py
+
+include scripts/e1br_prewrite_checkpoint.py scripts/e1br_prewrite_runtime.py
+include scripts/run_e1br_prewrite_continuation.py

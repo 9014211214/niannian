@@ -42,6 +42,8 @@ PRIOR_E1B = Decimal("0.134894814")
 PRIOR_KNOWN = Decimal("1.527273986")
 RETAINED_UNKNOWN_HOLD = Decimal("0.320307142")
 ALLOWANCE = Decimal("1.044798044")
+E1B_LIMIT = Decimal("1.5")
+CUMULATIVE_STOP = Decimal("3")
 PRIOR_UNKNOWN = 8
 PRIOR_DISPATCHES = 556
 RETAINED_MAIN = 13
@@ -180,7 +182,7 @@ def build_engine(root):
     new_total = sum(NEW_COUNTS["main"].values())
     selection = selection_evidence(root)
     entry = common._load_module("scripts._e1br_execution", "run_e1b.py")
-    entry.CAMPAIGN, entry.PRIOR_KNOWN, entry.CUMULATIVE_STOP = CAMPAIGN, PRIOR_KNOWN, Decimal("3")
+    entry.CAMPAIGN, entry.PRIOR_KNOWN, entry.CUMULATIVE_STOP = CAMPAIGN, PRIOR_KNOWN, CUMULATIVE_STOP
     entry.STAGES, entry.COUNTS, entry.MAX_WIRE_REQUESTS = ("main",), NEW_COUNTS, MAX_WIRE_REQUESTS
     entry.ACCEPTED_OLD_UNKNOWN, entry.RETAINED_UNKNOWN_HOLD = PRIOR_UNKNOWN, RETAINED_UNKNOWN_HOLD
     entry.MIN_INTERVAL_SECONDS, entry.OBSERVE_TRANSPORT = 10, True
@@ -205,7 +207,7 @@ def build_engine(root):
 
     def preflight():
         base_preflight()
-        if ALLOWANCE != min(Decimal("1.5") - PRIOR_E1B, Decimal("3") - PRIOR_KNOWN) - RETAINED_UNKNOWN_HOLD:
+        if ALLOWANCE != min(E1B_LIMIT - PRIOR_E1B, CUMULATIVE_STOP - PRIOR_KNOWN) - RETAINED_UNKNOWN_HOLD:
             raise RunError("e1br_inherited_budget_changed")
         if selection["case_ids"] != SELECTED:
             raise RunError("e1br_balanced_selection_changed")
@@ -236,7 +238,7 @@ def build_engine(root):
             retry_content_rule="no_model_body_only", exhausted_online_or_memory="stop_not_evaluable",
             exhausted_reflection="secondary_failure_if_durable_and_guard_permits")
         value["budget"].update(status="human_decision_anchored", choice=BUDGET_CHOICE,
-            approved_limit_usd="1.5", cumulative_stop_usd="3", prior_e1b_known_usd=str(PRIOR_E1B),
+            approved_limit_usd=str(E1B_LIMIT), cumulative_stop_usd=str(CUMULATIVE_STOP), prior_e1b_known_usd=str(PRIOR_E1B),
             prior_known_floor_usd=str(PRIOR_KNOWN), historical_unknown_reserved_usd=str(RETAINED_UNKNOWN_HOLD),
             accepted_old_unknown=PRIOR_UNKNOWN, effective_new_allowance_usd=str(ALLOWANCE),
             current_remaining_usd=str(ALLOWANCE), new_unknown_rule="each_authorized_no_body_attempt_retains_its_own_reservation")
@@ -246,7 +248,7 @@ def build_engine(root):
 
     def authorization_template(current=None):
         return {"schema": "e1br_authorization_v1", "status": "pending", "budget_choice": None,
-            "campaign": CAMPAIGN.as_posix(), "user_limit_usd": "1.5", "cumulative_stop_usd": "3",
+            "campaign": CAMPAIGN.as_posix(), "user_limit_usd": str(E1B_LIMIT), "cumulative_stop_usd": str(CUMULATIVE_STOP),
             "prior_known_usd": str(PRIOR_KNOWN), "prior_e1b_known_usd": str(PRIOR_E1B),
             "historical_unknown_reserved_usd": str(RETAINED_UNKNOWN_HOLD), "accepted_old_unknown": PRIOR_UNKNOWN,
             "effective_new_allowance_usd": str(ALLOWANCE), "max_physical_calls": MAX_WIRE_REQUESTS,

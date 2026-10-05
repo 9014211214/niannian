@@ -1,4 +1,4 @@
-"""Release audit tests use authored synthetic source, no external scanner/network."""
+"""Release audit tests use synthetic source/local subprocesses, no scanner/network."""
 import json
 from pathlib import Path
 
@@ -122,3 +122,40 @@ def test_detector_failure_does_not_print_stderr(monkeypatch, tmp_path):
     monkeypatch.setattr(audit.subprocess, "run", lambda *args, **kwargs: Result())
     with pytest.raises(audit.AuditError, match="^detect_secrets_failed$"):
         audit.run_detector(tmp_path)
+
+
+@pytest.mark.parametrize("parent_utf8", [None, "0"])
+def test_detector_child_reads_nonascii_utf8_when_parent_mode_is_unset_or_disabled(monkeypatch, tmp_path, parent_utf8):
+    import hashlib
+    import importlib.metadata
+    import sys
+
+    if parent_utf8 is None:
+        monkeypatch.delenv("PYTHONUTF8", raising=False)
+    else:
+        monkeypatch.setenv("PYTHONUTF8", parent_utf8)
+    monkeypatch.setattr(importlib.metadata, "version", lambda _name: audit.SCANNER_VERSION)
+    text = "# 中文陪伴🙂\napi_key = 'software-fixture-only'\n"
+    fixture = tmp_path / "fixture-中文.py"
+    fixture.write_text(text, encoding="utf-8")
+    real_run = audit.subprocess.run
+    observed = []
+
+    def local_reader(command, **kwargs):
+        assert "--all-files" in command and "--no-verify" in command
+        observed.append(kwargs["env"]["PYTHONUTF8"])
+        # The actual child uses implicit open(), as detect-secrets 1.5.0 does.
+        # Its UTF-8 mode must be forced even when the parent explicitly uses 0.
+        code = (
+            "import hashlib,json,sys; "
+            "text=open(sys.argv[1]).read(); "
+            "print(json.dumps({'version':'1.5.0','results':{},"
+            "'utf8_mode':sys.flags.utf8_mode,"
+            "'text_sha256':hashlib.sha256(text.encode('utf-8')).hexdigest()}))"
+        )
+        return real_run([sys.executable, "-c", code, str(fixture)], **kwargs)
+
+    monkeypatch.setattr(audit.subprocess, "run", local_reader)
+    result = audit.run_detector(tmp_path)
+    assert observed == ["1"] and result["utf8_mode"] == 1
+    assert result["text_sha256"] == hashlib.sha256(text.encode("utf-8")).hexdigest()

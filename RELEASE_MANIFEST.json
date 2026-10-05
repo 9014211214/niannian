@@ -31,9 +31,9 @@
       "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
     },
     {
-      "bytes": 4445,
+      "bytes": 4692,
       "path": "MANIFEST.in",
-      "sha256": "19e685d8b7762144a24f638df9b8a93d1a69b3a2606bbe03742e07a1deafcb5e"
+      "sha256": "152c7e8ecf4696031efc0be19e8a6dcd8788c2733027f34bf92606f12d4407f0"
     },
     {
       "bytes": 5046,
@@ -276,9 +276,9 @@
       "sha256": "7258f2001421513e1bbfa61f50b87a7311d12ef3cfda36b4ac24012d26f5e99d"
     },
     {
-      "bytes": 22115,
+      "bytes": 22567,
       "path": "aria/engine/memory/consolidator.py",
-      "sha256": "fa65633e41f2d3d8a8542d6283da002d7852ba1768bfdf04c224e34440bba74f"
+      "sha256": "9f07bea3196a16c3fa9abaddaa339179c91966522cf4a17181d03b606343dde2"
     },
     {
       "bytes": 3825,
@@ -401,9 +401,9 @@
       "sha256": "f21a1165dae725ab082bb64a6d057379e81476ce06b82605fc1c66d43b3df606"
     },
     {
-      "bytes": 26163,
+      "bytes": 27123,
       "path": "aria/engine/policy/e1br_calls.py",
-      "sha256": "14e2445c9d962bf6dae80ff3737d46a59fccdaf2b04bb948b7a68e2ffc4b5d96"
+      "sha256": "5b0f91ae642ae80d8eda0b1c5f564358c0bc4e9eb286b3d715658fa3fd64e7a2"
     },
     {
       "bytes": 44724,
@@ -426,9 +426,9 @@
       "sha256": "4ce52868011e05acf3f0e22f89757d1d0d29b74989c37d3e02f5472b84e582c3"
     },
     {
-      "bytes": 10941,
+      "bytes": 11241,
       "path": "aria/engine/policy/online_json.py",
-      "sha256": "f4cb1304585669e9f6b8dfd16de958a49a9976ded5942dfbbadc986f2ac7b3e2"
+      "sha256": "a5f653b43d01bfe73ff915f9a716bf996876bcb981c2dafe258ff5c1f6b63bf7"
     },
     {
       "bytes": 7704,
@@ -701,6 +701,16 @@
       "sha256": "b264556979789b76c9be8603b67f7083ab92ab68ed1232fe84f72f31cdb14c61"
     },
     {
+      "bytes": 3596,
+      "path": "docs/E1BR_MEMORY_CONTINUATION.md",
+      "sha256": "358d15c7ab34c6c00081611e36e2022527299501b6a444056edb10a0a4a088ee"
+    },
+    {
+      "bytes": 3021,
+      "path": "docs/E1BR_PREWRITE_CONTINUATION.md",
+      "sha256": "9bb8ab7ac815598d5759b5f5592d947939598a2504584da5501b63e8ff410d11"
+    },
+    {
       "bytes": 1876,
       "path": "docs/E1BR_RECEIVED_CONTINUATION.md",
       "sha256": "71e52f392e3584e88e79888daafaba98eedc868f172244c71bb72beda7ba67a0"
@@ -791,14 +801,14 @@
       "sha256": "5df547af19f87d1abef65f9b775d809c2013bb6173dfe16fcdae5ed379f8908d"
     },
     {
-      "bytes": 49789,
+      "bytes": 52815,
       "path": "docs/PROGRESS.md",
-      "sha256": "2c4905292d4b4f7c1b2278c02a6631e4778f0300bc9fbc604510a414d754b261"
+      "sha256": "6372aa18a83bf7f4b8f9918527faa56f01b9162576d560827cff5ff46efa3c73"
     },
     {
-      "bytes": 8648,
+      "bytes": 9290,
       "path": "docs/RELEASE_SECURITY_AUDIT.md",
-      "sha256": "5a909520c8d2beca4d0f23c9d5e0daa1f7a68fa46012c27916059a3415a31ceb"
+      "sha256": "0015d80f8f6dfed4f3dc62832f04b875a9d37425ed365f27ef226a9f6fb8fc41"
     },
     {
       "bytes": 13449,
@@ -986,14 +996,14 @@
       "sha256": "35f56849c57536b3a05201ec7f2b66d7cb97e66d0bf7ed470d5bdc329d4265d6"
     },
     {
-      "bytes": 9599,
+      "bytes": 9775,
       "path": "scripts/audit_release.py",
-      "sha256": "08ad4b3917fef2b15751395a896f56d1c1ed85985e1d7ce462fdea21b2908dbe"
+      "sha256": "2eb06951ed495482955e038ec05162591fd9b7bb65ca9dd0bda863a657deea27"
     },
     {
-      "bytes": 31280,
+      "bytes": 32981,
       "path": "scripts/build_minimal_release.py",
-      "sha256": "2a11828a21f1fda71be09a8b8a7548606976dda1498ca9c8d302be8d3b25e109"
+      "sha256": "b944d3538ad0ba74807410e0bb98b0fbd7304e3edafc27d7015d85f87e8aa077"
     },
     {
       "bytes": 12119,
@@ -1011,9 +1021,9 @@
       "sha256": "c8bd25a370b937a2831018bb1c76e55bf9cbaccb038fd26bfc3a32cd883f978c"
     },
     {
-      "bytes": 15024,
+      "bytes": 15425,
       "path": "scripts/check_release_install.py",
-      "sha256": "4ee79ad6a09894c93f70f39cac9e6c860f614e17d058c7b6acadb7e6eff8d4f7"
+      "sha256": "468faf4c782f9b4f84b55e84d37d371683764b62645a5913e29a5e46098bb549"
     },
     {
       "bytes": 8529,
@@ -1086,9 +1096,9 @@
       "sha256": "1405e3ce371d51ef0b949ef668cee1e5d7f9828b1095de97e9f50c97d0b23093"
     },
     {
-      "bytes": 7570,
+      "bytes": 7653,
       "path": "scripts/e1br_assessment.py",
-      "sha256": "82ad2b0b2a025c2a1f5013780a3a1b8d1a0a3fc482aa121f1a44f1521b236e03"
+      "sha256": "eab081065e411ca0c3669b15d169170b9c960e0a0f718f6e29584bc89e5975e9"
     },
     {
       "bytes": 23034,
@@ -1119,6 +1129,36 @@
       "bytes": 15549,
       "path": "scripts/e1br_format_runtime.py",
       "sha256": "786a8a1a838bd6677926568f76c3cecad303a5c1b2c296825f064e7817675e93"
+    },
+    {
+      "bytes": 16708,
+      "path": "scripts/e1br_memory_checkpoint.py",
+      "sha256": "8b16c6fd958bad88ea4c15a8602352c52223f31dbef6ccb8c58aa53a21d6d488"
+    },
+    {
+      "bytes": 6690,
+      "path": "scripts/e1br_memory_legacy.py",
+      "sha256": "3fb5edae83a9451575ff5b75caff8ab06694e0a38a165cc63b9af864572b10fd"
+    },
+    {
+      "bytes": 22957,
+      "path": "scripts/e1br_memory_qualification.py",
+      "sha256": "f1e98265cd3d9b32fdf27fc1c70d81bb96e8d0e7680532551f4d4a5530e5198d"
+    },
+    {
+      "bytes": 21461,
+      "path": "scripts/e1br_memory_runtime.py",
+      "sha256": "c4898b968c33387eedb5cf9a06e1cf0f26e0b8d6d5b00346e6db0785e0c9cfdf"
+    },
+    {
+      "bytes": 22715,
+      "path": "scripts/e1br_prewrite_checkpoint.py",
+      "sha256": "9ec3df52041fb2df48cd69f9a8776b6a122ab84a1edd7da18924b048c0a9a284"
+    },
+    {
+      "bytes": 12500,
+      "path": "scripts/e1br_prewrite_runtime.py",
+      "sha256": "b76c448c38f68c92084326f566d451449f574eabfd7caf136a7cf4a076e7bf0f"
     },
     {
       "bytes": 9387,
@@ -1256,9 +1296,9 @@
       "sha256": "03e2c8b4e6f345f339b97a55fc7ef250263c00d0902f8e2385e0009851c19437"
     },
     {
-      "bytes": 25627,
+      "bytes": 25738,
       "path": "scripts/run_e1br.py",
-      "sha256": "17fa9fd23d7f182c320474ab00f984f2ef37d0010f0de4707dd8f42291e2c03c"
+      "sha256": "79f1d30cb672bbedf881be0a9f091d026707a58a5ae4bdc3b0124a759d90a676"
     },
     {
       "bytes": 12336,
@@ -1269,6 +1309,16 @@
       "bytes": 13472,
       "path": "scripts/run_e1br_format_continuation.py",
       "sha256": "773cd8710d96ff351929714c91789975d4c58d6387ea6d51b4a15b3f282d7e0f"
+    },
+    {
+      "bytes": 13707,
+      "path": "scripts/run_e1br_memory_continuation.py",
+      "sha256": "e7df388fce5a80c01a6c4db3a28e7fc7feb427e7677691d13bad081a590d4606"
+    },
+    {
+      "bytes": 16579,
+      "path": "scripts/run_e1br_prewrite_continuation.py",
+      "sha256": "bfac9f6532558ddf9ff0f318612304978c7567a507f30978d7421827973cc257"
     },
     {
       "bytes": 11195,
@@ -1426,9 +1476,9 @@
       "sha256": "741292c02c6d2cd907db078889396c8029929d0e784748cc11223947979dca2e"
     },
     {
-      "bytes": 8035,
+      "bytes": 8777,
       "path": "tests/test_cognitive_memory_protocol.py",
-      "sha256": "42a6f60fa93995c2b8ff0665176fe44e7090d8eea8865f41f24a0e37d70f5fb8"
+      "sha256": "c0f6ad529cdca3b37d739ff8d96fd99189fca3527ac703d19a30608868ea51b8"
     },
     {
       "bytes": 7755,
@@ -1726,6 +1776,31 @@
       "sha256": "999c1abf97e799966f0e361ce874c601f983c3e1bf53e2a654e406a9f427063e"
     },
     {
+      "bytes": 15347,
+      "path": "tests/test_e1br_memory_qualification.py",
+      "sha256": "caf700543dbdf2b4ba42f37129423a4228b19c84317a11aecba9f21456eb71b6"
+    },
+    {
+      "bytes": 10478,
+      "path": "tests/test_e1br_memory_runtime.py",
+      "sha256": "04e431d2148d228ec6e8691a6bdb69ef513f61724462ae42b27b45e6bb7ad878"
+    },
+    {
+      "bytes": 8645,
+      "path": "tests/test_e1br_prewrite_checkpoint.py",
+      "sha256": "ba2e4f30ee5e12b5e0a2475a494d7906f8a13681fc6df63765e6688efe03857d"
+    },
+    {
+      "bytes": 2224,
+      "path": "tests/test_e1br_prewrite_qualification.py",
+      "sha256": "f311f4f757e744654b7492a6296ff36b5c3d0ce514e6f83a5a5b680044b73a73"
+    },
+    {
+      "bytes": 7777,
+      "path": "tests/test_e1br_prewrite_runtime.py",
+      "sha256": "ab9c72ae65e206c1d860591a66a20457a527bbb76c4167b53b60e81f1352a10d"
+    },
+    {
       "bytes": 7395,
       "path": "tests/test_e1br_received_body.py",
       "sha256": "430973825408ea71673ac6103b8d29a4a69cce9858254770f22321f165770ab5"
@@ -1921,9 +1996,9 @@
       "sha256": "8e73be88dd5e044993b7f7f39caf85cb6fa50b60be24569db2c3aad2787e3400"
     },
     {
-      "bytes": 28461,
+      "bytes": 32771,
       "path": "tests/test_minimal_release.py",
-      "sha256": "718253889398c239802f84f9624495412167e71910acccd19b5991f30e4798cc"
+      "sha256": "c87723cfc108633a63b7a54197e4b0afd01f4614e0ec74c9393fb345c3e5ca0a"
     },
     {
       "bytes": 8107,
@@ -2126,9 +2201,9 @@
       "sha256": "989e59bc05c2f5c51f6439dcd310fad8b5f2497c76b03225f1318f7bc60c28c5"
     },
     {
-      "bytes": 5924,
+      "bytes": 7573,
       "path": "tests/test_release_audit.py",
-      "sha256": "4205a259b7c4e4b242b92e52c15fda09a509c6983d3b2c4f091eea28ed131b25"
+      "sha256": "d2f58748beb580626e8703b1d5f1aebcca972bda8ad0b3e627529d9e41514f4f"
     },
     {
       "bytes": 4943,
@@ -2312,7 +2387,7 @@
     }
   ],
   "model_requests": 0,
-  "policy_version": "aria-minimal-source-9",
+  "policy_version": "aria-minimal-source-11",
   "scope": "selected_current_source_only_not_git_history_or_runtime_data",
   "synthetic_password_fixture_exemptions": [
     {
