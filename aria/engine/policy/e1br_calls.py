@@ -17,6 +17,7 @@ import uuid
 from .minimal_calls import MinimalCallStopped, _stamp, _unique_request_object
 from .online_decision import protocol_version
 from .online_json import parse_json_decision
+from .online_json_diagnostics import online_shape_diagnostic, sanitize_online_shape_diagnostic
 from .reserved_calls import ReservedCallGuard, validate_reservation_policy
 from .request_pacing import monotonic_value, wait_until
 from .response_observability import (
@@ -164,6 +165,14 @@ def validate_e1br_records(rows, *, stage, registration_sha256, no_content_check=
                 raise ValueError("e1br_error_envelope_audit_binding_changed")
         if "transport_failure" in row:
             validate_transport_failure(row["transport_failure"])
+        if "online_shape" in row:
+            shape = row["online_shape"]
+            if (not shape or sanitize_online_shape_diagnostic(shape) != shape
+                    or row.get("role") != "online_fast"
+                    or row.get("reply_return_channel") != "json_object"
+                    or row.get("status") != "failed"
+                    or row.get("validation_error") != "online_decision_schema_invalid"):
+                raise ValueError("invalid_e1br_online_shape")
         prior = groups[_key(row)]
         same = [item for item in prior if item["product_step"] == row["product_step"]]
         retries = sum("infrastructure_retry_of_request_id" in item for item in prior)
@@ -391,6 +400,9 @@ class E1BRCallGuard(ReservedCallGuard):
                 try:
                     parsed = parse_json_decision(content, row["online_decision_version"])
                 except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
+                    # This guard rejects the body before the client can observe
+                    # its shape. Retain only fixed schema paths and categories.
+                    row["online_shape"] = online_shape_diagnostic(content, row["online_decision_version"])
                     row["validation_error"] = "online_decision_schema_invalid"
                     raise MinimalCallStopped("online_decision_schema_invalid") from None
                 # parse_json_decision has already rejected duplicates/nonfinite

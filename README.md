@@ -13,6 +13,11 @@ the intended preference-use effect was not measured. See the
 [fixed result and diagnosis](docs/E1BR_RESULTS_2026_10_05.md). Later repairs need
 their own model evidence; software tests do not establish a benefit to elders.
 
+The first E1c run dispatched 124 of 1,056 planned positions and completed one of
+12 cases before a response violated the output schema. It remains **not evaluable**;
+the short-plan prompt repair has software checks, not proven model reliability.
+See the [evidence boundaries](docs/EVIDENCE.md) for what these results can support.
+
 ## Run locally
 
 Requires Python 3.10 or newer. From this directory, on Windows:

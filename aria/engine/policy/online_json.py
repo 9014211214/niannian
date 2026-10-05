@@ -18,6 +18,7 @@ ONLINE_JSON_PROTOCOL_VERSION = "online_json_protocol_v2"
 # The carrier/history protocol stays v2; the nested-field guidance is versioned
 # separately so experiments never inherit the older prompt's effect claim.
 ONLINE_JSON_STRUCTURE_VERSION = "online_json_structure_v1"
+ONLINE_JSON_PLAN_VERSION = "online_json_bounded_plan_v1"
 INPUT_VERSION = "online_json_input_v2"
 _FORMAT_MARKER = "\n\n## 本次输入与返回合同：online_json_protocol_v2\n"
 _SCHEMA_INSTRUCTION = (
@@ -86,12 +87,31 @@ def schema_field_contract(version: str) -> str:
             + "\n".join(lines))
 
 
-def _format_contract(version):
+def bounded_plan_contract(version: str) -> str:
+    """Read each plan field's existing bounds; supply no sample decisions."""
+    schema = online_decision_tool_spec(version)["function"]["parameters"]
+    fields = schema["properties"]["communication_plan"]["properties"]
+    lines = [
+        f"$.communication_plan.{key}：至少{fields[key]['minLength']}个字符、"
+        f"至多{fields[key]['maxLength']}个字符（含标点和空格）。"
+        for key in ("support_order", "boundary")
+    ]
+    return ("\n\n## 当轮沟通计划长度合同：" + ONLINE_JSON_PLAN_VERSION
+            + "\ncommunication_plan.support_order和boundary仅记录本轮简短先后安排和沟通行动边界，"
+            "不是通用政策、安全规则或系统提示的复述；不要粘贴整段提示。"
+            "两项分别是非空且非纯空白的字符串，各自满足下列长度限制；"
+            "这些限制约束内部计划字段，与response的表达要求分开。"
+            "生成前简化本轮计划并核对各自长度，不把核对过程写入输出。\n"
+            + "\n".join(lines))
+
+
+def _format_contract(version, *, bounded_plan=True):
     schema = online_decision_tool_spec(version)["function"]["parameters"]
     suffix = SCHEMA_MARKER + _SCHEMA_INSTRUCTION + _canonical(schema)
     carrier = _carrier_contract(version)
     assert carrier.endswith(suffix)
-    return carrier[:-len(suffix)] + schema_field_contract(version) + suffix
+    plan = bounded_plan_contract(version) if bounded_plan else ""
+    return carrier[:-len(suffix)] + schema_field_contract(version) + plan + suffix
 
 
 def prepare_json_messages(messages: list[dict], version: str) -> list[dict]:
@@ -104,6 +124,9 @@ def prepare_json_messages(messages: list[dict], version: str) -> list[dict]:
     channel = bind_online_return_channel([], channel="plain_json")[0]["content"]
     suffixes = [contract(v) for contract in (_format_contract, _carrier_contract)
                 for v in ONLINE_DECISION_VERSIONS]
+    # Match the prior exact structure-v1 contract for lossless rebinding.
+    suffixes += [_format_contract(v, bounded_plan=False)
+                 for v in ONLINE_DECISION_VERSIONS]
     legacy = {channel + SCHEMA_MARKER + _SCHEMA_INSTRUCTION
               + _canonical(online_decision_tool_spec(v)["function"]["parameters"])
               for v in ONLINE_DECISION_VERSIONS}
