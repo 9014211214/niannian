@@ -230,6 +230,7 @@
         <details class="understanding"><summary>原话与审核来源 <span id="evidence-count" class="number">0 条</span></summary><div id="evidence" class="detail-body"></div></details>
         <details class="understanding"><summary>模型调用与费用 <span id="model-usage-summary" class="number">正在读取</span></summary><div id="model-usage" class="detail-body"></div></details>
         <p id="model-guard-notice" class="error" role="status" hidden></p>
+        <button id="resume-models" type="button" hidden>我确认恢复后续模型调用</button>
         <div class="offline"><strong id="offline-title">会后整理尚未运行</strong><p id="offline-status">封存与整理分开。离开页面只尝试封存，不会自动调用会后模型。</p><details class="inline-detail"><summary>查看整理阶段记录</summary><div id="offline-stages" class="detail-body"></div></details></div>
       </aside>
     </div>
@@ -273,7 +274,7 @@
     ];
     const names = {candidate:'待观察',working:'适用中',stable:'较稳定',retired:'已撤回',open:'进行中',active:'进行中',sealed:'已封存',reviewed:'已整理',expired:'已到期',completed:'已完成',pending:'等待处理',idle:'暂无待办',blocked:'需核查后再继续',failed:'失败',unknown:'结果未知',not_run:'未执行',not_started:'未开始',disabled:'未启用',local_preview:'本地流程占位',live:'真实生成',model:'真实模型生成',rule:'安全规则接管',rule_protection:'安全规则接管',rule_safety:'安全规则接管',support:'支持',counter:'反证',not_applied:'未应用',applied:'已应用',conversation:'对话原话',synthetic_demo:'虚构角色演示',added:'新增',revised:'修订',removed:'撤回',unchanged:'维持',facts:'事实',fact:'事实',hypotheses:'人物假设',hypothesis:'人物假设',unavailable:'未观测'};
     let state = null, busy = false, uncertain = null, selectedSession = null, activeSession = null;
-    Object.assign(names,{proposed:'待本人确认',confirmed:'本人已确认',declined:'不记这条',withdrawn:'本人已撤回',superseded:'已由新说明取代',stated_preferences:'本人相处说明',local_rule:'本地规则示意',ui:'本人页面操作',result_unknown:'生成或保存结果不明',model_failed:'模型调用或返回失败'});
+    Object.assign(names,{proposed:'待本人确认',confirmed:'本人已确认',declined:'不记这条',withdrawn:'本人已撤回',superseded:'已由新说明取代',stated_preferences:'本人相处说明',local_rule:'本地规则示意',ui:'本人页面操作',result_unknown:'生成或保存结果不明',model_failed:'模型调用或返回失败',local_request_rejected:'本地预检拒绝（未发送）',rule_fallback:'系统兜底（非模型生成）'});
     let renderingTurns = '', suggestedSession = null, leavingSeal = false;
     let stagePlaying=false, replayMode=false, replayFrames=[], replayIndex=0, replayTimer=null;
     let careState=null, careBusy=false, careUnknown=null;
@@ -296,7 +297,8 @@
       container.replaceChildren();
       $('forget-usage-note').hidden=!configured;
       $('model-guard-notice').hidden=!modelCallsStopped();
-      $('model-guard-notice').textContent=modelCallsStopped()?'后续模型调用已停止，请核查记录或调用限额。不会自动重试；已保存的对话仍可回看。':'';
+      $('model-guard-notice').textContent=modelCallsStopped()?(usage.stop_reason==='local_request_rejected'?'本地发送前检查拒绝了请求，模型未收到该请求。请核查输入额度、配置或记录完整性；恢复按钮不能解除。':usage.can_resume===true?'连续三次对话或会后整理失败，后续模型调用已暂停。本人可明确恢复；旧请求不会重新发送，费用记录继续保留。':'后续模型调用因费用、限额或结果完整性问题停止，恢复按钮不能解除；请核查记录。已保存的对话仍可回看。'):'';
+      $('resume-models').hidden=usage.can_resume!==true;
       if(!configured) {
         $('model-usage-summary').textContent=state?.mode==='live'?'状态未提供':'模型已关闭';
         placeholder(container,state?.mode==='live'?'尚未取得调用记录，请刷新核查。':'本地预览的模型调用已关闭。');
@@ -307,6 +309,7 @@
       container.append(text('p','调用尝试在发送前登记；结果不明时，不能确定是否已发出。未知费用不算作零费用。','subtle'));
       container.append(text('p','达到次数或费用阈值，或费用、结果不明时，停止后续模型请求。费用阈值只阻止后续请求，不保证单次账单上限。','subtle'));
       container.append(text('p','清除体验资料会保留调用记录，不恢复调用额度。','subtle'));
+      if(usage.recovery_contract)container.append(text('p',`连续失败 ${scalar(usage.consecutive_failures)} 次。单次格式失败用有标识的兜底回复，可继续下一轮；仅无模型内容且费用明确的429/5xx最多额外尝试两次。`,'subtle'));
     }
     function updateControls() {
       const pending=[...array(state?.turns),...allReviews()].some(row=>['pending','unknown'].includes(row.status) || row.requires_review);
@@ -320,6 +323,7 @@
       $('seal').disabled=locked || !isCurrentOpen();
       $('reflect').hidden=state?.mode==='local_preview';
       $('reflect').disabled=locked || modelCallsStopped() || isCurrentOpen() || !array(state?.sessions).length;
+      $('resume-models').disabled=locked || viewingHistory() || state?.model_usage?.can_resume!==true;
       $('preference-review').hidden=state?.mode!=='local_preview';
       $('preference-review').disabled=locked || isCurrentOpen() || viewingHistory() || !array(state?.sessions).length;
       $('stated-preferences').querySelectorAll('button').forEach(button=>{const cannotWithdraw=busy || careBusy || replayMode || !!uncertain || state?.storage_failed || !state || viewingHistory();button.disabled=button.dataset.preferenceAction==='withdraw'?cannotWithdraw:locked || viewingHistory();});
@@ -339,6 +343,7 @@
         const preview=turn.source==='local_preview' || turn.source==='preview';
         const failed=turn.status==='failed', pending=['pending','unknown'].includes(turn.status);
         const response={speaker:failed || pending || preview?'narrator':'robot',source:failed?'失败记录':pending?'结果未确定':preview?'本地占位 · 非模型回复':label(turn.source) || '实际返回文本',text:failed?turn.error || '本轮失败，没有可交付回复。':pending?'本轮没有确定结果；不会用预写回复替代。':turn.response || '本轮没有返回文本。',turn_id:turn.turn_id};
+        if(turn.source==='rule_fallback' && turn.response){response.source='系统兜底 · 非模型生成';response.text=turn.response;}
         if(turn.external_emotion?.simulated){user.source+=' · 合成情绪实验';response.source+=' · 合成情绪实验，非真实观测';}
         return [user,response];
       });
@@ -513,7 +518,8 @@
           wrapper.append(message('user',turn.text,displayTime(turn.created_at || turn.at)));
           if(turn.external_emotion)wrapper.append(text('p',`${turn.external_emotion.simulated?'合成情绪实验 · 非真实观测':'外部情绪读数 · 可能有误'}：${turn.external_emotion.label} · 来源 ${turn.external_emotion.source}`,'subtle'));
           const isPreview=turn.source==='local_preview' || turn.source==='preview' || (state.mode==='local_preview' && !['model','rule_safety','rule','rule_protection'].includes(turn.source));
-          if(turn.status==='failed')wrapper.append(message('system',turn.error || '本轮处理失败，没有可交付的 Agent 回复。失败不会用预写回答替代。','失败',true));
+          if(turn.source==='rule_fallback' && turn.response){wrapper.append(message('system',turn.response,'系统兜底 · 非模型生成'));wrapper.append(message('system',turn.error || '模型输出未通过校验，本轮没有作为模型成功。','本轮模型失败',true));}
+          else if(turn.status==='failed')wrapper.append(message('system',turn.error || '本轮处理失败，没有可交付的 Agent 回复。失败不会用预写回答替代。','失败',true));
           else if(turn.status==='pending' || turn.status==='unknown')wrapper.append(message('system','本轮尚无确定结果。请刷新状态核查，勿重复发送这句话。',label(turn.status)));
           else if(isPreview)wrapper.append(message('system',turn.response || '这句话已进入本地流程。模型调用关闭，没有生成机器人回复。','本地流程占位 · 非模型回复'));
           else if(turn.response)wrapper.append(message('assistant',turn.response,label(turn.source) || '实际交付文本'));
@@ -676,10 +682,11 @@
           const started=uncertain.endpoint==='start' && state.session_id && !uncertain.sessionIds.includes(state.session_id);
           const forgotten=uncertain.endpoint==='forget' && !array(state.sessions).length && !array(state.turns).length;
           const reflected=uncertain.endpoint==='reflect' && array(state.reviews).some(review=>review.request_id===uncertain.id && ['completed','failed'].includes(review.status));
+          const resumed=uncertain.endpoint==='resume-models' && array(state.model_usage?.product_events).some(event=>event.event==='resumed' && event.request_id===uncertain.id);
           const localReviewed=uncertain.endpoint==='preference-review' && array(state.preference_reviews).some(review=>review.request_id===uncertain.id && ['completed','failed'].includes(review.status));
           const preferenceSaved=uncertain.endpoint==='preference' && array(state.profile?.stated_preferences).some(item=>item.id===uncertain.id && item.status===({confirm:'confirmed',decline:'declined',withdraw:'withdrawn'}[uncertain.action]));
           const cognitiveSaved=uncertain.endpoint==='cognitive' && ((uncertain.action==='enable' && state.cognitive?.enabled===true) || (uncertain.action==='disable' && state.cognitive?.enabled===false) || (uncertain.action==='delete' && !array(state.cognitive?.observations).some(item=>item.id===uncertain.id)) || (uncertain.action==='reminder_set' && state.cognitive?.status==='watch' && state.cognitive?.cooldown_until));
-          if((known && ['completed','failed'].includes(known.status)) || sealed || started || forgotten || reflected || localReviewed || preferenceSaved || cognitiveSaved){ uncertain=null; setError(''); status('已找到这次操作的保存结果；没有重新发送。'); }
+          if((known && ['completed','failed'].includes(known.status)) || sealed || started || forgotten || reflected || resumed || localReviewed || preferenceSaved || cognitiveSaved){ uncertain=null; setError(''); status('已找到这次操作的保存结果；没有重新发送。'); }
           else {setError('上次请求结果仍需核查，已停止写操作且不会自动重发。你可以继续刷新查看保存结果。'+(uncertain.id?`\n请求编号：${uncertain.id}`:''));status('已读取状态；未执行任何新的模型或护理操作。');}
         } else if(state.storage_failed) {setError('保存失败，已停止写操作。请先核查本地保存问题；刷新仅查看状态。');status('已读取状态；保存故障尚未解决。');}
         else if(state.requires_review || [...array(state.turns),...allReviews()].some(row=>['pending','unknown'].includes(row.status) || row.requires_review)) {setError('存在等待处理、结果不明或需要核查费用的请求，已停止写操作。刷新只查看保存结果，不会重新发送。');status('已读取状态；仍有请求需要核查。');}
@@ -727,6 +734,7 @@
     $('start').addEventListener('click',()=>mutate('start',{},()=>{selectedSession=null;render(state);$('message-input').focus();}));
     $('seal').addEventListener('click',()=>mutate('seal',{session_id:state.session_id}));
     $('reflect').addEventListener('click',()=>mutate('reflect',{request_id:crypto.randomUUID()}));
+    $('resume-models').addEventListener('click',()=>mutate('resume-models',{request_id:crypto.randomUUID(),pause_id:state?.model_usage?.pause_id,confirmed:true,replay:replayMode}));
     $('preference-review').addEventListener('click',()=>mutate('preference-review',{request_id:crypto.randomUUID()}));
     $('refresh').addEventListener('click',refresh);
     $('return-current').addEventListener('click',()=>{selectedSession=null;render(state);status('已回到当前会话。');});

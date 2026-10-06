@@ -36,6 +36,7 @@ _HANDLER_ERROR_CODES = _REFLECTION_ERROR_DETAILS | {
     "offline_memory_handler_exception", "offline_reflection_handler_exception",
     "invalid_memory_payload", "invalid_memory_protocol", "memory_extraction_failed",
     "person_reflection_failed",
+    "memory_privacy_unreviewed",
 }
 # A handler cannot overwrite the active checkpoint, queue, task state, consent,
 # trust or other live runtime data while committing offline understanding.
@@ -256,6 +257,8 @@ class OfflineSessionQueue:
                                   if candidate.cognitive_health_consent.has_text_monitoring_consent() else None),
             excluded_turn_indices=excluded, source_completeness=source_completeness,
             memory_completed=memory_completed, reflection_completed=reflection_completed,
+            memory_privacy_review_completed=(memory_completed
+                and ctx.working_memory.get("_memory_privacy_review_completed") is True),
             state="pending" if source_completeness == "complete" else "needs_review",
         ))
         self._clear_matching_checkpoint(candidate, ctx.session_id)
@@ -273,6 +276,7 @@ class OfflineSessionQueue:
             "_offline_source_completeness": job.source_completeness,
             "_sensitive_memory_excluded_turns": list(job.excluded_turn_indices),
             "_memory_consolidated": job.memory_completed, "_reflection_completed": job.reflection_completed,
+            "_memory_privacy_review_completed": job.memory_privacy_review_completed,
         })
         if persona.cognitive_health_consent.has_text_monitoring_consent():
             ctx.working_memory.update({
@@ -353,11 +357,14 @@ class OfflineSessionQueue:
                         if (not isinstance(result, tuple) or len(result) != 3
                                 or not isinstance(result[0], PersonaProfile)
                                 or result[0].user_id != self.persona.user_id
-                                or type(result[1]) is not str or result[1] not in {"ok", "skipped", "failed", "sealed_failed"}
-                                or result[1] == "sealed_failed" and stage != "reflection"):
+                                or type(result[1]) is not str or result[1] not in {"ok", "skipped", "failed", "sealed_failed"}):
                             error = "offline_handler_result_invalid"
                         elif result[1] == "failed":
                             error = _safe_code(result[2])
+                        elif (stage == "memory" and result[1] in {"ok", "skipped"}
+                              and ctx.working_memory.get("_memory_privacy_review_required")
+                              and not ctx.working_memory.get("_memory_privacy_review_completed")):
+                            error = "offline_memory_privacy_unreviewed"
                 except Exception:
                     error = f"offline_{stage}_handler_exception"
                 # Late results cannot outlive the fixed raw-data retention window.
@@ -374,12 +381,14 @@ class OfflineSessionQueue:
                         error = "offline_store_failed"
                     return self._result("failed", error, attempted_jobs=attempted, completed_jobs=completed)
                 if result[1] == "sealed_failed":
-                    # Discard the handler candidate entirely. Memory/R1 were
-                    # already committed; a failed personality review cannot
-                    # mutate them or block future sessions at the FIFO head.
+                    # Discard the handler candidate entirely. A settled memory
+                    # body failure also seals this session without reflection:
+                    # its privacy classification was not established. No stage
+                    # is falsely marked complete and future sessions can drain.
+                    # Reflection failure preserves previously committed memory.
                     candidate = self.persona.model_copy(deep=True)
                     active = candidate.offline_sessions[0]
-                    self._finish(candidate, active, self._clock(), outcome="reflection_failed",
+                    self._finish(candidate, active, self._clock(), outcome=stage + "_failed",
                                  error_code=_safe_code(result[2]))
                     if not self._commit(candidate):
                         return self._result("failed", "offline_store_failed", attempted_jobs=attempted,
@@ -388,6 +397,20 @@ class OfflineSessionQueue:
                     break
                 candidate = self._merge_result(result[0], stage=stage)
                 active = candidate.offline_sessions[0]
+                if stage == "memory":
+                    # The semantic privacy decision and extracted memory share
+                    # the same durable commit. Reflection reconstructs the
+                    # original conversation using this persisted exclusion map.
+                    mask = ctx.working_memory.get("_sensitive_memory_excluded_turns", [])
+                    if (not isinstance(mask, (list, tuple, set)) or any(
+                            type(index) is not int or not 0 <= index < len(active.turns) for index in mask)):
+                        return self._result("failed", "offline_exclusion_mask_invalid",
+                                            attempted_jobs=attempted, completed_jobs=completed)
+                    active.excluded_turn_indices = sorted(set(active.excluded_turn_indices) | set(mask))
+                    for index in active.excluded_turn_indices:
+                        active.turns[index] = SessionTurnSnapshot(user="", agent="")
+                    active.memory_privacy_review_completed = (
+                        ctx.working_memory.get("_memory_privacy_review_completed") is True)
                 setattr(active, stage + "_completed", True)
                 active.last_error_code = None
                 if active.memory_completed and active.reflection_completed:

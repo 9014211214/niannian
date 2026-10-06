@@ -84,6 +84,9 @@ def test_real_validation_failure_is_saved_by_queue_without_raw_output(tmp_path):
     engine = _engine(updater)
     queue = OfflineSessionQueue(PersonaProfile(user_id="fixture"), Store())
     assert queue.enqueue(ctx, memory_completed=True)["status"] == "queued"
+    # This fixture begins after a completed privacy review. Legacy jobs without
+    # that receipt are covered separately and must never reach this model.
+    queue.persona.offline_sessions[0].memory_privacy_review_completed = True
     result = queue.drain(lambda person, _: (person, "skipped", None),
                          engine._offline_reflection_stage)
     assert result["status"] == "failed"

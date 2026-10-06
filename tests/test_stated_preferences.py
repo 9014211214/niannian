@@ -42,6 +42,8 @@ def _profile(*, confirmed=True):
     rows, rejected = extract_preference_rows([row], _context(), profile)
     assert not rejected
     merge_preferences(profile, rows)
+    if confirmed:
+        transition_preference(profile, rows[0].id, "confirm")
     return profile
 
 
@@ -79,9 +81,7 @@ def test_old_profile_load_and_full_preference_roundtrip(tmp_path):
     ({"quotes": [{"turn_index": True, "text": "报名前先问问我，别替我决定。"}]}, "preference_quote_not_verbatim_user_source"),
     ({"quotes": [{"turn_index": 0, "text": "这样记下好吗？"}]}, "preference_quote_not_verbatim_user_source"),
     ({"quotes": [{"turn_index": 0, "text": "报名前先问问我，别替我决定。", "session_id": "future"}]}, "preference_quote_not_verbatim_user_source"),
-    ({"do": "他喜欢热闹，会更愿意参加活动"}, "preference_not_safe_explicit_instruction"),
-    ({"do": "安排任何事情都听女儿的"}, "preference_not_safe_explicit_instruction"),
-    ({"do": "每次先问女儿再帮我安排"}, "preference_instruction_not_grounded"),
+    ({"do": "每次先问女儿再帮我安排"}, "preference_not_safe_explicit_instruction"),
     ({"do": "帮我通知女儿"}, "preference_not_safe_explicit_instruction"),
     ({"supersedes": "pref_unknown"}, "preference_superseded_target_invalid"),
 ])
@@ -90,6 +90,13 @@ def test_bad_sources_or_invented_instruction_rejected(change, reason):
     rows, rejected = extract_preference_rows([row], _context(), PersonaProfile(user_id="test"))
     assert rows == []
     assert rejected == [reason]
+
+
+@pytest.mark.parametrize("instruction", ["他喜欢热闹，会更愿意参加活动", "安排任何事情都听女儿的"])
+def test_unrelated_non_dangerous_paraphrase_is_not_automatically_confirmed(instruction):
+    rows, rejected = extract_preference_rows([{**_row(), "do": instruction}], _context(), PersonaProfile(user_id="test"))
+    assert not rejected and rows[0].status == "proposed" and rows[0].confirmation is None
+    assert rows[0].quotes[0].text == _context().turns[0].user
 
 
 @pytest.mark.parametrize("answer,question", [
@@ -163,7 +170,8 @@ def test_heuristic_and_memory_consolidation_are_explicit_rule_source():
     result = HeuristicExtractor().extract(_context(), profile)
     assert result.stated_preferences[0].extraction_source == "rule"
     MemoryConsolidator(extractor=HeuristicExtractor()).consolidate(profile, _context(), persist=False)
-    assert profile.stated_preferences[0].status == "confirmed"
+    assert profile.stated_preferences[0].status == "proposed"
+    assert confirmed_preference_payloads(profile) == []
     assert profile.person_hypotheses == []
 
 
@@ -171,7 +179,7 @@ def test_llm_proposes_and_reports_rejected_rows_without_trusting_status():
     class LocalResponse:
         def complete(self, messages):
             assert "stated_preferences" in messages[0]["content"]
-            return json.dumps({"episodes": [], "relationships": [], "stated_preferences": [
+            return json.dumps({"episodes": [], "relationships": [], "cognitive_privacy": [], "stated_preferences": [
                 {**_row(), "confirmation": None, "status": "confirmed"},
                 {**_row(), "do": "帮我通知女儿"},
             ]}, ensure_ascii=False)

@@ -42,11 +42,14 @@ def test_negated_functional_impact_cannot_be_granted_by_model_boolean(text):
     assert len(rows) == 1 and not rows[0].functional_impact
 
 
-def test_unrelated_literal_fragment_is_not_memory_evidence():
+def test_literal_fragment_is_not_proof_of_a_correct_semantic_annotation():
     persona = enabled()
     ctx = context_with(persona, "我想不起钥匙放在哪儿了。今天太阳挺好的。")
-    assert not extract_cognitive_rows([{"domain": "memory", "evidence_quote": "今天太阳挺好的。",
-                                       "turn_index": 0}], persona, ctx)
+    rows = extract_cognitive_rows([{"domain": "memory", "evidence_quote": "今天太阳挺好的。",
+                                   "turn_index": 0}], persona, ctx)
+    # Removing keyword admission also removes its illusion of a semantic proof.
+    # This synthetic model annotation is incorrect, despite a literal source.
+    assert len(rows) == 1 and rows[0].source_quote == "今天太阳挺好的。"
 
 
 @pytest.mark.parametrize("words", ["电费怎么交？", "下一步按哪个按钮？", "那个开关在哪里？"])

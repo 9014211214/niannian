@@ -29,7 +29,11 @@ ONLINE_ID_NAMESPACE_VERSION = "online_json_id_namespaces_v1"
 # 让回复在推演之后生成；推演只能引用离线画像/假设与当前原话，不重算人格。
 # v1 保留原样，供历史复现与对照臂使用。
 ONLINE_DECISION_VERSION_V2 = "online_turn_decision_v2"
-ONLINE_DECISION_VERSIONS = (ONLINE_DECISION_VERSION, ONLINE_DECISION_VERSION_V2)
+# v3 keeps the v1 decision shape and adds a same-call semantic safety signal.
+# Historical v1/v2 schemas remain reproducible; minimal live clients select v3.
+ONLINE_DECISION_VERSION_SAFETY = "online_turn_decision_v3"
+ONLINE_DECISION_VERSIONS = (ONLINE_DECISION_VERSION, ONLINE_DECISION_VERSION_V2, ONLINE_DECISION_VERSION_SAFETY)
+SAFETY_CONCERNS = ("none", "self_harm", "medical_emergency", "fall", "unsafe_medication")
 ONLINE_DECISION_VERSION_ENV = "ARIA_ONLINE_DECISION_VERSION"
 DELIBERATION_VERSION = "turn_deliberation_v1"
 DELIBERATION_READ_LIMIT = 40
@@ -214,7 +218,7 @@ def protocol_version(messages: list[dict]) -> str | None:
         if not isinstance(content, str):
             continue
         versions.update(re.findall(
-            r"(?m)^协议版本[：:](online_turn_decision_v[12])(?:。|\s|$)", content))
+            r"(?m)^协议版本[：:](online_turn_decision_v[123])(?:。|\s|$)", content))
     if len(versions) > 1:
         raise ValueError("conflicting_online_protocol_declarations")
     return next(iter(versions), None)
@@ -469,6 +473,9 @@ def online_decision_tool_spec(version: str = ONLINE_DECISION_VERSION) -> dict:
         ],
         "additionalProperties": False,
     }
+    if version == ONLINE_DECISION_VERSION_SAFETY:
+        parameters["properties"]["safety_concern"] = {"type": "string", "enum": list(SAFETY_CONCERNS)}
+        parameters["required"].append("safety_concern")
     if version == ONLINE_DECISION_VERSION_V2:
         properties = parameters["properties"]
         properties["deliberation"] = deliberation_schema()
@@ -536,7 +543,7 @@ def single_pass_messages(
     copied = [dict(item) for item in messages]
     # v1 不写入任何新键（历史请求与上下文保持原样）；缺省即按 v1 解析。
     ctx.working_memory.pop("_online_decision_basis_ids", None)
-    if version == ONLINE_DECISION_VERSION_V2:
+    if version in {ONLINE_DECISION_VERSION_V2, ONLINE_DECISION_VERSION_SAFETY}:
         ctx.working_memory["_online_decision_version"] = version
     else:
         ctx.working_memory.pop("_online_decision_version", None)
@@ -615,6 +622,17 @@ def single_pass_messages(
         "\n不以‘没事就好’关闭持续变化，不把持续退出说成‘歇着挺好’，也不强迫参与。"
         "沟通方向 id 绝不是工具名。情绪/症状本身不授权。"
     )
+    if version == ONLINE_DECISION_VERSION_SAFETY:
+        shared_tail += (
+            "\n安全分流 safety_concern 必填：none/self_harm/medical_emergency/fall/unsafe_medication。"
+            "按当前本人原话及必要近文理解语义，不要求特定关键词。self_harm包括当前自伤念头、"
+            "意图或准备，也包括含蓄的求死表达；medical_emergency指当前可能需立即急救的身体变化；"
+            "fall指当前跌倒后受伤、无法自行安全起身或情况不明需现场帮助；unsafe_medication指"
+            "当前疑似误服、过量、危险停药/混用或为自伤积存药物。多项时优先自伤，再急症。"
+            "普通低落、思念、文学引述、假设、第三人转述、已解决的过去事件、明确否认本人的当前危险，"
+            "不能仅凭相关词给非none。标签仅是安全分流候选，不是诊断、危险已被证实或通知授权。"
+            "非none时由本地既有安全流程接管，不输出操作药物、执行工具或已联系他人的声称。"
+        )
     shared_tail += online_id_namespace_contract(version, interventions)
     if format_style == "schema_guided":
         # Replace only our newly constructed format wording, never quoted data.
@@ -635,7 +653,7 @@ def single_pass_messages(
     copied[0]["content"] = (
         base + delivery_contract
         + "\n\n## 在线单次情感决策\n"
-        f"协议版本：{ONLINE_DECISION_VERSION}。本次仅提出当轮状态候选、选择沟通"
+        f"协议版本：{version}。本次仅提出当轮状态候选、选择沟通"
         "方向和回复。长期人物理解只引用，不重算 DISC、Big Five、依恋或 CBT；"
         "不调用后续复核。"
         "\n当前可选干预："
@@ -659,7 +677,9 @@ def single_pass_messages(
         '"selected_intervention_id":"只能从当前可选干预 id 中选择；没有则空字符串",'
         '"communication_plan":{"pace":"枚举值","support_order":"具体先后安排",'
         '"boundary":"沟通行动边界"},'
-        '"uncertainty":0到1}。'))
+        + ('"safety_concern":"none/self_harm/medical_emergency/fall/unsafe_medication之一",'
+           if version == ONLINE_DECISION_VERSION_SAFETY else '')
+        + '"uncertainty":0到1}。'))
         + shared_tail
     )
     return copied
@@ -682,6 +702,8 @@ def _schema_field_meanings(action_response_contract: str, version: str) -> str:
         "\ncommunication_plan：pace取一个完整英文枚举；support_order是具体先后安排；"
         "boundary是沟通行动边界。uncertainty取0到1的数值。"
     )
+    if version == ONLINE_DECISION_VERSION_SAFETY:
+        text += "\nsafety_concern：当前本人安全关注的枚举标签，不是诊断或通知权限；无当前依据时为none。"
     if version == ONLINE_DECISION_VERSION_V2:
         text += (
             "\ndeliberation：person_read说明他此刻可能在意/想要什么；applied_basis仅用上面"
@@ -776,7 +798,7 @@ def apply_single_pass_decision(
     try:
         payload = _load_payload(raw)
     except Exception:
-        if _looks_like_internal_protocol(raw):
+        if _active_version(ctx) == ONLINE_DECISION_VERSION_SAFETY or _looks_like_internal_protocol(raw):
             _record_unstructured(ctx, status="invalid_protocol_response")
             return DETERMINISTIC_MODEL_FAILURE_REPLY
         response = str(raw).strip()
@@ -785,6 +807,11 @@ def apply_single_pass_decision(
 
     response = str(payload.get("response") or "").strip()
     if not response or _looks_like_internal_protocol(response):
+        _record_unstructured(ctx, status="invalid_protocol_response")
+        return DETERMINISTIC_MODEL_FAILURE_REPLY
+
+    safety_concern = payload.get("safety_concern")
+    if _active_version(ctx) == ONLINE_DECISION_VERSION_SAFETY and safety_concern not in SAFETY_CONCERNS:
         _record_unstructured(ctx, status="invalid_protocol_response")
         return DETERMINISTIC_MODEL_FAILURE_REPLY
 
@@ -907,6 +934,9 @@ def apply_single_pass_decision(
         "delivery_guard": delivery_guard,
         **plan_trace,
     }
+    if _active_version(ctx) == ONLINE_DECISION_VERSION_SAFETY:
+        trace["safety_concern"] = safety_concern
+        trace["safety_source"] = "online_model_semantics"
     ctx.working_memory["online_turn_decision"] = trace
     history = ctx.working_memory.setdefault(
         "online_decision_history", []
@@ -1286,6 +1316,7 @@ def _looks_like_internal_protocol(raw: str) -> bool:
         for marker in (
             ONLINE_DECISION_VERSION,
             ONLINE_DECISION_VERSION_V2,
+            ONLINE_DECISION_VERSION_SAFETY,
             "aria_turn_decision",
             '"state_signals"',
             '"current_affect"',

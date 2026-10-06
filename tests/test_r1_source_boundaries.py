@@ -24,10 +24,12 @@ def test_telling_the_owner_an_operation_step_is_not_disclosure(step):
 
 @pytest.mark.parametrize("step", ["一步", "下一步", "第一步"])
 def test_owner_step_quote_cannot_drop_the_wait_condition(step):
-    # The previous software probe selected only the consequent. The current
-    # contract deliberately rejects that crop while retaining its full form.
-    rows, rejected = extract(f"请你先告诉我{step}，等我说好了再继续。", f"告诉我{step}")
-    assert not rows and rejected == ["preference_condition_not_preserved"]
+    # R1-A repairs missing conditions from the full source rather than dropping
+    # an otherwise reviewable proposal merely because do is a paraphrase.
+    source = f"请你先告诉我{step}，等我说好了再继续。"
+    rows, rejected = extract(source, f"告诉我{step}")
+    assert not rejected and rows[0].status == "proposed"
+    assert rows[0].scope == source.rstrip("。")
 
 
 @pytest.mark.parametrize("boundary", ["，", ",", "。", ".", "；", ";", "！", "？", "\n"])
@@ -72,7 +74,11 @@ def test_selected_quote_cannot_hide_a_third_party_or_permission_context():
 
 def test_step_word_does_not_relax_literal_source_or_confirmation():
     rows, rejected = extract("请你先告诉我一步。", "告诉我下一步")
-    assert rows == [] and rejected == ["preference_instruction_not_grounded"]
+    assert not rejected and rows[0].status == "proposed"
+    assert rows[0].quotes[0].text == "请你先告诉我一步。"
+    assert rows[0].confirmation is None
+    # The actual source quote must still be literal, even for a paraphrased do.
+    assert extract("请你先告诉我一步。", "告诉我下一步", quote="告诉我下一步")[0] == []
 
 
 @pytest.mark.parametrize("prefix", ["我跟你说清楚", "我向您讲明白", "你对我说的时候"])

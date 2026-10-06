@@ -43,8 +43,9 @@ python3 -m venv .venv
 说明和有限护理状态。原会话出处不一定进入本轮输入，页面分开标记；不展示隐藏推理。
 缺少旧快照时明确说明不可恢复，不用当前档案补造过去依据。回放读取原记录，不刷新依据。
 
-闲置、断开或退出只封存；不会自动启动会后模型。模型失败和保存结果不明会停止后续调用，
-相同请求 ID 不再次发送，也不偷偷替换成预写回复。
+闲置、断开或退出只封存；不会自动启动会后模型。产品单次输出不合格会显示明确标注的系统
+兜底回复，下一轮可以继续；它不算模型生成效果。保存结果不明或费用不明仍停止后续调用，
+相同交互请求 ID 不再次执行，历史回放不会重新调用。
 
 ## 可选情绪读数与记忆变化记录
 
@@ -130,8 +131,18 @@ Linux 对应命令为 `.venv/bin/aria-web --minimal --care-setup-admin caregiver
 在项目根目录执行以下离线命令（先把三份文件放到对应位置）：
 
 ```text
-python scripts/prepare_model_policy.py --models-json artifacts/local/model-metadata/models.json --online-endpoints-json artifacts/local/model-metadata/online-endpoints.json --offline-endpoints-json artifacts/local/model-metadata/offline-endpoints.json --output artifacts/local/model-policy.json
+python scripts/prepare_model_policy.py --models-json artifacts/local/model-metadata/models.json --online-endpoints-json artifacts/local/model-metadata/online-endpoints.json --offline-endpoints-json artifacts/local/model-metadata/offline-endpoints.json --output artifacts/local/model-policy.json --cover-all-price-tiers
 ```
+
+新版最小真实入口建议显式使用 `--cover-all-price-tiers`：逐档核对公开价格，以输入、
+缓存读取/写入和输出各自的最高价预留，输入界仍取公开 context 减最大输出、再与独立
+prompt 上限取较小值。完整请求 UTF-8 字节＋8192 的保守计算不变，也不缩小会话或价格预算。
+不带该选项时保留旧合同：输入限制在第一个加价档之前，长会话可能在发送前被拒绝。
+全档最高价会提高预留额，仍必须满足已批准的总费用上限；生成成功不保证能完成所有对话。
+
+已有策略/台账不能原地改价或扩界。需要保存旧账和费用，重新生成新策略、重新核准本轮
+可用额度，并使用明确迁移后的新台账；不能删除旧账或换目录恢复已消耗的额度。生成器
+不自动迁移台账，也不授权实发或补发。
 
 输出策略及同名 `.proof.json` 核对记录；已有文件不会覆盖。不支持参数、未知价格档位或端点不符
 都会拒绝生成。生成成功仅证明保存资料符合本地检查，不是已发送请求或真实兼容性验收。
@@ -145,8 +156,9 @@ python scripts/prepare_model_policy.py --models-json artifacts/local/model-metad
 策略文件或密钥的存在都不会自动打开模型；预览模式也不能仅带限额参数开启调用。
 
 仓库默认在线 Qwen3.7 Flash，会后 Claude Sonnet 5 分别承担 memory/reflection。
-默认在线 `v1`＋`mode_v1`；`ARIA_ONLINE_DECISION_VERSION=online_turn_decision_v2` 与
-`ARIA_DELIVERY_BLOCK=profile_v1` 仅供显式实验，不代表已通过效果验收。
+最小入口真实在线固定装配 `v3`＋`mode_v1`，同一调用输出安全风险标注，简单聊天也须提供。
+旧 `v1/v2` 供独立的历史实验入口显式选择；`ARIA_DELIVERY_BLOCK=profile_v1` 仍仅供实验，
+不代表已通过效果验收。缺少安全字段是格式失败，不能显示成“没有风险”。
 最小入口在线使用 JSON 正文返回，完整决策 schema 随提示发送，响应经本地严格校验；
 不发送工具强制选择和并行工具字段。通用客户端保留旧 native 模式供旧实验复现，会后两次
 调用保留各自正文职责。生产装配没有直接套用旧 E1 请求字节，真实新版效果需另测。
@@ -156,8 +168,23 @@ JSON 正文模式不保证每个字段都符合长度或枚举约束。提示要
 最小入口在线输出上限固定为 1024 token，Sonnet 会后职责保留各自原默认上限。
 普通文本请求同样保留供应商、隐私与输出上限约束，不因没有 JSON 返回要求而放宽。
 
-三个职责共享持久调用台账；刷新、重启或清除聊天不恢复额度。失败/费用未知/结果未知
-停止后续调用，保留封存、读取和独立护理。旧 live 有对话却无账本时拒绝从零记费。
+三个职责共享持久调用台账；刷新、重启或清除聊天不恢复额度。产品与旧严格实验使用不同
+保护合同：产品单次格式失败保留原结果，使用带标识的系统兜底，下轮可继续；连续三次
+对话或会后整理失败才暂停，由本人点击“我确认恢复后续模型调用”。恢复只追加操作记录、
+重置连续失败计数，不删除失败、不重发旧请求、不恢复任何费用或次数额度。
+429/5xx 仅在完整错误回执证实没有模型内容、且本次费用明确且在预留内时，单次请求最多
+额外尝试两次，每次均有新的物理请求和预算预留记录；遵守不超过30秒的有效等待提示，
+过长或含糊的等待提示不立即重发。未知费用、已收到的模型正文或不完整回执均不重发。
+这一传输重发不改变原有 reflection 有限格式更正职责，两者分别记账。
+预算/次数限额、费用未知、路由或隐私合同异常、保存或结果不明停止后续调用，恢复按钮
+不能解除；封存、读取和独立护理仍保留。旧 live 有对话却无账本时拒绝从零记费。
+发送前输入或输出额度超限、配置/身份/来源检查失败属于本地拒发，立即持久停止，不计为
+可恢复的模型输出失败。台账只保留固定拒绝码、请求字节数和摘要，不记录原始异常文字；
+页面明确标注未发送，不能靠“恢复”解除。停止记录保存失败时保留未完成操作，重启仍停止。
+旧严格台账不会自动迁移成可恢复产品合同；已有费用和失败原件必须保留。
+会后 memory 已收正文但提取失败、且费用明确时，本次会话以 `memory_failed` 封存：不采纳
+候选、不执行本次 reflection（隐私分类尚未建立），下次会话可继续整理。本次 memory
+不会被自动重发，也不计为提取成功；未知费用或保存失败仍保留待核查队列并停止调用。
 调用台账还绑定模型和完整返回合同；旧已启用 live 的合同与新版不同时会安全拒绝。
 须核对旧费用并明确迁移后才能再次启用，目前没有自动迁移脚本，不能换目录或删账绕过。
 发送前按已冻结价格、完整请求字节与额外模板预留量、输出上限核查预算；收到回执后核对实际

@@ -800,7 +800,8 @@ class E1bLocalFixtureClient:
                                  "turn_index": int(index), "keywords": [], "referenceable": False})
             # No desired preference is prefilled. Specific proposal tests may
             # inject a different fixture that derives solely from shown text.
-            return json.dumps({"episodes": episodes, "relationships": [], "stated_preferences": []}, ensure_ascii=False)
+            return json.dumps({"episodes": episodes, "relationships": [], "stated_preferences": [],
+                               "cognitive_privacy": []}, ensure_ascii=False)
         digest = hashlib.sha256(messages[-1]["content"].encode()).hexdigest()[:10]
         return f"【软件替身，非真实模型效果】已处理本轮输入 {digest}。"
 

@@ -150,9 +150,9 @@ def test_failed_offline_memory_is_persisted_for_retry(tmp_path):
     assert engine.persona.person_model_state.sessions_completed == 0
 
     llm.payload = (
-        '[{"summary":"年轻时修机器","keywords":["修机器"],'
+        '{"cognitive_privacy":[],"relationships":[],"episodes":[{"summary":"年轻时修机器","keywords":["修机器"],'
         '"referenceable":true,"evidence_quote":"我年轻时在厂里修机器",'
-        '"turn_index":0}]'
+        '"turn_index":0}]}'
     )
     engine.finalize_session(ctx)
     saved = store.load("memory_retry")
@@ -171,6 +171,7 @@ def test_failed_offline_reflection_retries_without_duplicate_memory(tmp_path):
         persona=PersonaProfile(user_id="reflection_retry"),
         llm_client=MockLLMClient(),
         store=store,
+        extractor=LLMExtractor(_PayloadLLM('{"episodes":[],"relationships":[],"cognitive_privacy":[]}')),
         hypothesis_updater=updater,
     )
     ctx = EngineContext(
@@ -219,7 +220,7 @@ def test_invalid_memory_protocol_stays_pending_then_retries_successfully(
     assert pending.memory_completed is False
     assert extractor.last_error_type == "invalid_json_response"
 
-    llm.payload = '{"episodes":[],"relationships":[]}'
+    llm.payload = '{"episodes":[],"relationships":[],"cognitive_privacy":[]}'
     engine.finalize_session(ctx)
 
     saved = store.load("memory_protocol_retry")
@@ -240,6 +241,7 @@ def test_invalid_reflection_protocol_stays_pending_then_retries_successfully(
         persona=PersonaProfile(user_id="reflection_protocol_retry"),
         llm_client=MockLLMClient(),
         store=store,
+        extractor=LLMExtractor(_PayloadLLM('{"episodes":[],"relationships":[],"cognitive_privacy":[]}')),
         hypothesis_updater=updater,
     )
     ctx = EngineContext(

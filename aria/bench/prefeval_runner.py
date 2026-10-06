@@ -230,5 +230,6 @@ class PrefEvalFixtureClient:
         self.calls.append(deepcopy(messages))
         self.last_usage = {}  # Do not invent measured tokens or provider costs.
         if self.role == "memory":
-            return json.dumps({"episodes": [], "relationships": [], "stated_preferences": []})
+            return json.dumps({"episodes": [], "relationships": [], "stated_preferences": [],
+                               "cognitive_privacy": []})
         return "[Software fixture; no model call] The conversation is retained for local workflow checks."

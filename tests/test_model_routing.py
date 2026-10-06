@@ -1156,7 +1156,7 @@ def test_memory_and_person_model_clients_run_only_at_finalize(tmp_path):
     fast = _ProtocolAwareFast(
         _decision(response="我在，咱们慢慢说。")
     )
-    memory = _LLM("memory-deep-model", "[]")
+    memory = _LLM("memory-deep-model", '{"episodes":[],"relationships":[],"cognitive_privacy":[]}')
     reflection = _LLM("reflection-deep-model", '{"changes":[]}')
     engine = Engine(
         get_scene("companion_elder"),

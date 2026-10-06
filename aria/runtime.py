@@ -113,6 +113,8 @@ def create_minimal_clients(
     # the explicit minimal default at the validated experiment's output ceiling.
     clients[0].max_completion_tokens = 1024
     clients[0].reasoning_effort = "none"
+    from .engine.policy.online_decision import ONLINE_DECISION_VERSION_SAFETY
+    clients[0].online_decision_version = ONLINE_DECISION_VERSION_SAFETY
     return MinimalModelClients(
         online=clients[0], memory=clients[1], reflection=clients[2],
         model_calls_enabled=True,

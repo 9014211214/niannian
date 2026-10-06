@@ -31,12 +31,12 @@ def _ctx_with_convo() -> EngineContext:
 def test_llm_extractor_parses_fenced_json_and_guards_privacy():
     payload = (
         "```json\n"
-        '[{"summary":"他养了一只常来的橘猫，会喂它","keywords":["猫"],'
+        '{"cognitive_privacy":[],"relationships":[],"episodes":[{"summary":"他养了一只常来的橘猫，会喂它","keywords":["猫"],'
         '"referenceable":true,"evidence_quote":"今天那只橘猫又来了，我会喂它",'
         '"turn_index":0},\n'
         ' {"summary":"他提到老伴的忌日","keywords":["老伴"],'
         '"referenceable":true,"evidence_quote":"我老伴上个月忌日",'
-        '"turn_index":1}]\n'
+        '"turn_index":1}]}\n'
         "```"
     )
     res = LLMExtractor(FakeLLM(payload)).extract(_ctx_with_convo(), load_demo_persona("laochen_demo"))
@@ -69,6 +69,7 @@ def test_private_episode_is_never_referenceable_even_if_model_requests_it(
             "turn_index": 0,
         }],
         "relationships": [],
+        "cognitive_privacy": [],
     }
 
     result = LLMExtractor(
@@ -94,7 +95,7 @@ def test_no_reference_episode_never_enters_online_prompt():
     payload = (
         '{"episodes":[{"summary":"私事","keywords":["借钱"],'
         '"referenceable":true,"evidence_quote":"' + private_fact + '",'
-        '"turn_index":0}],"relationships":[]}'
+        '"turn_index":0}],"relationships":[],"cognitive_privacy":[]}'
     )
     persona = load_demo_persona("laochen_demo")
     extracted = LLMExtractor(FakeLLM(payload)).extract(ctx, persona)
@@ -120,9 +121,9 @@ def test_no_reference_episode_never_enters_online_prompt():
 
 def test_consolidator_with_llm_extractor_persists(tmp_path):
     payload = (
-        '[{"summary":"他养了一只橘猫","keywords":["猫"],'
+        '{"cognitive_privacy":[],"relationships":[],"episodes":[{"summary":"他养了一只橘猫","keywords":["猫"],'
         '"referenceable":true,"evidence_quote":"今天那只橘猫又来了",'
-        '"turn_index":0}]'
+        '"turn_index":0}]}'
     )
     store = PersonaStore(base_dir=tmp_path)
     persona = load_demo_persona("laochen_demo")
@@ -168,7 +169,7 @@ def test_llm_extractor_rejects_valid_json_with_wrong_protocol(payload):
 
 def test_llm_extractor_accepts_protocol_after_harmless_preamble_and_fence():
     extractor = LLMExtractor(FakeLLM(
-        '说明如下：\n```json\n{"episodes":[],"relationships":[]}\n```'
+        '说明如下：\n```json\n{"episodes":[],"relationships":[],"cognitive_privacy":[]}\n```'
     ))
 
     result = extractor.extract(
@@ -181,8 +182,40 @@ def test_llm_extractor_accepts_protocol_after_harmless_preamble_and_fence():
     assert extractor.last_error_type is None
 
 
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize("fragment", [
+    '"cognitive_privacy":[{"turn_index":0,"evidence_quote":"今天那只橘猫又来了"}],"cognitive_privacy":[]',
+    '"cognitive_privacy":[],"extra":{"nested":true,"nested":false}',
+    '"cognitive_privacy":[],"extra":NaN',
+    '"cognitive_privacy":[],"extra":Infinity',
+    '"cognitive_privacy":[],"extra":1e999',
+])
+def test_ambiguous_or_nonfinite_memory_never_completes_privacy_review(fragment, wrapped):
+    payload = '{"episodes":[],"relationships":[],' + fragment + '}'
+    if wrapped:
+        payload = '说明：\n```json\n' + payload + '\n```'
+    ctx = _ctx_with_convo()
+    extractor = LLMExtractor(FakeLLM(payload))
+    result = extractor.extract(ctx, load_demo_persona("laochen_demo"))
+    assert extractor.last_status == "failed"
+    assert extractor.last_error_type == "invalid_json_response"
+    assert not ctx.working_memory.get("_memory_privacy_review_completed")
+    assert not result.new_episodes and not result.stated_preferences
+
+
+def test_second_memory_object_cannot_be_discarded_to_claim_completed_review():
+    payload = ('{"episodes":[],"relationships":[],"cognitive_privacy":[]}'
+               '{"cognitive_privacy":[{"turn_index":0,"evidence_quote":"今天那只橘猫又来了"}]}')
+    ctx = _ctx_with_convo()
+    extractor = LLMExtractor(FakeLLM(payload))
+    extractor.extract(ctx, load_demo_persona("laochen_demo"))
+    assert extractor.last_status == "failed"
+    assert not ctx.working_memory.get("_memory_privacy_review_completed")
+
+
 def test_llm_extractor_rejects_ungrounded_memory_and_relationship():
     payload = """{
+      "cognitive_privacy": [],
       "episodes": [{
         "summary": "他获得过全国冠军",
         "keywords": ["冠军"],
@@ -212,6 +245,7 @@ def test_relationship_context_has_provenance_and_never_infers_sharing(tmp_path):
     ctx = EngineContext(user_id="relationship", scene_id="companion_elder")
     ctx.add_turn("我女儿小芳住在深圳，每周日给我打电话。", "听起来你们一直有联系。")
     payload = """{
+      "cognitive_privacy": [],
       "episodes": [],
       "relationships": [{
         "name": "小芳",
@@ -249,10 +283,10 @@ def test_cross_session_getting_to_know_a_new_user(tmp_path):
 
     store = PersonaStore(base_dir=tmp_path)
     payload = (
-        '[{"summary":"他在备战人生第一个马拉松",'
+        '{"cognitive_privacy":[],"relationships":[],"episodes":[{"summary":"他在备战人生第一个马拉松",'
         '"keywords":["马拉松","跑步"],"referenceable":true,'
         '"evidence_quote":"我在备战人生第一个马拉松，最近在练跑步",'
-        '"turn_index":0}]'
+        '"turn_index":0}]}'
     )
 
     # 会话 1:全新用户(冷启动,没有任何档案),聊到跑步

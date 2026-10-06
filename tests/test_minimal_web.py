@@ -72,7 +72,7 @@ class RecordingClient:
             return json.dumps({"episodes": [{
                 "summary": "软件夹具事实", "evidence_quote": quote,
                 "turn_index": 0, "keywords": ["风车"], "referenceable": True,
-            }], "relationships": []}, ensure_ascii=False)
+            }], "relationships": [], "cognitive_privacy": []}, ensure_ascii=False)
         if self.role == "reflection":
             return '{"protocol_version":"2.0","reviews":[],"changes":[]}'
         return "本地测试替身的输出，仅用于验证软件流程。"

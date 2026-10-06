@@ -169,7 +169,7 @@ def test_product_confirmation_is_used_for_a_valid_authored_communication_fixture
 
     def memory(messages):
         captured.append(messages)
-        return json.dumps({"episodes": [], "relationships": [], "stated_preferences": [{
+        return json.dumps({"episodes": [], "relationships": [], "cognitive_privacy": [], "stated_preferences": [{
             "do": quote, "quotes": [{"turn_index": 0, "text": quote}], "confirmation": None}]}, ensure_ascii=False)
 
     monkeypatch.setattr(clients.memory, "complete", memory)

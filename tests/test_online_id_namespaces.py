@@ -64,6 +64,8 @@ def test_strategy_in_state_is_still_rejected_and_not_repaired(version):
     if version == decision.ONLINE_DECISION_VERSION_V2:
         value['deliberation'] = {'person_read': '软件占位', 'applied_basis': [],
                                 'options': [{'intervention_id': '', 'predicted_reaction': '软件占位'}]}
+    if version == decision.ONLINE_DECISION_VERSION_SAFETY:
+        value['safety_concern'] = 'none'
     raw = json.dumps(value, ensure_ascii=False)
     with pytest.raises(ValueError, match='invalid_online_json_schema'):
         parse_json_decision(raw, version)

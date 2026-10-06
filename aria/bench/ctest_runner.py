@@ -82,8 +82,8 @@ class CTestLocalMemoryFixture:
     def complete(self, messages):
         self.calls.append(deepcopy(messages))
         content = messages[-1]["content"]
-        suffix = content.split("独立变化原话（仅cognitive_observations可用，非普通事实或人物证据）：\n", 1)
-        sources = json.loads(suffix[1]) if len(suffix) == 2 else []
+        suffix = content.split("已同意本人原话（全部审阅；只有标注出的认知隐私轮次禁止作为普通事实或人物证据）：\n", 1)
+        sources = json.JSONDecoder().raw_decode(suffix[1])[0] if len(suffix) == 2 else []
         rows = []
         for source in sources:
             text = source["text"]
@@ -98,7 +98,7 @@ class CTestLocalMemoryFixture:
             rows.append({"domain": domain, "evidence_quote": text, "turn_index": source["turn_index"],
                          "functional_impact": bool(re.search(r"耽误|影响|没法", text))})
         return json.dumps({"episodes": [], "relationships": [], "stated_preferences": [],
-                           "cognitive_observations": rows}, ensure_ascii=False)
+                           "cognitive_privacy": [], "cognitive_observations": rows}, ensure_ascii=False)
 
 
 class CTestRunner:

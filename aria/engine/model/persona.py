@@ -495,6 +495,9 @@ class OfflineSessionRecord(BaseModel):
     source_completeness: Literal["complete", "legacy_tail_unknown_indices"] = "complete"
     recovery_mode: Literal["text_only"] = "text_only"
     memory_completed: bool = False
+    # Old jobs default to unreviewed; stage completion alone does not prove
+    # semantic privacy screening was performed before reflection.
+    memory_privacy_review_completed: bool = False
     reflection_completed: bool = False
     attempts: int = 0
     state: Literal["pending", "started", "exhausted", "needs_review"] = "pending"

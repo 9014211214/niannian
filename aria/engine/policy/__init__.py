@@ -19,6 +19,7 @@ from .llm import LLMClient, MockLLMClient
 from .online_decision import (
     DETERMINISTIC_MODEL_FAILURE_REPLY,
     ONLINE_DECISION_VERSIONS,
+    ONLINE_DECISION_VERSION_SAFETY,
     apply_single_pass_decision,
     configured_online_decision_version,
     is_internal_protocol_response,
@@ -51,8 +52,10 @@ class PolicyEngine:
         selected = fast_llm or llm or MockLLMClient(role="online_fast")
         self.fast_llm: LLMClient = selected
         self.llm: LLMClient = selected
-        # 默认 v1；v2（推演在前、response 在后）经参数或环境变量显式开启。
-        version = online_decision_version or configured_online_decision_version()
+        # The minimal real client declares v3; explicitly frozen experiments
+        # and legacy clients retain their selected v1/v2 contract.
+        version = (online_decision_version or getattr(selected, "online_decision_version", None)
+                   or configured_online_decision_version())
         if version not in ONLINE_DECISION_VERSIONS:
             raise ValueError("unknown_online_decision_version")
         self.online_decision_version = version
@@ -107,6 +110,10 @@ class PolicyEngine:
             "fast_integrated", ("routing_not_provided",)
         )
         selected = self.fast_llm
+        if self.online_decision_version == ONLINE_DECISION_VERSION_SAFETY:
+            # Semantic safety cannot depend on the lexical fast/complex router.
+            # This changes the shape of the same call, never adds a classifier call.
+            route = ReplyModelRoute("fast_integrated", (*route.reasons, "same_call_semantic_safety"))
         single_pass = route.integrated_decision
         if single_pass:
             messages = single_pass_messages(
@@ -134,9 +141,9 @@ class PolicyEngine:
                 (*route.reasons, "fast_model_failed"),
             )
         if deterministic_fallback and (
-            (ctx.working_memory.get("model_route") or {})
-            .get("state", {})
-            .get("tier") == "online_integrated"
+            self.online_decision_version == ONLINE_DECISION_VERSION_SAFETY
+            or (ctx.working_memory.get("model_route") or {})
+            .get("state", {}).get("tier") == "online_integrated"
         ):
             record_online_decision_failure(ctx)
         if single_pass:

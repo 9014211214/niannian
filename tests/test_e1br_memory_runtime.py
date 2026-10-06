@@ -1,4 +1,8 @@
-"""Software transport only: failed memory stays missing while reflection runs."""
+"""Software transport only: current privacy blocks unreviewed reflection.
+
+The historical frozen experiment used 88 sends. Current code retains its 88
+planned positions but skips the failed memory session's reflection position.
+"""
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -21,7 +25,7 @@ from scripts.e1br_memory_runtime import (
     json_syntax_failure, validate_memory_ledger, validate_memory_terminal_proof, require_unexpired_job,
 )
 from scripts.e1br_format_runtime import SCHEMA as FORMAT_SCHEMA
-from scripts.run_e1br import position_key
+from scripts.run_e1br import position_key, position_inventory
 from tests.test_reserved_calls import client, policy, receipt
 from tests.test_e1br_format_runtime import DECISION
 
@@ -129,24 +133,48 @@ def run_software_case(tmp_path, monkeypatch, *, failed_session=1, memory_body=BA
 
 
 @pytest.mark.parametrize("session", [1, 2])
-def test_future_syntax_failure_preserves_failed_memory_and_completes_88_positions(tmp_path, monkeypatch, session):
+def test_current_privacy_skips_unreviewed_reflection_and_retains_88_planned_positions(tmp_path, monkeypatch, session):
     result, state, runner, apps, calls, before = run_software_case(tmp_path, monkeypatch, failed_session=session)
     assert result is not None and not runner.stopped, (state["stop_reason"], apps[0]._run["reviews"])
-    assert len(calls) == len(state["attempts"]) == 88
+    planned = {position for position in position_inventory() if position[1] == "e1b_f2"}
+    observed = {tuple(row["experiment_position"]) for row in state["attempts"]}
+    skipped = {("reflection", "e1b_f2", session, "shared", 0, None)}
+    assert len(planned) == 88 and planned - observed == skipped
+    assert observed <= planned and len(calls) == len(state["attempts"]) == len(observed) == 87
     assert not state["stopped"] and state["unknown_cost_requests"] == 0
     proof = result["shared"]["state"]["memory_terminal_positions"][0]
     directory = runner.root / "main/e1b_f2"
     row = next(r for r in state["attempts"] if r["request_id"] == proof["request_id"])
+    assert "cost" in row["usage"] and row["usage"]["cost"] > 0
+    assert proof["fixed_denominator_retained"] is True and proof["body_retried"] is False
+    assert not any(r["role"] == "reflection" and r["session_id"] == row["session_id"]
+                   for r in state["attempts"])
     validate_memory_terminal_proof(directory, proof, row)
     first = json.loads((directory / f"memory-s{session}.first.json").read_bytes())
     product = json.loads((directory / f"memory-s{session}.product.json").read_bytes())
     assert first["raw_proposals"] is None and first["parse_status"] == "parse_error"
     assert product["product_status"] == "failed" and product["accepted_count"] is None
     baseline = json.loads((directory / proof["baseline_profile_path"]).read_bytes())
+    failed_job = next(job for job in baseline["offline_sessions"] if job["session_id"] == row["session_id"])
+    assert failed_job["memory_privacy_review_completed"] is False
     for field in ("episodic_memory", "stated_preferences", "person_hypotheses", "relationship_context"):
         assert baseline[field] == before[0][field]
     audit = next(r for r in result["shared"]["profile"]["offline_session_audit"] if r["session_id"] == row["session_id"])
-    assert audit["memory_completed"] is False and audit["gap"] is True
+    assert audit["memory_completed"] is False and audit["gap"] is True and audit["reflection_completed"] is False
+    reflection_audit = json.loads((directory / f"memory-s{session}.terminal.reflection.json").read_bytes())
+    assert reflection_audit["reflection_status"] == "sealed_failed"
+    assert reflection_audit["reflection_error"] == "memory_privacy_unreviewed"
+    assert reflection_audit["offline_audit"] == audit
+    other = next(r for r in result["shared"]["profile"]["offline_session_audit"] if r["session_id"] != row["session_id"])
+    assert other["outcome"] == "completed" and other["memory_completed"] and other["reflection_completed"]
+    assert any(r["role"] == "reflection" and r["session_id"] == other["session_id"] for r in state["attempts"])
+    # Both failure positions still allow the later six S3 branches to run;
+    # the S1 variant additionally checks the subsequent valid S2 review above.
+    assert len(result["branches"]) == 6
+    assert all(len(branch["state"]["turns"]) == 10
+               and all(turn["status"] == "completed" for turn in branch["state"]["turns"])
+               for branch in result["branches"])
+    assert result["shared"]["profile"]["offline_sessions"] == []
     assert len(validate_memory_ledger(tmp_path / "ledger.sqlite3", memory_contract=CONTRACT, attempts=state["attempts"])) == 1
 
 

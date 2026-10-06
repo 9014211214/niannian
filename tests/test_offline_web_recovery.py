@@ -40,7 +40,7 @@ GOOD_REFLECTION = '{"protocol_version":"2.0","reviews":[],"changes":[]}'
 
 
 def _app(store, *, failing=True, reflection=None, checkpoint_turns=1):
-    memory = LocalModel('{"episodes":[],"relationships":[]}')
+    memory = LocalModel('{"episodes":[],"relationships":[],"cognitive_privacy":[]}')
     reflection = reflection or LocalModel(RuntimeError("PRIVATE_PROVIDER_FAILURE") if failing else GOOD_REFLECTION)
     fast = _ProtocolAwareFast(_DECISION_OK)
     app = TextWebApp(store=store, clients=MinimalModelClients(fast, memory, reflection, True),

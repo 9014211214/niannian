@@ -28,6 +28,7 @@ from ..engine.minimal_care import MinimalCareService
 from ..engine.minimal_care_context import build_care_context
 from ..engine.policy.llm import OpenRouterLLMClient
 from ..engine.policy.minimal_calls import MinimalCallGuard, validate_limits
+from ..engine.policy.product_calls import ProductCallGuard
 from ..engine.model.persona import PersonaProfile
 from ..engine.cognitive import cognitive_action, cognitive_owner_view
 from ..engine.perception.external_emotion import parse_external_emotion, external_emotion_payload
@@ -95,7 +96,7 @@ class MinimalWebApp(TextWebApp):
                         raise ValueError("显式限额与共享调用账本不一致。")
                 if model_reservation_policy is not None and validate_reservation_policy(model_reservation_policy) != model_call_guard.policy:
                     raise ValueError("显式费用预留策略与共享调用账本不一致。")
-            guard = model_call_guard or ReservedCallGuard(
+            guard = model_call_guard or ProductCallGuard(
                 ledger_path, max_requests=model_max_requests,
                 max_observed_cost_usd=model_stop_cost_usd,
                 reservation_policy=model_reservation_policy)
@@ -188,6 +189,23 @@ class MinimalWebApp(TextWebApp):
 
     def _models_stopped(self):
         return self.call_guard is not None and self.call_guard.snapshot()["stopped"]
+
+    def resume_models(self, request_id, pause_id, *, confirmed=False, read_only=False, actor=_USER):
+        """The explicit local owner surface; replay never changes the ledger."""
+        with self._user_lock(_USER):
+            if read_only:
+                return self._result(False, "回放只读，不能恢复模型调用。")
+            if actor != _USER:
+                raise PermissionError("只有本体验的本人可以恢复调用。")
+            if confirmed is not True or not isinstance(self.call_guard, ProductCallGuard):
+                return self._result(False, "请本人明确确认恢复；严格实验账本不支持产品恢复。")
+            if self._unresolved():
+                return self._result(False, "存在保存失败或结果不明，不能通过恢复按钮继续调用。")
+            try:
+                self.call_guard.resume(request_id, pause_id)
+            except (ValueError, RuntimeError):
+                return self._result(False, "当前暂停不能恢复，或状态已变化；请核查费用、限额与保存记录。")
+            return self._result()
 
     def _engine_for_persona(self, persona):
         return create_minimal_engine(get_scene(self.scene_id), persona,
@@ -469,6 +487,9 @@ class MinimalWebApp(TextWebApp):
                     ctx.working_memory["minimal_care_context"] = deepcopy(row["care_context"])
                 with self._model_scope("turn", turn_id, session_id):
                     result = super().text_turn(_USER, text, turn_id=turn_id, external_emotion=external_emotion)
+                    if (isinstance(self.call_guard, ProductCallGuard) and
+                            (ctx.working_memory.get("model_route") or {}).get("reply", {}).get("source") == "deterministic_fallback"):
+                        self.call_guard.note_output_failure()
                 if not result["ok"]:
                     raise RuntimeError("turn_failed")
                 route = (ctx.working_memory.get("model_route") or {}).get("reply", {})
@@ -480,9 +501,15 @@ class MinimalWebApp(TextWebApp):
                     "violations": [value for value in delivery_guard.get("violations", [])
                                    if isinstance(value, str) and re.fullmatch(r"[a-z_]{1,80}", value)][:16],
                 }
+                product_fallback = failed and isinstance(self.call_guard, ProductCallGuard)
+                hard_stop = product_fallback and self.call_guard.snapshot()["stop_reason"] not in {None, "consecutive_failures"}
+                local_rejection = (self.call_guard.snapshot().get("last_request_rejection", {})
+                                   if product_fallback else {})
+                local_rejected = local_rejection.get("operation_id") == turn_id
                 row.update(status="failed" if failed else "completed",
-                           response="" if failed else result["response"],
-                           source="model_failed" if failed else (
+                           response=(result["response"] if product_fallback and not hard_stop else "") if failed else result["response"],
+                           source=("local_request_rejected" if local_rejected else
+                                   "rule_fallback" if product_fallback and not hard_stop else "model_failed") if failed else (
                                "rule_safety" if ctx.working_memory.get("risk_flag") else
                                "rule_protection" if protection["response_changed"] else row["source"]),
                            delivery_protection=protection,
@@ -494,9 +521,18 @@ class MinimalWebApp(TextWebApp):
                                              if ctx.reasoning.selected else None),
                            elapsed_ms=round((time.perf_counter() - started) * 1000))
                 if failed:
-                    self._halt_models()
-                    row["requires_review"] = True
-                    row["error"] = "模型调用或返回失败，本轮没有可用的模型回复；已停止后续调用，需先核查结果与费用。"
+                    if product_fallback:
+                        row["requires_review"] = bool(hard_stop)
+                        row["error"] = ("本地发送前检查未通过，本轮未向模型发送请求。已停止后续调用；请核查输入额度、配置或记录完整性，恢复按钮不能解除。"
+                                        if local_rejected else
+                                        "本轮使用系统兜底回复，不是模型生成；连续三次失败已暂停，请本人明确恢复。"
+                                        if self.call_guard.snapshot().get("can_resume") else
+                                        "模型调用受费用、限额或完整性保护停止；请核查记录，不能用恢复按钮解除。" if hard_stop else
+                                        "本轮使用系统兜底回复，不是模型生成；可继续下一轮，不重发本轮内容。")
+                    else:
+                        self._halt_models()
+                        row["requires_review"] = True
+                        row["error"] = "模型调用或返回失败，本轮没有可用的模型回复；已停止后续调用，需先核查结果与费用。"
             except Exception:
                 self._halt_models()
                 # The model might already have run. Keep the durable attempt pending;
@@ -593,14 +629,28 @@ class MinimalWebApp(TextWebApp):
                 engine = self._engine_for_persona(persona)
                 with self._model_scope("review", request_id, job.session_id):
                     result = engine.recover_offline_sessions(max_jobs=1)
-                success = result.get("last_run", {}).get("completed_jobs", 0) == 1
+                    success = result.get("last_run", {}).get("completed_jobs", 0) == 1
+                    if isinstance(self.call_guard, ProductCallGuard):
+                        audit = next((item for item in reversed(engine.persona.offline_session_audit)
+                                      if item.session_id == job.session_id), None)
+                        success = success and audit is not None and audit.outcome == "completed"
+                        if not success:
+                            self.call_guard.note_output_failure()
+                        if result.get("last_run", {}).get("error_code") == "offline_store_failed":
+                            self._storage_failed = True
+                            self._halt_models()
                 after = self._understanding(engine.persona)
                 row.update(status="completed" if success else "failed", result=result,
                            changes=_changes(before, after, job.session_id), finished_at=_stamp())
                 if not success:
-                    row["requires_review"] = True
-                    self._halt_models()
-                    row["error"] = "会后整理未完成；请查看阶段状态，不会自动重试。"
+                    if isinstance(self.call_guard, ProductCallGuard):
+                        reason = self.call_guard.snapshot()["stop_reason"]
+                        row["requires_review"] = reason not in {None, "consecutive_failures"}
+                        row["error"] = "本次会后整理未完成，阶段记录保留且不自动重发；其他对话是否可用以调用状态为准。"
+                    else:
+                        row["requires_review"] = True
+                        self._halt_models()
+                        row["error"] = "会后整理未完成；请查看阶段状态，不会自动重试。"
             except Exception:
                 self._halt_models()
                 row["error"] = "会后整理或保存结果不明；已停止继续调用。"
@@ -755,6 +805,9 @@ def make_minimal_handler(app):
                 "/api/minimal/text": lambda body: app.submit(body.get("text"), body.get("turn_id"), body.get("session_id"), external_emotion=body.get("external_emotion")),
                 "/api/minimal/seal": lambda body: app.seal(body.get("session_id")),
                 "/api/minimal/reflect": lambda body: app.reflect(body.get("request_id")),
+                "/api/minimal/resume-models": lambda body: app.resume_models(
+                    body.get("request_id"), body.get("pause_id"), confirmed=body.get("confirmed"),
+                    read_only=body.get("replay", False), actor=body.get("actor", _USER)),
                 "/api/minimal/preference": lambda body: app.preference_action(
                     body.get("action"), body.get("id"), read_only=body.get("replay", False)),
                 "/api/minimal/preference-review": lambda body: app.preview_preferences(body.get("request_id")),

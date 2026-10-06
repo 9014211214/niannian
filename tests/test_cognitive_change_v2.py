@@ -31,6 +31,7 @@ class Payload:
     def complete(self, messages):
         self.calls.append(deepcopy(messages))
         return json.dumps({"episodes": [], "relationships": [], "stated_preferences": [],
+                           "cognitive_privacy": [],
                            "cognitive_observations": self.rows}, ensure_ascii=False)
 
 
@@ -128,12 +129,14 @@ def test_context_is_visible_but_does_not_count(text):
     assert len(result) == 1 and result[0].counting is False and not result[0].functional_impact
 
 
-def test_functional_impact_requires_literal_support():
+def test_functional_impact_uses_model_semantics_without_keyword_prerequisite():
     p = enabled()
     ctx = context_with(p)
     result = extract_cognitive_rows([{"domain": "memory", "evidence_quote": ctx.turns[0].user,
                                      "turn_index": 0, "functional_impact": True}], p, ctx)
-    assert len(result) == 1 and not result[0].functional_impact
+    assert len(result) == 1 and result[0].functional_impact
+    # This tests applying a synthetic semantic annotation, not its correctness.
+    assert result[0].source_quote == ctx.turns[0].user
 
 
 def test_same_event_requires_known_identity_and_code_matching():
@@ -350,7 +353,7 @@ def test_enabled_global_guard_and_emergency_priority():
     assert "70%" not in response and "阿尔茨海默" not in response
     response = engine.process_turn(ctx, "我刚才突然不知道自己在哪。")
     assert "120" in response and "阿尔茨海默" not in response
-    assert not cognitive_sources(p, ctx)
+    assert [source.text for source in cognitive_sources(p, ctx)] == ["今天挺好的。"]
 
 
 def test_natural_decline_and_disable_use_owner_current_words():

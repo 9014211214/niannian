@@ -492,7 +492,8 @@ class MinimalCallGuard:
             except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError):
                 raise MinimalCallStopped("model_request_configuration_changed") from None
             if (previous and product.get("product_step") != "format_correction"
-                    and (self.recovery_policy is None or self._recovery.active is None)):
+                    and (self.recovery_policy is None or self._recovery.active is None)
+                    and not self._allow_product_retry(client, request, previous)):
                 raise MinimalCallStopped("duplicate_model_operation")
             reservation = self._reserve(client, request, payload, state)
             row = {"request_id": uuid.uuid4().hex, **scope,
@@ -512,6 +513,10 @@ class MinimalCallGuard:
             self._db.execute("INSERT INTO attempts(request_id,record) VALUES(?,?)",
                              (row["request_id"], json.dumps(row, ensure_ascii=False, allow_nan=False)))
         return row
+
+    def _allow_product_retry(self, client, request, previous):
+        """Strict/experimental guards never inherit product retry permission."""
+        return False
 
     @staticmethod
     def _reflection_product_metadata(client, payload, previous):

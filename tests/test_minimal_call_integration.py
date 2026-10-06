@@ -71,6 +71,9 @@ def responses(monkeypatch, *rows):
         message = response.data["choices"][0]["message"]
         if "tool_calls" in message and not payload.get("tools"):
             decision = json.loads(message["tool_calls"][0]["function"]["arguments"])
+            from aria.engine.policy.online_decision import protocol_version
+            if protocol_version(payload["messages"]) == "online_turn_decision_v3":
+                decision["safety_concern"] = "none"
             response = Response(
                 json.dumps(decision, ensure_ascii=False)
                 if payload.get("response_format") == {"type": "json_object"}
@@ -137,7 +140,7 @@ def test_unknown_cost_rejects_reply_and_seal_forget_restart_cannot_reset_allowan
 
 def test_three_roles_share_guard_and_explicit_review_context(tmp_path, monkeypatch):
     calls = responses(monkeypatch, *(Response(DECISION, {"cost": .01}) for _ in range(3)),
-                      Response('{"episodes":[],"relationships":[]}', {"cost": .02}),
+                      Response('{"episodes":[],"relationships":[],"cognitive_privacy":[]}', {"cost": .02}),
                       Response('{"protocol_version":"2.0","reviews":[],"changes":[]}', {"cost": .03}))
     app = app_at(tmp_path, maximum=5)
     sid = send_one(app)
@@ -158,20 +161,30 @@ def test_three_roles_share_guard_and_explicit_review_context(tmp_path, monkeypat
     app.close()
 
 
-def test_memory_protocol_failure_stops_next_roles_and_survives_clear(tmp_path, monkeypatch):
-    calls = responses(monkeypatch, Response(DECISION, {"cost": .01}), Response('{}', {"cost": .02}))
+def test_memory_protocol_failure_keeps_original_and_allows_new_conversation(tmp_path, monkeypatch):
+    calls = responses(monkeypatch, Response(DECISION, {"cost": .01}), Response('{}', {"cost": .02}),
+                      Response(DECISION, {"cost": .01}), Response('{"episodes":[],"relationships":[],"cognitive_privacy":[]}', {"cost": .02}))
     app = app_at(tmp_path)
     sid = send_one(app)
     app.seal(sid)
     result = app.reflect("invalid-memory")
     assert not result["ok"]
-    assert result["state"]["reviews"][0]["requires_review"]
-    assert result["state"]["model_usage"]["stopped"]
+    assert not result["state"]["reviews"][0]["requires_review"]
+    assert not result["state"]["model_usage"]["stopped"]
+    assert result["state"]["model_usage"]["consecutive_failures"] == 1
     assert result["state"]["model_usage"]["unknown_cost_requests"] == 0
-    app.forget_run()
-    new_sid = app.start()["state"]["session_id"]
-    assert not app.submit("清除仍不能重发", "another", new_sid)["ok"]
+    assert result["state"]["offline"]["pending_count"] == 0
+    audit = result["state"]["offline"]["audit"][-1]
+    assert audit["outcome"] == "memory_failed" and not audit["memory_completed"] and not audit["reflection_completed"]
+    assert not app.reflect("do-not-retry-memory")["ok"]
     assert len(calls) == 2
+    new_sid = app.start()["state"]["session_id"]
+    assert app.submit("换一个话题", "another", new_sid)["ok"]
+    assert len(calls) == 3
+    assert len(app.state()["reviews"]) == 1
+    assert app.seal(new_sid)["ok"]
+    assert app.reflect("new-session-memory")["ok"] and len(calls) == 4
+    assert app.state()["offline"]["audit"][0] == audit
     app.close()
 
 
@@ -213,8 +226,11 @@ def test_reasoning_contract_violation_preserves_fee_and_persistently_stops(route
         calls.append(payload)
         assert payload["reasoning"] == {"enabled": False, "exclude": True}
         structured = payload.get("response_format") == {"type": "json_object"}
-        assert structured == (route == "fast_integrated")
-        response = Response(json.dumps(DECISION, ensure_ascii=False) if structured else "我在听。",
+        from aria.engine.policy.online_decision import protocol_version
+        is_v3 = protocol_version(payload["messages"]) == "online_turn_decision_v3"
+        assert structured == (is_v3 or route == "fast_integrated")
+        decision = {**DECISION, **({"safety_concern": "none"} if is_v3 else {})}
+        response = Response(json.dumps(decision, ensure_ascii=False) if structured else "我在听。",
                             {"cost": .0123, "prompt_tokens": 10, "completion_tokens": 12})
         response.data["model"] = payload["model"]
         response.data["provider"] = "Alibaba"

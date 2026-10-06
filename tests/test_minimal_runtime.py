@@ -155,7 +155,7 @@ def test_live_failure_attempts_once_and_does_not_substitute_story(monkeypatch):
 def test_online_and_sealing_do_not_call_offline_roles(tmp_path, monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", _forbid_call)
     fast = _FixtureLLM("本地软件夹具回复，不是模型效果。")
-    memory = _FixtureLLM('{"episodes":[],"relationships":[]}')
+    memory = _FixtureLLM('{"episodes":[],"relationships":[],"cognitive_privacy":[]}')
     reflection = _FixtureLLM('{"protocol_version":"2.0","reviews":[],"changes":[]}')
     clients = runtime.MinimalModelClients(fast, memory, reflection, True)
     persona = PersonaProfile(user_id="two-lines")

@@ -32,6 +32,9 @@ def synthetic_entry_root(tmp_path, monkeypatch):
     profile = app._profile()
     job = profile.offline_sessions[0]
     job.memory_completed, job.reflection_completed = True, False
+    # This donor explicitly simulates a completed current-memory stage. It is
+    # not a migration/default for retained real sessions with missing review.
+    job.memory_privacy_review_completed = True
     job.attempts, job.state, job.active_stage = 1, "pending", "reflection"
     app.store.save(profile)
     saved_run = deepcopy(app._run)

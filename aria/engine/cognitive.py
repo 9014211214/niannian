@@ -12,21 +12,15 @@ import re
 
 from .model.persona import CognitiveObservationRecord, CognitiveSourceTurn, CognitiveTrendState
 
-VERSION = "cognitive-change-v3-20261003"
+VERSION = "cognitive-change-v4-20261006"
 _DOMAINS = {"memory", "language", "orientation", "daily_function", "repetition"}
-_SIGNALS = {
-    "memory": r"忘|记不[住清得]|记不起来|想不起",
-    "language": r"叫啥|叫什么|说不出|找不到词|卡在词|名字.*叫不出",
-    "orientation": r"礼拜|星期|几号|日期|白天晚上|搞混",
-    "daily_function": r"交电费|交水费|账单|水电费|做饭|关火|吃药|交费|缴费|买菜|算.*账",
-}
 _NOT_SELF = re.compile(r"我妈|我爸|我老伴|我爱人|我女儿|我儿子|邻居|他说|她说|听说|如果|假如|新闻|电影|电视剧")
 _NEGATED = re.compile(r"没有忘|没忘|并非|不是记不|没有搞混|不是.*说不出|没有.*变化")
 _CONTEXT = re.compile(r"老了.{0,5}记性|年纪大.{0,6}记性|偶尔|一时|后来想起来|后来找到了|没睡好|失眠|听不清|口误|方言|故意|有意|再说一遍|跟你说过")
 _COGNITIVE_HINT = re.compile(r"忘|记不[住清得]|想不起|找不到词|话到嘴边|说不出|搞混|叫啥|算不清")
 _ACUTE = re.compile(r"突然.{0,10}(?:糊涂|不认|不知道|认不出)|(?:现在|刚才|刚刚).{0,8}(?:找不到回家|迷路)|不认识家|回不来|煤气.{0,8}(?:没关|忘关)|忘.{0,3}关火|药.{0,6}(?:两遍|两次|重复)")
-_IMPACT = re.compile(r"忘.{0,6}(?:交|缴)|不会交|不会用|算不清|做不了|不会做|耽误|没法|影响|做饭.*忘")
 _IMPACT_NEGATED = re.compile(r"(?:没(?:有)?|并未|不曾|不)(?:受|被)?(?:影响|耽误)|仍能照常|照常(?:做饭|买菜|办事)")
+_CARE_RECEIPT_ONLY = re.compile(r"(?:护理|提醒|任务|通知).{0,12}(?:未确认|没确认|无回执|未送达)")
 _NO_PROACTIVE = re.compile(r"这种事别提醒|不要再提醒.*(?:记性|变化)|别再提.*(?:记性|变化)|关闭.*(?:留意|变化提醒)")
 _BUSY = re.compile(r"难过|伤心|生气|烦|低落|害怕|焦虑|担心|着急|帮我|请帮|提醒|通知|取消|授权|求助|疼|难受|救命|忙|先办|正在办|怎么|如何|下一步|在哪[里儿]|先做什么|先干什么")
 
@@ -51,7 +45,7 @@ def _enabled(persona):
 
 
 def cognitive_sensitive(text):
-    """Conservative exclusion applies even before someone opts into C1."""
+    """Keyword privacy fallback only; never a positive extraction eligibility gate."""
     return bool(_COGNITIVE_HINT.search(text or ""))
 
 
@@ -117,19 +111,31 @@ def cognitive_action(persona, action, *, actor, observation_id=None, delete_reco
     persona.cognitive_trend.updated_at = stamp
 
 
+def apply_cognitive_withdrawal(ctx, persona, utterance, *, now=None):
+    """Apply explicit owner withdrawal before any model/safety routing.
+
+    This only removes consent/raw capture. It never collects observations,
+    changes a reminder, or infers a new permission from conversational context.
+    """
+    if (_enabled(persona) and ctx.user_id == persona.user_id and not ctx.simulation_mode
+            and _NO_PROACTIVE.search(utterance)):
+        cognitive_action(persona, "disable", actor=persona.user_id, delete_records=False, now=now)
+        ctx.working_memory.pop("_cognitive_source_turns", None)
+        ctx.working_memory.pop("_cognitive_session_at", None)
+        ctx.working_memory.pop("_cognitive_owner_enabled", None)
+        return True
+    return False
+
+
 def capture_cognitive_turn(ctx, persona, utterance, risk_signal=None, *, now=None):
     """Capture only current, consented owner speech, never retrofit old history."""
+    if apply_cognitive_withdrawal(ctx, persona, utterance, now=now):
+        return
     if not _enabled(persona) or ctx.user_id != persona.user_id or ctx.simulation_mode:
         ctx.working_memory.pop("_cognitive_owner_enabled", None)
         return
     stamp = _now(now).isoformat()
     consent_at = persona.cognitive_health_consent.text_consented_at
-    if _NO_PROACTIVE.search(utterance):
-        cognitive_action(persona, "disable", actor=persona.user_id, delete_records=False, now=now)
-        ctx.working_memory.pop("_cognitive_source_turns", None)
-        ctx.working_memory.pop("_cognitive_session_at", None)
-        ctx.working_memory.pop("_cognitive_owner_enabled", None)
-        return
     if ctx.turns and re.fullmatch(r"(?:不用|不需要|先不用|不要|不想)(?:了|吧)?[。！! ]*", utterance):
         previous = ctx.turns[-1].agent
         if re.search(r"医生|体检", previous) and re.search(r"要不要|愿不愿|是否|愿意", previous):
@@ -141,17 +147,16 @@ def capture_cognitive_turn(ctx, persona, utterance, risk_signal=None, *, now=Non
     if not ctx.working_memory.get("_cognitive_session_at"):
         ctx.working_memory["_cognitive_session_at"] = stamp
     ctx.working_memory["_cognitive_owner_enabled"] = True
-    known_event = any(evidence.quote == utterance for item in persona.evidence_review_ledger
-                      for evidence in item.event_evidence)
-    if (not cognitive_sensitive(utterance) and not known_event) or re.search(r"别记|不要记|别保存|不要保存|别留.*记录", utterance):
+    if re.search(r"别记|不要记|别保存|不要保存|别留.*记录", utterance):
         return
     # Present emergencies stay on the existing deterministic safety route.
-    if (risk_signal is not None and getattr(risk_signal, "tier", 0) >= 2) or _ACUTE.search(utterance):
+    if ((risk_signal is not None and getattr(risk_signal, "tier", 0) >= 2)
+            or _ACUTE.search(utterance) or not utterance.strip() or len(utterance) > 2000):
         return
     sources = ctx.working_memory.setdefault("_cognitive_source_turns", [])
     index = len(ctx.turns)
     if not any(row.get("turn_index") == index for row in sources):
-        sources.append(CognitiveSourceTurn(turn_index=index, text=utterance[:2000], at=stamp,
+        sources.append(CognitiveSourceTurn(turn_index=index, text=utterance, at=stamp,
                                            consent_at=consent_at).model_dump())
 
 
@@ -178,15 +183,18 @@ def cognitive_extraction_prompt(persona, ctx):
     sources = cognitive_sources(persona, ctx)
     system = (
         "\n本人已开启记忆与日常变化提醒。同一个顶层JSON对象必须同时包含"
-        "episodes、relationships、stated_preferences、cognitive_observations这四个数组；"
+        "episodes、relationships、stated_preferences、cognitive_privacy、cognitive_observations这五个数组；"
         "每个数组的元素必须是对象。没有符合条件的条目也必须保留对应空数组[]，不能省略字段。"
         "cognitive_observations的条目按上方同一JSON示例的字段输出，不另输出一个对象。"
-        "只从独立变化原话区提出观察；不判断疾病、人格、严重程度或概率。"
+        "审阅已同意本人原话区的全部轮次，不能按某个词是否出现筛选；只从此区提出观察。"
+        "不判断疾病、人格、严重程度或概率。"
         "自嘲、听力/睡眠影响、方言、口误、有意重讲、他人经历和假设情景不算变化。"
-        "护理提醒未确认不算忘记。独立变化原话绝不能进入episodes、relationships、stated_preferences。"
+        "护理提醒未确认不算忘记。标为认知隐私的轮次绝不能进入episodes、relationships、stated_preferences。"
+        "普通交流仍可正常提取事实，不要把已同意原话区全部当作认知观察。"
+        "functional_impact只在原话明确描述实际日常功能受影响时为true，不确定为false。"
         "不确定就给空数组；无此区也给空数组。"
     )
-    user = "\n\n独立变化原话（仅cognitive_observations可用，非普通事实或人物证据）：\n" + json.dumps(
+    user = "\n\n已同意本人原话（全部审阅；只有标注出的认知隐私轮次禁止作为普通事实或人物证据）：\n" + json.dumps(
         [{"turn_index": row.turn_index, "text": row.text} for row in sources], ensure_ascii=False)
     event_refs = [{"event_id": item.event_id, "quote": evidence.quote}
                   for item in persona.evidence_review_ledger for evidence in item.event_evidence
@@ -220,7 +228,8 @@ def extract_cognitive_rows(rows, persona, ctx):
         if _grounded_quote(quote, row["turn_index"], source_context) is None:
             continue
         # Full source, not a cherry-picked fragment, controls negation/context.
-        if _NOT_SELF.search(source.text) or _NEGATED.search(source.text) or _ACUTE.search(source.text):
+        if (_NOT_SELF.search(source.text) or _NEGATED.search(source.text) or _ACUTE.search(source.text)
+                or _CARE_RECEIPT_ONLY.search(source.text)):
             continue
         context = bool(_CONTEXT.search(source.text))
         event_id = None
@@ -239,13 +248,11 @@ def extract_cognitive_rows(rows, persona, ctx):
                               and _parse(item.at) is not None
                               and _parse(source.at) - timedelta(days=7) <= _parse(item.at) <= _parse(source.at)}
             context = duplicates < 3 and len(prior_sessions | {ctx.session_id}) < 3
-        elif not re.search(_SIGNALS[domain], quote):
-            continue
         identifier = "cog_" + hashlib.sha256(
             f"{ctx.session_id}|{source.turn_index}|{domain}|{source.text}".encode()).hexdigest()[:24]
         if identifier in persona.cognitive_trend.deleted_observation_ids:
             continue
-        impact = (row.get("functional_impact") is True and bool(_IMPACT.search(quote))
+        impact = (row.get("functional_impact") is True
                   and not _IMPACT_NEGATED.search(source.text) and not context)
         result.append(CognitiveObservationRecord(
             id=identifier, at=source.at, session_id=ctx.session_id, domain=domain,

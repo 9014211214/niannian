@@ -46,6 +46,25 @@ def safety_response(signal: RiskSignal, persona: Optional[PersonaProfile] = None
     who = _address(persona)
     contact = _consented_contact(persona)
 
+    if signal.kind == "semantic_self_harm_concern":
+        return (
+            f"{who}我想认真确认你的安全：你现在有伤害自己的打算，或者已经做了什么吗？"
+            "如果已经服药、受伤，或觉得自己可能马上行动，请现在拨打 120，并请身边信任的人过来陪着。"
+            "先和可能伤害自己的东西保持距离。我可以继续听你说，但还需要真人一起帮你。"
+        )
+    if signal.kind == "semantic_unsafe_medication_concern":
+        return (
+            f"{who}这涉及用药安全，先不要自行补服、加量、混用或停药。"
+            "请尽快联系医生或药师核实；如果可能已经误服、过量或出现不适，请现在拨打 120，"
+            "把药盒和服用时间告诉专业人员，不要自行催吐。"
+        )
+    if signal.kind == "medical_emergency_unspecified":
+        return (
+            f"{who}你说的身体变化可能需要立即处理，我不能靠聊天判断原因。"
+            "请现在拨打 120，说明正在发生的症状和开始时间，并呼叫身边的人过来；"
+            "不要自己开车，也不要等我继续回复才求助。"
+        )
+
     if signal.kind == "immediate_safety_electrical_hazard":
         # Keep non-professionals away from live equipment, not a repair lesson.
         # Public fire guidance: https://www.119.gov.cn/kp/hzyf/2022/624.shtml

@@ -152,13 +152,14 @@ def test_archived_strict_modes_are_explicit_and_full_local_gate_remains(mode, mo
 
 def test_failed_reflection_seals_without_losing_memory_r1_or_blocking_next_session(tmp_path):
     from aria.engine.memory.persona_store import PersonaStore
+    from aria.engine.memory.stated_preferences import transition_preference
     from aria.runtime import MinimalModelClients, create_minimal_engine
     from aria.scenes.registry import get_scene
     from tests.test_model_routing import _DECISION_OK, _ProtocolAwareFast
     from tests.test_stated_preferences import _context, _row
 
     fast = _ProtocolAwareFast(_DECISION_OK)
-    memory = Replies([{"episodes": [], "relationships": [], "stated_preferences": [_row()]}] * 2)
+    memory = Replies([{"episodes": [], "relationships": [], "stated_preferences": [_row()], "cognitive_privacy": []}] * 2)
     reflection = Replies([{"reviews": []}] * 4)
     reflection.reflection_return_format = "body_json"
     store = PersonaStore(tmp_path)
@@ -174,6 +175,11 @@ def test_failed_reflection_seals_without_losing_memory_r1_or_blocking_next_sessi
         audit = saved.offline_session_audit[-1]
         assert audit.outcome == "reflection_failed" and audit.gap
         assert audit.memory_completed and not audit.reflection_completed
+        new_rows = [row for row in saved.stated_preferences if row.quotes[0].session_id == session]
+        assert len(new_rows) == 1 and new_rows[0].status == "proposed"
+        transition_preference(engine.persona, new_rows[0].id, "confirm")
+        store.save(engine.persona)
+        saved = store.load("preference_test")
         assert saved.stated_preferences[0].status == "confirmed"
         assert not saved.person_hypotheses and not saved.evidence_review_ledger
         assert saved.person_model_state.sessions_observed == 0
@@ -215,7 +221,7 @@ def test_budget_or_unresolved_claim_never_becomes_a_completed_optional_stage(tmp
         def snapshot(self): return deepcopy(state)
     reflection.model_request_control = Control()
     engine = create_minimal_engine(get_scene("companion_elder"), PersonaProfile(user_id="person"),
-        clients=MinimalModelClients(_ProtocolAwareFast(_DECISION_OK), Replies([{"episodes": [], "relationships": []}]), reflection, True),
+        clients=MinimalModelClients(_ProtocolAwareFast(_DECISION_OK), Replies([{"episodes": [], "relationships": [], "cognitive_privacy": []}]), reflection, True),
         store=PersonaStore(tmp_path))
     engine.seal_session(context())
     result = engine.recover_offline_sessions(max_jobs=1)

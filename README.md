@@ -18,6 +18,10 @@ The first E1c run dispatched 124 of 1,056 planned positions and completed one of
 the short-plan prompt repair has software checks, not proven model reliability.
 See the [evidence boundaries](docs/EVIDENCE.md) for what these results can support.
 
+The [design audit repairs](docs/DESIGN_REPAIR_2026_10_06.md) cover preference admission,
+cognitive privacy, same-call safety checks, call recovery and pre-send reservations.
+The subsequent E1c-v2 run remains incomplete; these changes have not passed model-effect acceptance.
+
 ## Run locally
 
 Requires Python 3.10 or newer. From this directory, on Windows:
@@ -66,8 +70,11 @@ unknown results; this is not a provider billing guarantee.
 - Memory and daily-change observations, off by default and enabled by the fictional
   owner. Original quotes can be inspected/deleted; this does not diagnose illness.
 
-The default online policy is `v1` with `mode_v1`. The `v2` deliberation protocol and
-`profile_v1` delivery profile remain explicit experiments. The proposed consented
+The minimal live client uses `v3` with `mode_v1`: the same online call includes a
+safety signal, including on simple turns. Earlier `v1/v2` experiments retain their
+original contracts; `profile_v1` remains experimental. Keyword safety checks stay
+in place. A model signal grants no notification or medical authority, and the new
+semantic path still needs real-model validation. The proposed consented
 message experience and real-model short film have not been completed. See the
 progress page for version-specific implementation and acceptance results.
 

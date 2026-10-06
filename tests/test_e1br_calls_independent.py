@@ -186,7 +186,8 @@ def test_metered_client_identity_survives_capture_proxy_at_failed_queue_boundary
     from tests.test_model_routing import _DECISION_OK, _ProtocolAwareFast
     from tests.test_reflection_body_json import Replies
     client, guard, calls, _ = configured(tmp_path, monkeypatch, "reflection", [http_error(b"") for _ in range(3)])
-    memory = Replies([{"episodes": [], "relationships": []}])
+    memory = Replies([{"episodes": [], "relationships": [], "stated_preferences": [],
+                       "cognitive_privacy": []}])
     engine = create_minimal_engine(get_scene("companion_elder"), PersonaProfile(user_id="person"),
         clients=MinimalModelClients(_ProtocolAwareFast(_DECISION_OK), memory, client, True),
         store=PersonaStore(tmp_path / "profile"))

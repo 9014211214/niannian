@@ -75,6 +75,8 @@ def test_real_updater_queue_consumes_old_body_preserves_memory_and_stops_on_save
     ctx = context(); ctx.session_id = local.retained.SESSION
     engine.seal_session(ctx)
     engine.persona.offline_sessions[0].memory_completed = True
+    # Synthetic current-contract donor, not a legacy profile migration.
+    engine.persona.offline_sessions[0].memory_privacy_review_completed = True
     store.save(engine.persona)
     profile = engine.persona.model_copy(deep=True)
     conversation = "\n".join(f"[turn {i}] 用户:{t.user}\nAria:{t.agent}" for i, t in enumerate(ctx.turns))

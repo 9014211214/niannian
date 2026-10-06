@@ -379,10 +379,16 @@ def test_legacy_full_profile_without_grounded_changes_is_rejected():
 
 def test_engine_diagnoses_on_session_close_and_persists(tmp_path):
     """端到端:单次只存候选；跨会话重复后才让人物假设影响交付。"""
+    from aria.engine.memory.consolidator import LLMExtractor
+    class ReviewedMemoryFixture:
+        def complete(self, _messages):
+            return json.dumps({"episodes": [], "relationships": [],
+                               "stated_preferences": [], "cognitive_privacy": []})
     store = PersonaStore(base_dir=tmp_path)
     persona = PersonaProfile(user_id="u1")
     engine = Engine(
         get_scene("companion_elder"), persona=persona, store=store,
+        extractor=LLMExtractor(ReviewedMemoryFixture()),
         hypothesis_updater=PersonaHypothesisUpdater(_AvoidantDiagnosisLLM()),
     )
     ctx = EngineContext(user_id="u1", scene_id="companion_elder")
@@ -396,6 +402,7 @@ def test_engine_diagnoses_on_session_close_and_persists(tmp_path):
 
     engine2 = Engine(
         get_scene("companion_elder"), persona=reloaded, store=store,
+        extractor=LLMExtractor(ReviewedMemoryFixture()),
         hypothesis_updater=PersonaHypothesisUpdater(_AvoidantDiagnosisLLM()),
     )
     ctx2 = EngineContext(user_id="u1", scene_id="companion_elder")
@@ -415,6 +422,7 @@ def test_engine_diagnoses_on_session_close_and_persists(tmp_path):
 
     engine3 = Engine(
         get_scene("companion_elder"), persona=reloaded2, store=store,
+        extractor=LLMExtractor(ReviewedMemoryFixture()),
         hypothesis_updater=PersonaHypothesisUpdater(_AvoidantDiagnosisLLM()),
     )
     ctx3 = EngineContext(user_id="u1", scene_id="companion_elder")

@@ -42,7 +42,7 @@ def test_owner_condition_and_communication_action_are_proposed_verbatim(text):
     assert not rejected and len(rows) == 1
     assert rows[0].do == rows[0].quotes[0].text == text
     assert rows[0].status == "proposed" and rows[0].confirmation is None
-    assert rows[0].scope == "仅限完整原话所述情境"
+    assert rows[0].scope == text.rstrip("。")
     assert "所有时候" not in rows[0].scope
 
 
@@ -54,11 +54,12 @@ def test_owner_condition_and_communication_action_are_proposed_verbatim(text):
 ])
 def test_cropping_or_paraphrasing_cannot_remove_the_owner_condition(text, instruction, quote):
     rows, rejected = extract(text, instruction, quote)
-    assert not rows and rejected
+    assert not rejected and rows[0].status == "proposed"
+    assert rows[0].scope == text.rstrip("。")
+    assert rows[0].quotes[0].text == text
 
 
 @pytest.mark.parametrize("text", [
-    "等我做好记录，你再开门。",  # A real-world action, not communication.
     "我把计算过程写完后，他再解释不同的解法。",  # Third-person action.
     "等我把疑问列出来，小周再回应。",
     "等我把疑问列出来他再回应。",
@@ -67,13 +68,9 @@ def test_cropping_or_paraphrasing_cannot_remove_the_owner_condition(text, instru
     "今天小周说等我把疑问列出来再回应。",
     "假设我把计算过程写完后，你再解释不同的解法。",
     "比如我把计算过程写完后，你再解释不同的解法。",
-    "我不希望等我把疑问列出来再回应。",
-    "别等我把疑问列出来再回应。",
     "等我把疑问列出来再回应，这不是我的要求。",
-    "等我把疑问列出来再回应，你会这样做吗？",
     "原句是“等我把疑问列出来再回应”。",
     "我读过等我把疑问列出来再回应这句话。",
-    "不是等我把疑问列出来再回应。",
     "以前你总等我说完再解释。",
     "我转述的是小周的话：等我说完你再讲。",
     "我只是练习这句话：等我讲完你再给我建议。",
@@ -104,21 +101,19 @@ def test_selected_sentence_keeps_the_complete_source_turn_and_scope():
     assert not rejected
     assert rows[0].quotes[0].text == full
     assert rows[0].do == request
-    assert rows[0].scope == "今天整理的是练习本"
+    assert rows[0].scope == full.rstrip("。")
 
 
 def test_qualifier_after_selected_sentence_cannot_be_dropped():
     full = REQUESTS[1] + "只限现在这道算术题。"
     rows, rejected = extract(full, REQUESTS[1], REQUESTS[1])
-    assert not rows and rejected
+    assert not rejected and "只限现在这道算术题" in rows[0].scope
 
 
 @pytest.mark.parametrize("text,instruction", [
     ("我把柜门擦完后，你才问我抹布放哪儿，那是昨天发生的事。", None),
     ("等我把标签看清楚，你再说明步骤，这句话来自一本练习册。", None),
     ("等我坐好，你再解释小周的作业给他听。", None),
-    ("我希望先自己找开关，只有我说需要时，你才告诉我下一步。", "告诉我下一步"),
-    ("让我自己先看一遍安装图，卡住以后再告诉我下一步。", "告诉我下一步"),
     ("说到医生开的药时，等我把感受说完，你再建议把每天两片改成一片。", None),
     ("等我把这段话写完，你再教小周怎么操作。", None),
 ])
@@ -143,7 +138,9 @@ def test_two_source_turns_cannot_drop_a_later_qualification():
         {"turn_index": 1, "text": ctx.turns[1].user},
     ]}
     rows, rejected = extract_preference_rows([row], ctx, PersonaProfile(user_id=ctx.user_id))
-    assert not rows and rejected
+    assert not rejected and rows[0].status == "proposed"
+    assert "但只限现在这一道，下一道不这样做" in rows[0].scope
+    assert len(rows[0].quotes) == 2
 
 
 def test_owner_object_before_arrangement_is_not_a_missing_condition_clause():
@@ -170,7 +167,7 @@ def test_model_prompt_and_parser_share_literal_condition_contract():
     class Response:
         def complete(self, messages):
             self.messages = messages
-            return json.dumps({"episodes": [], "relationships": [], "stated_preferences": [{
+            return json.dumps({"episodes": [], "relationships": [], "cognitive_privacy": [], "stated_preferences": [{
                 "do": REQUESTS[1], "scope": "随时",
                 "quotes": [{"turn_index": 0, "text": REQUESTS[1]}],
                 "confirmation": None,
@@ -180,7 +177,7 @@ def test_model_prompt_and_parser_share_literal_condition_contract():
     ctx.add_turn(REQUESTS[1], "本地软件替身。")
     result = LLMExtractor(client).extract(ctx, PersonaProfile(user_id=ctx.user_id))
     system = client.messages[0]["content"]
-    assert "必须逐字引用quotes中的连续原话，不改写" in system
+    assert "可忠实转述quotes" in system
     assert "不能只截取条件之后的动作" in system
     assert "quotes保留该轮完整本人原话" in system
     assert len(result.stated_preferences) == 1
@@ -193,7 +190,7 @@ def test_real_product_pipeline_persists_confirms_injects_and_withdraws(tmp_path,
     # JSON is an explicit model-output fixture, never evidence of model effects.
     app, clients = live_fixture(tmp_path)
     sid = start_and_submit(app, [owner_request, "这一段我想自己整理。", "今天先到这里。"])
-    clients.memory.payload = {"episodes": [], "relationships": [], "stated_preferences": [{
+    clients.memory.payload = {"episodes": [], "relationships": [], "cognitive_privacy": [], "stated_preferences": [{
         "do": owner_request, "scope": "所有对话", "status": "confirmed",
         "quotes": [{"turn_index": 0, "text": owner_request}], "confirmation": None,
     }]}

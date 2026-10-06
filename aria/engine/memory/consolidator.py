@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -30,7 +31,10 @@ from ..model.persona import (
 )
 from .persona_store import PersonaStore
 from .stated_preferences import extract_preference_rows, heuristic_preferences, merge_preferences
-from ..cognitive import cognitive_extraction_prompt, extract_cognitive_rows, consolidate_cognitive
+from ..cognitive import (
+    cognitive_extraction_prompt, cognitive_sources, cognitive_sensitive,
+    extract_cognitive_rows, consolidate_cognitive,
+)
 
 
 @dataclass
@@ -174,11 +178,38 @@ def _strip_fences(raw: str) -> str:
     return s.strip()
 
 
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("memory_json_duplicate_key")
+        result[key] = value
+    return result
+
+
+def _finite_float(raw):
+    value = float(raw)
+    if not math.isfinite(value):
+        raise ValueError("memory_json_non_finite")
+    return value
+
+
+def _reject_constant(_raw):
+    raise ValueError("memory_json_non_finite")
+
+
 def _parse_json_payload(raw: str):
-    """Accept a JSON object/legacy array inside harmless prose or fences."""
+    """One unambiguous JSON value, optionally after a preamble or in fences.
+
+    Privacy fields must not be overwritten by duplicate keys, including in
+    nested objects or the preamble-compatible decoder. Contract errors are
+    never retried through a more permissive parser.
+    """
     value = _strip_fences(str(raw or ""))
+    decoder = json.JSONDecoder(object_pairs_hook=_unique_object,
+                               parse_float=_finite_float, parse_constant=_reject_constant)
     try:
-        return json.loads(value)
+        return decoder.decode(value)
     except json.JSONDecodeError:
         starts = [
             index for index in (value.find("{"), value.find("["))
@@ -186,7 +217,10 @@ def _parse_json_payload(raw: str):
         ]
         if not starts:
             raise
-        parsed, _ = json.JSONDecoder().raw_decode(value[min(starts):])
+        candidate = value[min(starts):]
+        parsed, end = decoder.raw_decode(candidate)
+        if candidate[end:].strip() not in {"", "```"}:
+            raise ValueError("memory_json_trailing_content")
         return parsed
 
 
@@ -218,11 +252,43 @@ def _cognitive_protocol_rows(data) -> list[dict]:
     """An absent C1 field is a failed extraction, never zero observations."""
     if not isinstance(data, dict):
         raise ValueError("cognitive memory response must be a JSON object")
-    for name in ("episodes", "relationships", "stated_preferences", "cognitive_observations"):
+    for name in ("episodes", "relationships", "stated_preferences", "cognitive_privacy", "cognitive_observations"):
         rows = data.get(name)
         if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
-            raise ValueError("cognitive memory response requires four object arrays")
+            raise ValueError("cognitive memory response requires five object arrays")
     return data["cognitive_observations"]
+
+
+def _cognitive_privacy_indices(data, ctx, persona, observation_rows) -> set[int]:
+    """Validate semantic privacy markings before any ordinary extraction.
+
+    This field is required even with monitoring disabled: privacy filtering
+    does not grant consent to collect observations. All proposed observations
+    also mask their literal source, including non-counting/context proposals.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("cognitive_privacy"), list):
+        raise ValueError("memory privacy classification is required")
+    rows = data["cognitive_privacy"]
+    if len(rows) > 120:
+        raise ValueError("memory privacy classification exceeds turn limit")
+    sources = {index: turn.user for index, turn in enumerate(ctx.turns) if turn.user}
+    for row in cognitive_sources(persona, ctx):
+        sources[row.turn_index] = row.text
+    excluded = {index for index, text in sources.items() if cognitive_sensitive(text)}
+    for row in rows:
+        if (not isinstance(row, dict) or set(row) != {"turn_index", "evidence_quote"}
+                or type(row["turn_index"]) is not int or row["turn_index"] not in sources
+                or not isinstance(row["evidence_quote"], str) or not row["evidence_quote"].strip()
+                or len(row["evidence_quote"]) > 2000
+                or row["evidence_quote"] not in sources[row["turn_index"]]):
+            raise ValueError("memory privacy source is not literal owner speech")
+        excluded.add(row["turn_index"])
+    for row in observation_rows:
+        index, quote = row.get("turn_index"), row.get("evidence_quote")
+        if (type(index) is int and index in sources and isinstance(quote, str)
+                and quote.strip() and quote in sources[index]):
+            excluded.add(index)
+    return excluded
 
 
 class LLMExtractor:
@@ -238,6 +304,8 @@ class LLMExtractor:
         self.last_error_type: str | None = None
 
     def extract(self, ctx: EngineContext, persona: PersonaProfile) -> ConsolidationResult:
+        ctx.working_memory["_memory_privacy_review_required"] = True
+        ctx.working_memory.pop("_memory_privacy_review_completed", None)
         excluded = _sensitive_memory_excluded_turns(ctx)
         convo = "\n".join(
             f"[turn {index}] 用户:{turn.user}\n小予:{turn.agent}"
@@ -250,6 +318,7 @@ class LLMExtractor:
         if not convo.strip():
             self.last_status = "skipped"
             self.last_error_type = None
+            ctx.working_memory["_memory_privacy_review_completed"] = True
             return ConsolidationResult()
         if persona.stated_preferences:
             previous = [
@@ -273,10 +342,10 @@ class LLMExtractor:
                 '"relationships":[{"name":"","relation":"","facts":['
                 '{"value":"","evidence_quote":"逐字用户原话","turn_index":0}],'
                 '"referenceable":false}],"stated_preferences":['
-                '{"do":"本人明确要求的交流做法，60字内，必须逐字引用quotes中的连续原话，不改写",'
+                '{"do":"本人提出的相处方式，60字内；可忠实转述quotes，不新增条件、权限、人格或医疗结论",'
                 '"scope":"本人说明的适用场景","quotes":[{"turn_index":0,"text":"逐字用户原话"}],'
-                '"confirmation":{"turn_index":1,"text":"本人后续完整肯定答复"},'
-                '"supersedes":null}]'
+                '"confirmation":null,'
+                '"supersedes":null}],"cognitive_privacy":[{"turn_index":0,"evidence_quote":"认知隐私的逐字本人原话"}]'
                 + (
                     ',"cognitive_observations":[{"domain":"memory|language|orientation|daily_function|repetition",'
                     '"evidence_quote":"逐字本人原话","turn_index":0,"functional_impact":false,'
@@ -289,14 +358,19 @@ class LLMExtractor:
                 "丢弃无法与该轮原话匹配或已被隐私层排除的条目。"
                 "私密/敏感（明确要求保密、逝者、家庭隐情、自伤、债务/转账/"
                 "存款/账户、证件或联系方式）一律 referenceable=false。"
+                "必须审阅输入中的全部本人轮次，并输出cognitive_privacy数组；没有认知隐私也须显式输出[]。"
+                "用语义判断本人记忆、找词、时间地点、重复或日常功能变化相关的私密内容，不以关键词为必要条件。"
+                "每条标注只有turn_index和evidence_quote，原话须逐字可查。"
+                "标注轮次不得进入episodes、relationships、stated_preferences或人物分析；其余普通事实照常抽取。"
+                "此隐私排除不等于开启变化提醒，未开启时禁止输出认知观察或累计趋势。"
                 "不要输出 consent_to_share，系统永远不会因模型抽取自动授权分享。"
                 "相处说明只记录本人明确要求怎样交流，不是人格标签、因果推测或分享通知权限。"
-                "do须保留原话里的条件、先后顺序和适用范围；条件式请求应引用完整请求句，"
+                "do须保留原话里的条件、先后顺序和适用范围；条件式请求应忠实保留完整含义，"
                 "不能只截取条件之后的动作，不能从本人反对、第三人转述或假设举例中提取。"
                 "quotes保留该轮完整本人原话（最多240字）；不能为了满足60字上限丢掉限定，"
                 "无法完整表达就不提取。scope只能来自原话，不能扩大场景。"
-                "confirmation只有在助理先复述同一做法并问是否这样记下、本人随后完整肯定时才给出，"
-                "否则为null。不能用助理原话或自己的总结充当本人证据；不得扩大原话范围。"
+                "confirmation一律为null，模型只能提议，必须由本人另行明确操作确认才生效。"
+                "不能用助理原话或自己的总结充当本人证据；不得扩大原话范围。"
                 "没有符合条件的相处说明就给空数组。"
                 "只输出 JSON，不要解释。"
             )},
@@ -315,12 +389,18 @@ class LLMExtractor:
             data = _parse_json_payload(raw)
             episode_rows, relationship_rows = _memory_protocol_rows(data)
             cognitive_rows = _cognitive_protocol_rows(data) if cognitive_system else []
+            privacy_indices = _cognitive_privacy_indices(data, ctx, persona, cognitive_rows)
+            if not cognitive_system and data.get("cognitive_observations"):
+                raise ValueError("cognitive observation requires owner consent")
         except (TypeError, ValueError, json.JSONDecodeError):
             self.last_status = "failed"
             self.last_error_type = "invalid_json_response"
             return ConsolidationResult()
         self.last_status = "ok"
         self.last_error_type = None
+        # Commit the mask before grounding ordinary facts, relationships or R1.
+        ctx.working_memory["_sensitive_memory_excluded_turns"] = sorted(excluded | privacy_indices)
+        ctx.working_memory["_memory_privacy_review_completed"] = True
 
         eps: list[EpisodicMemoryEntry] = []
         base = len(persona.episodic_memory)

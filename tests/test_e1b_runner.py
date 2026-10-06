@@ -231,7 +231,7 @@ def test_all_raw_candidates_types_and_over_limit_preserved_but_hidden_fields_exc
                   "quotes": [{"turn_index": 0, "text": "not grounded", "thinking": "HIDDEN_QUOTE"}]}]
     candidates += [{"do": f"无依据候选 {i}", "quotes": []} for i in range(11)]
     raw = '<think>HIDDEN_PREFIX</think>' + json.dumps({"episodes": [], "relationships": [],
-           "reasoning": "HIDDEN_TOP", "stated_preferences": candidates}, ensure_ascii=False)
+           "reasoning": "HIDDEN_TOP", "stated_preferences": candidates, "cognitive_privacy": []}, ensure_ascii=False)
     runner, records = setup_runner(tmp_path, factory=memory_response_factory(raw))
     report = runner.run_case(runner.suite.items[0].id)
     folder = runner.root / "main" / runner.suite.items[0].id

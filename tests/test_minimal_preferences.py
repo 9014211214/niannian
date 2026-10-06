@@ -204,7 +204,7 @@ def test_grounded_model_preference_proposal_survives_offline_queue_commit(tmp_pa
     app, clients = live_fixture(tmp_path)
     words = ["安排之前先问问我。", "我喜欢和大家一起做风车。", "具体什么时候我还想想。"]
     sid = start_and_submit(app, words)
-    clients.memory.payload = {"episodes": [], "relationships": [], "stated_preferences": [{
+    clients.memory.payload = {"episodes": [], "relationships": [], "cognitive_privacy": [], "stated_preferences": [{
         "do": "涉及本人的安排先询问意愿，再一起商量具体时间",
         "quotes": [{"session_id": sid, "turn_index": 0, "text": words[0]}],
     }]}

@@ -19,7 +19,8 @@ class LocalExtractorResponse:
 
     def complete(self, messages):
         self.messages = messages
-        return json.dumps({"episodes": self.episodes, "relationships": []}, ensure_ascii=False)
+        return json.dumps({"episodes": self.episodes, "relationships": [],
+                           "cognitive_privacy": []}, ensure_ascii=False)
 
 
 def context():

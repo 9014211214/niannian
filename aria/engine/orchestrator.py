@@ -25,7 +25,7 @@ from ..skills import SkillRegistry
 from ..tools.registry import ToolRegistry
 from .alliance import update_alliance
 from .context import EmotionState, EngineContext
-from .cognitive import cognitive_sources
+from .cognitive import apply_cognitive_withdrawal, cognitive_sources
 from .formulation import update_formulation
 from .memory.consolidator import Extractor, MemoryConsolidator
 from .memory.diagnosis import PersonaHypothesisUpdater, _REFLECTION_ERROR_DETAILS
@@ -42,6 +42,7 @@ from .model.persona import (
     SessionTurnSnapshot,
 )
 from .risk.safety import safety_response
+from .risk.semantic import semantic_safety_signal
 from .perception import PerceptionEngine, route_state_analysis
 from .perception.evidence import collect_evidence
 from .perception.longitudinal import enrich_with_personal_baseline
@@ -56,6 +57,9 @@ from .policy.actions import (
     stage_pending_action,
 )
 from .policy.llm import LLMClient, create_llm_client
+from .policy.online_decision import (
+    DETERMINISTIC_MODEL_FAILURE_REPLY, ONLINE_DECISION_VERSION_SAFETY,
+)
 from .policy.prompt import update_delivery_state
 from .routing import route_reply_model
 
@@ -222,6 +226,14 @@ class Engine:
         ):
             raise ValueError("simulated observations require an isolated simulation engine")
         self._validate_context_mode(ctx)
+        semantic_screening = (
+            self.policy.online_decision_version == ONLINE_DECISION_VERSION_SAFETY
+        )
+        # Reducing privacy permission must never wait for a model's safety
+        # answer. This narrow helper does not collect, remind or notify anyone.
+        if semantic_screening and apply_cognitive_withdrawal(ctx, self.persona, utterance):
+            if self.store is not None and self.persona is not None:
+                self.store.save(self.persona)
         current_turn_id = ctx.working_memory.pop("_current_turn_id", None)
         acoustic = prepare_acoustic(
             acoustic, turn_index=len(ctx.turns), turn_id=current_turn_id,
@@ -244,6 +256,7 @@ class Engine:
             "personality_decision",
             "online_turn_decision",
             "intervention_delivery",
+            "observation_execution",
             "fraud_assessment",
             "cognitive_assessment",
             "care_events",
@@ -278,6 +291,12 @@ class Engine:
         if external_reading is not None:
             ctx.working_memory["perception_input"]["external_emotion"] = deepcopy(external_reading)
         ctx.working_memory["model_route"] = {}
+
+        # Every early-return path can be checkpointed by the UI. Preserve the
+        # existing relationship baseline before either safety route can return.
+        if self.persona is not None and not ctx.working_memory.get("_alliance_seeded"):
+            ctx.alliance.trust = self.persona.alliance.trust
+            ctx.working_memory["_alliance_seeded"] = True
 
         # 明确高风险先于任何生成式调用接管，不能让胸痛/呼吸困难先排队等状态模型。
         signal = self._risk.assess(ctx)
@@ -317,8 +336,17 @@ class Engine:
                 self.store.save(self.persona)
             return response
 
-        # 只有通过高风险接管检查后，当前话语才可作为上一轮已交付干预的
-        # 反馈；胸痛、呼吸困难等急症不能被误学成“用户愿意继续展开”。
+        learning_before_screening = None
+        if semantic_screening:
+            # The same online call still needs tentative state for its prompt.
+            # Commit none of that learning until its safety field is validated.
+            learning_before_screening = deepcopy((
+                ctx.reasoning, ctx.alliance, ctx.formulation, ctx.active_tasks,
+            ))
+
+        # Keyword safety already passed; v3 changes here remain tentative until
+        # same-turn semantic safety also passes. Emergencies are never learned
+        # as successful continued engagement with the previous intervention.
         if self._state_reasoner is not None:
             self._state_reasoner.observe_response(ctx, utterance)
 
@@ -386,10 +414,7 @@ class Engine:
         ctx.working_memory["model_route"]["state"] = state_info
 
         # 2. 更新结构化状态(非 LLM):关系联盟 + 个案假设
-        #    关系账本播种(P2-#10):trust 从 persona 带进来,不再每次会话从 0.5 开始。
-        if self.persona is not None and not ctx.working_memory.get("_alliance_seeded"):
-            ctx.alliance.trust = self.persona.alliance.trust
-            ctx.working_memory["_alliance_seeded"] = True
+        #    Existing trust was seeded before safety handling, including early returns.
         update_alliance(ctx, utterance)
         update_formulation(ctx, self.persona)
 
@@ -405,7 +430,7 @@ class Engine:
         care_observer = getattr(self.scene, "observe_care", None)
         care_changed = (
             bool(care_observer(ctx, self.persona, utterance, signal))
-            if callable(care_observer) else False
+            if callable(care_observer) and not semantic_screening else False
         )
         # 2b. 场景状态推理:文本永远有;声音/视觉/行为/环境等有输入才作为证据加入。
         #     这一层维护竞争假设和干预候选，不做疾病诊断。
@@ -434,7 +459,8 @@ class Engine:
         )
         care_skill_changed = (
             bool(care_skill_executor(ctx, self.persona))
-            if callable(care_skill_executor) and self.store is not None
+            if (callable(care_skill_executor) and self.store is not None
+                and not semantic_screening)
             else False
         )
         if (
@@ -461,6 +487,83 @@ class Engine:
             model_route=reply_route,
         )
         online_trace = ctx.working_memory.get("online_turn_decision") or {}
+        model_signal = semantic_safety_signal(ctx, utterance)
+        semantic_clear = (
+            online_trace.get("version") == ONLINE_DECISION_VERSION_SAFETY
+            and online_trace.get("status") == "parsed"
+            and online_trace.get("turn_index") == len(ctx.turns)
+            and online_trace.get("safety_source") == "online_model_semantics"
+            and online_trace.get("safety_concern") == "none"
+        )
+        if semantic_screening and not semantic_clear:
+            # Keep the received protocol/route audit, but roll back tentative
+            # outcomes, trust, formulation and task controls before ANY save.
+            # A later Web checkpoint must not persist a false intervention win.
+            (ctx.reasoning, ctx.alliance, ctx.formulation,
+             ctx.active_tasks) = learning_before_screening
+            for key in ("personality_decision", "skill_proposals",
+                        "_delivery_response_candidate_for_turn", "_cognitive_block_selected"):
+                ctx.working_memory.pop(key, None)
+            excluded = ctx.working_memory.setdefault("_sensitive_memory_excluded_turns", [])
+            if len(ctx.turns) not in excluded:
+                excluded.append(len(ctx.turns))
+            reason = "semantic_safety_takeover" if model_signal else "semantic_safety_unavailable"
+            ctx.working_memory["intervention_delivery"] = {
+                "status": "not_delivered", "turn_index": len(ctx.turns),
+                "intervention_id": None, "reason": reason,
+            }
+            if model_signal is None:
+                # Missing/invalid safety is not a clear result. Deliver only
+                # fallback, without scene observers, actions or task flows.
+                ctx.working_memory["model_route"]["safety"] = {
+                    "source": "online_model_semantics", "status": "unavailable",
+                    "response_source": "deterministic_fallback",
+                }
+                ctx.add_turn(utterance, DETERMINISTIC_MODEL_FAILURE_REPLY)
+                self._mark_interaction_started()
+                return DETERMINISTIC_MODEL_FAILURE_REPLY
+        if model_signal is not None:
+            self._record_risk(ctx, model_signal)
+            ctx.working_memory["risk_flag"] = {
+                "tier": model_signal.tier, "kind": model_signal.kind,
+                "source": "online_model_semantics", "diagnosis": False,
+            }
+            # A safety concern never becomes ordinary memory/personality evidence.
+            excluded = ctx.working_memory.setdefault("_sensitive_memory_excluded_turns", [])
+            if len(ctx.turns) not in excluded:
+                excluded.append(len(ctx.turns))
+            if "_cognitive_source_turns" in ctx.working_memory:
+                ctx.working_memory["_cognitive_source_turns"] = [
+                    row for row in ctx.working_memory["_cognitive_source_turns"]
+                    if row.get("turn_index") != len(ctx.turns)
+                ]
+            ctx.working_memory.pop("_delivery_response_candidate_for_turn", None)
+            ctx.working_memory["model_route"]["safety"] = {
+                "source": "online_model_semantics", "response_source": "deterministic_safety",
+                "concern": online_trace["safety_concern"],
+            }
+            # Do not parse or execute the generated action/body on this branch.
+            response = self._handle_risk(ctx, model_signal)
+            ctx.add_turn(utterance, response)
+            self._mark_interaction_started()
+            if self.store is not None and self.persona is not None:
+                self._persist_runtime_state(ctx)
+                self.store.save(self.persona)
+            return response
+        if semantic_screening:
+            # These extension hooks can mutate consent, tasks or external care
+            # state, so v3 may invoke them only after a current validated none.
+            care_changed = (
+                bool(care_observer(ctx, self.persona, utterance, signal))
+                if callable(care_observer) else False
+            )
+            care_skill_changed = (
+                bool(care_skill_executor(ctx, self.persona))
+                if callable(care_skill_executor) and self.store is not None else False
+            )
+            if (care_changed or care_skill_changed) and self.store is not None and self.persona is not None:
+                self._persist_runtime_state(ctx)
+                self.store.save(self.persona)
         if (
             self._state_reasoner is not None
             and reasoning_before_current is not None
@@ -751,6 +854,14 @@ class Engine:
             extractor = self._consolidator.extractor
             status = getattr(extractor, "last_status", "ok")
             if status == "failed":
+                client = getattr(extractor, "llm", None)
+                control = getattr(client, "model_request_control", None)
+                terminal = getattr(control, "memory_failure_is_terminal", None)
+                if callable(terminal) and terminal(client):
+                    # Production may close this failed session without repeating
+                    # its received body or exposing unscreened text to reflection.
+                    # Strict experimental guards retain their own original rule.
+                    return persona, "sealed_failed", "memory_extraction_failed"
                 return persona, "failed", "memory_extraction_failed"
             return updated, "ok", None
 
@@ -758,6 +869,15 @@ class Engine:
         if self.hypothesis_updater is None:
             update_delivery_state(persona)
             return persona, "skipped", None
+        reflection_client = (
+            getattr(self.hypothesis_updater, "reflection_metered_client", None)
+            or getattr(self.hypothesis_updater, "llm", None)
+        )
+        if (reflection_client is not None
+                and ctx.working_memory.get("_memory_privacy_review_completed") is not True):
+            # Old persisted memory-completed jobs have no semantic privacy
+            # receipt. Never expose their raw conversation or silently re-run it.
+            return persona, "sealed_failed", "memory_privacy_unreviewed"
         with OFFLINE_SESSION_LOCK:
             update = getattr(self.hypothesis_updater, "update", None)
             if not callable(update):
