@@ -502,13 +502,8 @@ class MinimalWebApp(TextWebApp):
                     raise RuntimeError("turn_failed")
                 route = (ctx.working_memory.get("model_route") or {}).get("reply", {})
                 failed = route.get("source") == "deterministic_fallback"
-                delivery_guard = ctx.working_memory.get("delivery_response_guard") or {}
-                protection = {
-                    "activated": delivery_guard.get("activated") is True,
-                    "response_changed": delivery_guard.get("response_changed") is True,
-                    "violations": [value for value in delivery_guard.get("violations", [])
-                                   if isinstance(value, str) and re.fullmatch(r"[a-z_]{1,80}", value)][:16],
-                }
+                from ..engine.policy.delivery_provenance import delivery_protection
+                protection = delivery_protection(ctx)
                 product_fallback = failed and isinstance(self.call_guard, ProductCallGuard)
                 hard_stop = product_fallback and self.call_guard.snapshot()["stop_reason"] not in {None, "consecutive_failures"}
                 local_rejection = (self.call_guard.snapshot().get("last_request_rejection", {})

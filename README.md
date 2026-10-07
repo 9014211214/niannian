@@ -20,7 +20,12 @@ See the [evidence boundaries](docs/EVIDENCE.md) for what these results can suppo
 
 The [design audit repairs](docs/DESIGN_REPAIR_2026_10_06.md) cover preference admission,
 cognitive privacy, same-call safety checks, call recovery and pre-send reservations.
-The subsequent E1c-v2 run remains incomplete; these changes have not passed model-effect acceptance.
+The subsequent E1c-v2 run completed generation and first model scoring, and failed
+its effect gates. The later 24-case check also failed its task and reply gates.
+Three real-model story repeats are complete, but supported person hypotheses were
+not injected, so they do not establish a personality-understanding benefit. See the
+[versioned validation results](docs/VALIDATION_RESULTS_2026_10_07.md) for failures,
+exposure, subsequent repairs, and the separate repair check.
 
 ## Run locally
 
@@ -74,7 +79,9 @@ The minimal live client uses `v3` with `mode_v1`: the same online call includes 
 safety signal, including on simple turns. Earlier `v1/v2` experiments retain their
 original contracts; `profile_v1` remains experimental. Keyword safety checks stay
 in place. A model signal grants no notification or medical authority, and the new
-semantic path still needs real-model validation. The proposed consented
+semantic path has been checked with real models on frozen versions, with failed
+effect gates. Later layout and receipt-state repairs have software checks only.
+The proposed consented
 message experience and real-model short film have not been completed. See the
 progress page for version-specific implementation and acceptance results.
 

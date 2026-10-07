@@ -45,10 +45,7 @@ _UNCERTAIN_OR_HYPOTHETICAL = (
     "如果", "假如", "要是", "可能", "也许", "或许", "大概", "听说",
     "据说", "预计", "准备", "打算", "将会", "会不会",
 )
-_NON_TERMINAL_NOTIFICATION_STATUSES = {
-    "accepted", "queued", "pending", "submitted", "delivered_local",
-    "recorded_local", "sent_local",
-}
+_TERMINAL_NOTIFICATION_STATUSES = {"delivered", "notified"}
 _EXPLICIT_NON_COMPLETION = (
     "这个动作还没有执行", "还没有实际执行", "没有创建成功",
     "尚未执行", "未执行",
@@ -275,6 +272,21 @@ def _third_party_claim_is_grounded(
     return False
 
 
+def _notification_delivery_confirmed(receipt: dict, data: dict) -> bool:
+    # ok only describes the adapter call. Explicit pending/unknown/conflicting
+    # statuses cannot be promoted into terminal delivery by a truthy flag.
+    statuses = [source["status"] for source in (receipt, data)
+                if "status" in source]
+    if any(not isinstance(status, str)
+           or status.strip().lower() not in _TERMINAL_NOTIFICATION_STATUSES
+           for status in statuses):
+        return False
+    if statuses:
+        return len({status.strip().lower() for status in statuses}) == 1
+    # Compatibility for adapters with an explicit terminal boolean receipt.
+    return data.get("notified") is True or data.get("delivered") is True
+
+
 def _successful_receipts(
     ctx: EngineContext,
     persona: PersonaProfile | None,
@@ -301,13 +313,7 @@ def _successful_receipts(
         }.get(str(receipt.get("tool") or ""))
         if not category:
             continue
-        status = str(
-            data.get("status") or receipt.get("status") or ""
-        ).strip().lower()
-        if (
-            category == "notification"
-            and status in _NON_TERMINAL_NOTIFICATION_STATUSES
-        ):
+        if category == "notification" and not _notification_delivery_confirmed(receipt, data):
             continue
         args = receipt.get("args")
         args = args if isinstance(args, dict) else {}

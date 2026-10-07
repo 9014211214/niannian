@@ -272,7 +272,7 @@
       {title:'允许纠正', lines:['社区周末也有手作，女儿给我报了。我还没说想去呢。','不是不喜欢别人教，上回竹编老师讲的我就爱听。','我是想，写我名字以前，总得问问我。','去一次可以，就怕答应了以后回回都得去。','今天我只是想坐会儿，不用再帮我找活动。']},
       {title:'由他决定', lines:['周六我想和囡囡试试那个风车，不一定去上课。','明天下午三点半提醒我拿纸和本子，先提醒一次。','如果能设规则，过半小时我还没确认就告诉女儿提醒没确认，别发咱们聊天。','我改主意了，取消这个提醒和后续通知。','现在是什么状态？告诉她了吗？']}
     ];
-    const names = {candidate:'待观察',working:'适用中',stable:'较稳定',retired:'已撤回',open:'进行中',active:'进行中',sealed:'已封存',reviewed:'已整理',expired:'已到期',completed:'已完成',pending:'等待处理',idle:'暂无待办',blocked:'需核查后再继续',failed:'失败',unknown:'结果未知',not_run:'未执行',not_started:'未开始',disabled:'未启用',local_preview:'本地流程占位',live:'真实生成',model:'真实模型生成',rule:'安全规则接管',rule_protection:'安全规则接管',rule_safety:'安全规则接管',support:'支持',counter:'反证',not_applied:'未应用',applied:'已应用',conversation:'对话原话',synthetic_demo:'虚构角色演示',added:'新增',revised:'修订',removed:'撤回',unchanged:'维持',facts:'事实',fact:'事实',hypotheses:'人物假设',hypothesis:'人物假设',unavailable:'未观测'};
+    const names = {candidate:'待观察',working:'适用中',stable:'较稳定',retired:'已撤回',open:'进行中',active:'进行中',sealed:'已封存',reviewed:'已整理',expired:'已到期',completed:'已完成',pending:'等待处理',idle:'暂无待办',blocked:'需核查后再继续',failed:'失败',unknown:'结果未知',not_run:'未执行',not_started:'未开始',disabled:'未启用',local_preview:'本地流程占位',live:'真实生成',model:'真实模型生成',rule:'安全规则接管',rule_protection:'规则调整后的回复',rule_safety:'安全规则接管',support:'支持',counter:'反证',not_applied:'未应用',applied:'已应用',conversation:'对话原话',synthetic_demo:'虚构角色演示',added:'新增',revised:'修订',removed:'撤回',unchanged:'维持',facts:'事实',fact:'事实',hypotheses:'人物假设',hypothesis:'人物假设',unavailable:'未观测'};
     let state = null, busy = false, uncertain = null, selectedSession = null, activeSession = null;
     Object.assign(names,{proposed:'待本人确认',confirmed:'本人已确认',declined:'不记这条',withdrawn:'本人已撤回',superseded:'已由新说明取代',stated_preferences:'本人相处说明',local_rule:'本地规则示意',ui:'本人页面操作',result_unknown:'生成或保存结果不明',model_failed:'模型调用或返回失败',local_request_rejected:'本地预检拒绝（未发送）',rule_fallback:'系统兜底（非模型生成）'});
     let renderingTurns = '', suggestedSession = null, leavingSeal = false;
@@ -283,7 +283,7 @@
     const label = value => names[value] || scalar(value);
     const text = (tag, value, className) => { const el=document.createElement(tag); el.textContent=scalar(value); if(className)el.className=className; return el; };
     const shortId = value => scalar(value).slice(0,12);
-    const displayTime = value => { if(!value)return ''; const date=new Date(value); return Number.isNaN(date.valueOf()) ? scalar(value) : date.toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}); };
+    const displayTime = value => { if(!value)return ''; if(typeof value==='string' && /^\d{4}-\d{2}-\d{2}$/.test(value))return `${value}（仅日期）`; const date=new Date(value); return Number.isNaN(date.valueOf()) ? scalar(value) : date.toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}); };
     function fields(container, entries) { const dl=document.createElement('dl'); entries.forEach(([key,value])=>{ const v=scalar(value); if(v){dl.append(text('dt',key),text('dd',v));} }); if(dl.childNodes.length)container.append(dl); }
     function placeholder(container,message) { container.replaceChildren(text('p',message,'placeholder')); }
     function setError(message) { $('error').textContent=message || ''; $('error').hidden=!message; }
@@ -558,9 +558,11 @@
       const card=document.createElement('article'); card.className='evidence-card';
       if(typeof item==='string') { card.append(text('p',item)); return card; }
       if(!item || typeof item!=='object')return card;
-      const main=item.injected_text || item.do || item.claim || item.summary || item.text || item.content || item.event_summary || item.reason;
+      const atomicDisplay=kind==='hypothesis' && !item.injected_text && typeof item.atomic_claim?.tendency==='string';
+      const main=atomicDisplay ? `假设倾向：${item.atomic_claim.tendency}` : item.injected_text || item.do || item.claim || item.summary || item.text || item.content || item.event_summary || item.reason;
       if(item.injected_text)card.append(text('h3','实际选入文本'));
       if(main)card.append(text('p',main));
+      if(atomicDisplay && item.atomic_claim.outcome)fields(card,[['可能表现',item.atomic_claim.outcome]]);
       if(kind==='change') {
         fields(card,[['变更',label(item.kind)],['类型',label(item.category)]]);
         [['之前',item.before],['之后',item.after]].forEach(([name,value])=>{

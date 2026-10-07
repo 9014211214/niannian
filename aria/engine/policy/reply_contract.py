@@ -200,13 +200,21 @@ def reply_quality_contract(
         and set(plan.hypothesis_ids) <= {"grief_or_transition"}
         and not basis.get("current_physical_evidence_qualified")
     )
+    # In v3 the same call interprets current intent. A pre-model ordinary
+    # ask plan is a hypothesis, not authority to force a diagnostic question.
+    # Safety takeover and explicit wait remain separate, stronger boundaries.
+    semantic_v3 = ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v3"
+    advisory = bool(semantic_v3 and plan and plan.mode == "ask"
+                    and not ctx.working_memory.get("risk_flag"))
     return {
-        "version": REPLY_CONTRACT_VERSION,
+        "version": "1.7.1" if semantic_v3 else REPLY_CONTRACT_VERSION,
+        "observation_advisory": advisory,
         "observation_mode": plan.mode if plan is not None else "observe",
         "observation_question": plan.question.strip() if plan is not None else "",
         "question_budget": 0 if leave_space or (plan and plan.mode == "wait") else 1,
         "question_requirement": (
             "none" if leave_space or (plan and plan.mode == "wait")
+            else "optional" if advisory
             else "invitation_optional" if optional_invitation
             else "exact" if plan and plan.mode == "ask"
             else "optional"
@@ -239,7 +247,15 @@ def contract_prompt(contract: dict[str, Any]) -> str:
     """
     mode = contract["observation_mode"]
     question = str(contract.get("observation_question") or "")
-    if mode == "ask" and contract.get("question_requirement") == "invitation_optional":
+    if contract.get("observation_advisory"):
+        observation = (
+            "response 的观察建议：本地候选尚未完成本轮语义判断，不要求使用预设问句。"
+            "按当前原话和必要上下文判断本人正在请求什么、纠正什么、停止什么。"
+            "可直接交付答案或内容、接受纠正、安静倾听；只有当前需要且缺少必要信息时"
+            "才问一个相关问题，不因候选状态或关键词要求本人回答心理二选一。"
+            "当前身体求助须认真回应；急症或自伤关注仍按独立安全合同分流。\n"
+        )
+    elif mode == "ask" and contract.get("question_requirement") == "invitation_optional":
         observation = (
             "response 的观察合同=ask：这是陪伴邀请，不是必须回答的事实检查。"
             "可自然给一个允许不答的邀请，也可以不问、安静承接；不强制逐字复述。"

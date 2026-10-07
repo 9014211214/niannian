@@ -58,6 +58,12 @@ class ElderCompanionScene(BaseScene):
             r"阿尔[茨兹]海默|阿兹海默|痴呆|认知障碍|(?:风险|认知|记忆).{0,8}(?:\d+分|概率|高风险|低风险)|\d+(?:\.\d+)?\s*%", safe
         ):
             return "我不能通过聊天判断疾病或给出个人评估。反复出现的变化可能有多种原因，是否在下次体检时向医生提一句，由您决定；不愿意也可以。"
+        # All safety/receipt checks above keep their existing compact view.
+        # Restore layout only when those checks did not replace content.
+        if (ctx is not None
+                and ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v3"
+                and safe == " ".join(str(response or "").strip().split())):
+            return response
         return safe
 
 
@@ -94,6 +100,12 @@ class ElderCompanionScene(BaseScene):
             audit.update(activated=True, response_changed=True)
             audit.setdefault("violations", []).append("cognitive_private_sharing_blocked")
             return "这些变化记录只对您本人展示。若您想告诉家人，请先选出愿意分享的那一句，并明确授权分享范围；我还没有转达或发送。"
+        # All safety/receipt checks above keep their existing compact view.
+        # Restore layout only when those checks did not replace content.
+        if (ctx is not None
+                and ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v3"
+                and safe == " ".join(str(response or "").strip().split())):
+            return response
         return safe
 
 

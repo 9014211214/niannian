@@ -70,6 +70,9 @@ class PolicyEngine:
         available_tools: Optional[list[str]] = None,
         model_route: ReplyModelRoute | None = None,
     ) -> str:
+        # Select the current contract before building the base prompt.
+        # Clear stale v3 semantics when an explicit historical policy is used.
+        ctx.working_memory["_online_decision_version"] = self.online_decision_version
         pending_action = current_pending_action(ctx)
         advertised_tools = (
             list(available_tools or [])
@@ -165,7 +168,10 @@ class PolicyEngine:
                 ("invalid_model_protocol",),
             )
         if not route.integrated_decision and not deterministic_fallback:
+            from .delivery_provenance import record_reply_stage
+            before_format = response
             response = _enforce_fast_delivery(response)
+            record_reply_stage(ctx, "fast_format", before_format, response)
         route_info = client_route_info(
             selected,
             tier=route.tier,

@@ -95,6 +95,12 @@ def permitted_intervention_prompt(candidate, ctx: EngineContext) -> dict[str, st
         "guidance": candidate.guidance, "avoid": candidate.avoid,
     }
     contract = reply_quality_contract(ctx)
+    if contract.get("observation_advisory"):
+        fields["guidance"] = (
+            "以下是可选候选方向；是否相关、是否需要澄清由本轮完整语义决定，"
+            "不能覆盖当前明确任务、纠正或停止要求。" + fields["guidance"]
+        )
+        return fields
     if (
         contract["question_requirement"] == "exact"
         and contract["question_budget"] > 0

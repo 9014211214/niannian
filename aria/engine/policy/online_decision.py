@@ -594,6 +594,12 @@ def single_pass_messages(
         "有直接反证、明确新意愿或更高优先级身体事实才可改选，不为通用求证改选。"
         if local_selected_id else ""
     )
+    if reply_quality_contract(ctx).get("observation_advisory") and local_selected_id:
+        selection_contract = (
+            f"\n本地候选预选 id={local_selected_id}；这是本次语义判断前的建议，"
+            "不是已证实的状态或必须执行的沟通任务。根据当前完整原话选择相关方向，"
+            "优先完成明确任务、尊重纠正和停止；不为展示该方向强制追问。"
+        )
     base = str(copied[0].get("content") or "")
     # Production build_messages owns the shared contract. Standalone protocol
     # callers still receive it; never append a second competing observation rule.
@@ -861,6 +867,7 @@ def apply_single_pass_decision(
     elif (
         local_selected_id == "physical_clarification"
         and decision_basis.get("current_physical_evidence_qualified") is True
+        and not reply_quality_contract(ctx, utterance=utterance).get("observation_advisory")
     ):
         # 当前身体事实优先级不是语言模型可用人物偏好覆盖的软建议。
         selection_lock_reason = "current_physical_evidence"
@@ -888,6 +895,10 @@ def apply_single_pass_decision(
         requested_intervention_id=requested_selected_id,
         selection_lock_reason=selection_lock_reason,
     )
+    from .delivery_provenance import record_reply_stage
+    delivery_guard["response_changed"] = response != pre_guard_response
+    record_reply_stage(ctx, "online_guard", pre_guard_response, response,
+                       violations=delivery_guard.get("violations", []))
     plan_trace = _communication_plan_trace(payload, requested_selected_id, selected_id, available)
     version = _active_version(ctx)
     if version == ONLINE_DECISION_VERSION_V2:
@@ -1101,7 +1112,9 @@ def _guard_user_response(
     # 保持稳定顺序，避免同一问题重复记多次。
     violations = list(dict.fromkeys(violations))
     if not violations:
-        return value, {
+        # Scan the same compact view; v3 delivery retains author-visible layout.
+        delivered = response if _active_version(ctx) == ONLINE_DECISION_VERSION_SAFETY else value
+        return delivered, {
             "activated": False,
             "violations": [],
             "action_removed": False,

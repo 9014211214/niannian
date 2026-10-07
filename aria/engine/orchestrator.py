@@ -265,6 +265,7 @@ class Engine:
             "_delivery_response_candidate_for_turn",
             "_benchmark_reply_trace",
             "delivery_response_guard",
+            "_reply_delivery_stages",
             "perception_input",
             "perception_fusion",
             "prompt_evidence_snapshot",
@@ -544,6 +545,9 @@ class Engine:
             }
             # Do not parse or execute the generated action/body on this branch.
             response = self._handle_risk(ctx, model_signal)
+            from .policy.delivery_provenance import record_reply_stage
+            record_reply_stage(ctx, "semantic_safety", raw, response,
+                               violations=["semantic_safety_takeover"])
             ctx.add_turn(utterance, response)
             self._mark_interaction_started()
             if self.store is not None and self.persona is not None:
@@ -607,14 +611,18 @@ class Engine:
         ctx.working_memory.setdefault(
             "_delivery_response_candidate_for_turn", response
         )
+        from .policy.delivery_provenance import record_reply_stage
         response_overridden = False
         response_guard = getattr(self.scene, "guard_response", None)
         if callable(response_guard):
             guarded = response_guard(ctx, response)
+            record_reply_stage(ctx, "scene_guard", response, guarded,
+                               violations=["scene_response_replaced"] if guarded != response else [])
             if guarded != response:
                 response = guarded
                 action = None
                 response_overridden = True
+        before_tool = response
         if action is not None:
             pending_action = current_pending_action(ctx)
             prepared, denied_reason = prepare_action(
@@ -676,6 +684,9 @@ class Engine:
                     )
                     response_overridden = True
 
+        record_reply_stage(ctx, "tool_result", before_tool, response,
+                           violations=["tool_response_replaced"] if before_tool != response else [])
+
         # 6. 可选多步任务流；养老 Skill 需要等待/恢复时也可使用，不切换关系场景。
         flow = self.scene.task_flow()
         if flow is not None:
@@ -690,6 +701,9 @@ class Engine:
             guarded = delivery_response_guard(
                 ctx, response, utterance, self.persona
             )
+            audit = ctx.working_memory.get("delivery_response_guard") or {}
+            record_reply_stage(ctx, "delivery_guard", response, guarded,
+                               violations=audit.get("violations", []))
             if guarded != response:
                 response = guarded
                 response_overridden = True
