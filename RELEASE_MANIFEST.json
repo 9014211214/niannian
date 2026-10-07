@@ -851,9 +851,9 @@
       "sha256": "ca5b98a6bb9c449776029e615c3e1239715f902fcdd96826954b26116c1a2431"
     },
     {
-      "bytes": 26120,
+      "bytes": 13830,
       "path": "docs/PROGRESS.md",
-      "sha256": "43e01cb3322b013cf2f15bb9a60580d0d5799b18a182a12b51dbfc400f85fdf0"
+      "sha256": "e0320dc18428652ba6d76420943c750bbdfc4f1f08b7b0b2001675161c94cc50"
     },
     {
       "bytes": 9946,
@@ -881,9 +881,9 @@
       "sha256": "c621d85e0b79e24381b08279b551b906b8b5b1bedbf7fd3fefb4e8deb0e651d1"
     },
     {
-      "bytes": 19295,
+      "bytes": 20746,
       "path": "docs/VALIDATION_RESULTS_2026_10_07.md",
-      "sha256": "cdc67d6d5d3f8342ae1d2f6f5c934b25f881effb942ed03fd03cf66d421e3c84"
+      "sha256": "83b22368753a87845a62184c735f4649c64247522d38e390d157ef0f66b950dd"
     },
     {
       "bytes": 3761,
