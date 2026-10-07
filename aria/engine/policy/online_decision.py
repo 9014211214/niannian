@@ -896,6 +896,9 @@ def apply_single_pass_decision(
         selection_lock_reason=selection_lock_reason,
     )
     from .delivery_provenance import record_reply_stage
+    # Preserve the exact parsed body hash before the existing edge trim.
+    record_reply_stage(ctx, "response_normalization",
+                       str(payload.get("response") or ""), pre_guard_response)
     delivery_guard["response_changed"] = response != pre_guard_response
     record_reply_stage(ctx, "online_guard", pre_guard_response, response,
                        violations=delivery_guard.get("violations", []))

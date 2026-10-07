@@ -514,7 +514,7 @@ class MinimalWebApp(TextWebApp):
                            source=("local_request_rejected" if local_rejected else
                                    "rule_fallback" if product_fallback and not hard_stop else "model_failed") if failed else (
                                "rule_safety" if ctx.working_memory.get("risk_flag") else
-                               "rule_protection" if protection["response_changed"] else row["source"]),
+                               "rule_protection" if protection["protection_response_changed"] else row["source"]),
                            delivery_protection=protection,
                            emotion_summary={"label": ctx.emotion.label,
                                             "source": ctx.emotion.inference_source or "unavailable",

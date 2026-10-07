@@ -157,7 +157,8 @@ def test_actual_web_source_survives_later_unchanged_guard(tmp_path, mode, change
         assert len(online.calls) == 1
         assert row["source"] == ("rule_protection" if changed else "live")
         assert row["delivery_protection"]["response_changed"] is changed
-        assert row["delivery_protection"]["stages"][0]["stage"] == "online_guard"
+        assert [s["stage"] for s in row["delivery_protection"]["stages"][:2]] == [
+            "response_normalization", "online_guard"]
         assert row["delivery_protection"]["stages"][-1]["response_changed"] is False
     finally:
         app.close()

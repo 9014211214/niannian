@@ -27,6 +27,16 @@ not injected, so they do not establish a personality-understanding benefit. See 
 [versioned validation results](docs/VALIDATION_RESULTS_2026_10_07.md) for failures,
 exposure, subsequent repairs, and the separate repair check.
 
+A later 24-case, two-arm check did **not qualify the 1.8 prompt candidate for
+integration**. It stopped after 30 replies and one rate-limited request; 17 planned
+positions remain unissued. Both effect gates are not evaluable because exposure
+was below 80%, while the separate protection and fixed-denominator format gates
+failed. All 30 received replies passed the output schema. See the
+[fixed two-arm result](docs/VALIDATION_RESULTS_2026_10_07.md#8-2026-10-08-另版双臂检查). The prompt candidate
+and an optional reflection-format candidate remain isolated from the product.
+The separate response-source bookkeeping repair is integrated after software and
+independent checks; it does not inherit or change these model-effect results.
+
 ## Run locally
 
 Requires Python 3.10 or newer. From this directory, on Windows:

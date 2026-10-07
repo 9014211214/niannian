@@ -33,10 +33,18 @@ def delivery_protection(ctx) -> dict:
     stages = list(record.get("stages") or []) if record.get("turn_index") == len(ctx.turns) - 1 else []
     reasons = list(dict.fromkeys(value for stage in stages for value in stage["violations"]))
     return {
-        "version": "delivery_protection_v2",
+        "version": "delivery_protection_v3",
         "status": "observed" if stages else "not_observed",
         "activated": any(stage["activated"] for stage in stages),
         "response_changed": any(stage["response_changed"] for stage in stages),
+        # Edge trimming is observable but does not turn a model reply
+        # into a rule-authored response in the user-facing source label.
+        "normalization_response_changed": any(
+            stage["response_changed"] for stage in stages
+            if stage["stage"] == "response_normalization"),
+        "protection_response_changed": any(
+            stage["response_changed"] for stage in stages
+            if stage["stage"] != "response_normalization"),
         "violations": reasons[:16],
         "stages": [dict(stage) for stage in stages],
         "model_response_sha256": stages[0]["before_sha256"] if stages else None,
