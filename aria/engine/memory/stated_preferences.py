@@ -13,8 +13,28 @@ from datetime import datetime, timezone
 from ..context import EngineContext
 from ..model.persona import (
     PersonaProfile, PreferenceQuote, PreferenceTransition,
-    PreferenceUIConfirmation, StatedPreference,
+    PreferenceUIConfirmation, PreferenceSemanticReview, StatedPreference,
 )
+
+PREFERENCE_PROTOCOL_VERSION = "2.0"
+
+
+def _semantic_eligible(review: PreferenceSemanticReview | None) -> bool:
+    return bool(review is not None and review.kind == "communication_style"
+                and review.owner_requested is True and review.quote_supported is True
+                and review.scope_preserved is True and review.no_permission_claim is True)
+
+
+def preference_admission(row: StatedPreference) -> str:
+    """Eligibility is separate from the owner's immutable confirmation history."""
+    if row.extraction_source == "rule":
+        return "local_rule_preview"
+    return "model_reviewed" if _semantic_eligible(row.semantic_review) else "needs_review"
+
+
+def preference_is_usable(row: StatedPreference, *, allow_rule_preview: bool = False) -> bool:
+    admission = preference_admission(row)
+    return admission == "model_reviewed" or (allow_rule_preview and admission == "local_rule_preview")
 
 _NO_PERMISSION = ("分享", "转告", "通知", "联系", "告诉", "保密", "授权", "外发")
 # Compatibility only: the paused legacy E3 loader imports this old contract.
@@ -100,6 +120,17 @@ def _safe_user_instruction(text: str) -> bool:
     )
 
 
+def _model_source_safety(text: str) -> bool:
+    """Limited negative privacy/medical/diagnostic backstops, not intent parsing.
+
+    Owner intent, reported speech, denial and fact-vs-preference distinctions
+    belong to the model's explicit semantic review. A grammatical whitelist
+    must not silently replace that review. These checks do not prove safety.
+    """
+    return not (_sharing_or_permission(text) or _UNSAFE_ADVICE.search(text)
+                or _MEDICAL_RULE_CONTEXT.search(text) or _TRAIT_OR_CAUSE.search(text))
+
+
 def _owner_action_targets(instruction: str) -> bool:
     # Deny explicit third-party targets. Missing a recognised object is not a
     # rejection: natural paraphrases need not fit an affirmative grammar.
@@ -177,9 +208,11 @@ def extract_preference_rows(rows: object, ctx: EngineContext, persona: PersonaPr
             rejected.append("preference_quote_not_verbatim_user_source")
             continue
         quotes = list(quotes)
-        # Check full source turns, not only the model-selected substring. A
-        # quote cut out of '不要先问我' or '她说先问我' is not affirmative intent.
-        if not all(_safe_user_instruction(ctx.turns[row.turn_index].user) for row in quotes):
+        # Never check only a selected substring. The model route separates
+        # semantic intent from bounded safety checks; the old finite rule
+        # parser is retained only for explicitly isolated local previews.
+        safe_source = _model_source_safety if source == "model" else _safe_user_instruction
+        if not all(safe_source(ctx.turns[row.turn_index].user) for row in quotes):
             rejected.append("preference_full_user_context_unsafe")
             continue
         if any(len(ctx.turns[row.turn_index].user) > 240 for row in quotes):
@@ -198,6 +231,16 @@ def extract_preference_rows(rows: object, ctx: EngineContext, persona: PersonaPr
         if supersedes and (supersedes not in existing or existing[supersedes].status != "confirmed"):
             rejected.append("preference_superseded_target_invalid")
             continue
+        semantic_review = None
+        if source == "model":
+            try:
+                semantic_review = PreferenceSemanticReview.model_validate(raw.get("semantic_review"))
+            except (ValueError, TypeError):
+                rejected.append("preference_semantic_review_required")
+                continue
+            if not _semantic_eligible(semantic_review):
+                rejected.append("preference_not_communication_style")
+                continue
         scope = _grounded_scope(full_sources)
         if scope is None:
             rejected.append("preference_full_scope_too_long")
@@ -219,6 +262,7 @@ def extract_preference_rows(rows: object, ctx: EngineContext, persona: PersonaPr
                 quotes=full_quotes, confirmation=None,
                 status="proposed", supersedes=supersedes,
                 history=history, extraction_source=source, created_at=now, updated_at=now,
+                semantic_review=semantic_review,
             ))
         except ValueError:
             rejected.append("preference_model_validation_failed")
@@ -267,7 +311,7 @@ def merge_preferences(persona: PersonaProfile, rows: list[StatedPreference]) -> 
 
 
 def transition_preference(persona: PersonaProfile, preference_id: str, action: str,
-                          *, at: str | None = None) -> StatedPreference:
+                          *, at: str | None = None, allow_rule_preview: bool = False) -> StatedPreference:
     """Apply an explicit user's UI action. Caller owns lock and durable commit.
 
     All validation precedes mutation, including a replacement's old target.
@@ -281,6 +325,8 @@ def transition_preference(persona: PersonaProfile, preference_id: str, action: s
     status = transitions.get((row.status, action))
     if status is None:
         raise ValueError("invalid_preference_transition")
+    if action == "confirm" and not preference_is_usable(row, allow_rule_preview=allow_rule_preview):
+        raise ValueError("preference_review_required_before_confirmation")
     now = at or _now()
     datetime.fromisoformat(now)
     replacement = None
@@ -297,7 +343,7 @@ def transition_preference(persona: PersonaProfile, preference_id: str, action: s
     return changed
 
 
-def confirmed_preference_payloads(persona: PersonaProfile | None) -> list[dict]:
+def confirmed_preference_payloads(persona: PersonaProfile | None, *, allow_rule_preview: bool = False) -> list[dict]:
     """Exact bounded online payload. Withdrawn records never enter context."""
     if persona is None:
         return []
@@ -306,11 +352,13 @@ def confirmed_preference_payloads(persona: PersonaProfile | None) -> list[dict]:
         if instant.tzinfo is None:
             instant = instant.replace(tzinfo=timezone.utc)
         return instant.timestamp(), row.id
-    rows = sorted((row for row in persona.stated_preferences if row.status == "confirmed"),
+    rows = sorted((row for row in persona.stated_preferences if row.status == "confirmed"
+                   and preference_is_usable(row, allow_rule_preview=allow_rule_preview)),
                   key=confirmation_order, reverse=True)[:4]
     def quote_text(row):
         return f"session={row.session_id},turn={row.turn_index}: {row.text}"
     return [{"id": row.id, "do": row.do, "scope": row.scope,
+             "admission": preference_admission(row), "extraction_source": row.extraction_source,
              "not_implies": list(row.not_implies), "quotes": [quote_text(q) for q in row.quotes],
              "confirmation": (quote_text(row.confirmation) if isinstance(row.confirmation, PreferenceQuote)
                               else row.confirmation.model_dump())} for row in rows]

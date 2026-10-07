@@ -196,12 +196,12 @@ turn_index，并逐字复制该轮用户原话中的 evidence_quote；解释性�
 
 
 EVIDENCE_REVIEW_PROTOCOL_VERSION = "2.0"
-EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION = "2.3"
+EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION = "2.4"
 # Public diagnostic values are codes, never model output or exception messages.
 # Keep this explicit: new validators default to the generic category until their
 # non-sensitive code has deliberately been reviewed and added here.
 _REFLECTION_ERROR_DETAILS = frozenset({
-    "model_call_failed", "invalid_json_response", "invalid_evidence_review_protocol",
+    "model_call_failed", "invalid_json_response", "invalid_reflection_shape", "invalid_evidence_review_protocol",
     "reflection_object_required", "nonfinite_json_number", "changes_array_required",
     "review_protocol_version_required", "review_or_change_bound_exceeded",
     "invalid_review_fields", "duplicate_or_invalid_review_id",
@@ -229,7 +229,7 @@ _REVIEW_PROMPT_LIMIT = 24
 _EVIDENCE_SYSTEM_PROMPT = """你负责会后人物理解，不做在线聊天、不诊断、不授予任何工具权限。
 本次严格使用 evidence-review protocol 2.0：先依据用户原话审查证据，再至多更新一条
 对未来互动有用的、可推翻的原子人物主张。只能输出规定 JSON，不输出思维过程。
-本提示的输出合同为 prompt contract 2.3；数据 protocol_version 仍必须为字符串 "2.0"。
+本提示的输出合同为 prompt contract 2.4；数据 protocol_version 仍必须为字符串 "2.0"。
 
 重要区别：
 1. 范围内支持、范围内真正反例、范围以外和未知是不同结果。已有主张先逐字对照其
@@ -262,6 +262,12 @@ event_evidence引用本次明确纠正的原话，不能只是重贴旧事件原
 未能确定是否旧事件用 unknown、prior_event_id=null。没有已知 event_id 时不得填 same_event。
 不要把 review.id、hypothesis_id 或当前新编的标识当作 prior_event_id，也不要省略无法
 引用的附属 review 来掩盖证据错误；只提交有当前逐字出处且事件关系能如实表达的观察。
+同一批 reviews 中首次描述的一个新事件可以有多条观察：它们均用 new_event、
+prior_event_id=null，并逐对象复用同一组 event_evidence 引用（turn_index 和
+evidence_quote 完全一致），系统会给它们同一个 event_id，不把多条观察算成多次
+独立事件。same_event 专指请求中已提供 event_id 的历史事件，不能表示“与本批
+r1/r2是同一件事”，也不能把当前 review.id 当旧 event_id。不确定是否同一事件
+仍用 unknown；不能为合组捏造共同背景，也不能把已知旧事件改称新事件。
 首次行为证据可提出 repeated_pattern 方向的暂定候选，但只能说“可能”，不能宣称重复
 模式已被观察证实；系统仍要求独立事件数量与原有阈值才允许成为工作/稳定假设。
 4. 一个 atomic_claim 只包含一个 aspect、其 conditions、一个 tendency。outcome 字段必须
@@ -337,6 +343,11 @@ cbt维度 core_pattern/trigger/belief/maintaining_factor/protective_factor，需
   不应更新的范围外、未知、复述或 context_only review 不要附带 change。
   新主张的 within_scope 是证据与 atomic_claim.conditions 相符，不是它已有历史；
   unknown 与 relation=new 的 change 同时输出不会入账，审查完成也不代表人物已经学会。
+- 输出前核对绑定：新主张的 change 只能对应 within_scope/support 的 review；已有
+  主张的 change 对应 within_scope/support 或 counter。unknown、outside_scope、
+  context_only、旧事件复述等观察可保留 review，但不附 change。不把 unknown 改成
+  support 来凑出 change，也不将 stated_preference 的实际反应强塞入 outcome；若
+  证据类型与结果字段无法如实一致，保留观察、changes=[]。
 
 严格 JSON 形状（即使不更新也必须有protocol_version和reviews）：
 {"protocol_version":"2.0","reviews":[{
@@ -700,7 +711,15 @@ class PersonaHypothesisUpdater:
         if raw is None and self.body_json_protocol:
             self.last_status = "failed"
             self.last_error_type = "invalid_json_response"
-            self.last_error_detail = "invalid_json_response"
+            # Keep the terminal type used by existing queue/control gates while
+            # distinguishing parsed-but-invalid shape from JSON syntax. Only
+            # the safe validator category is inspected, never raw model text.
+            self.last_error_detail = (
+                "invalid_reflection_shape"
+                if self.last_format_attempts
+                and self.last_format_attempts[-1].get("shape", {}).get("kind") == "schema"
+                else "invalid_json_response"
+            )
             self._record_proposal_outcomes(None, {}, review_status="not_evaluated")
             return persona
         try:

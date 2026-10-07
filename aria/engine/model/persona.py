@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
 
 LOCAL_DEMO_NOTIFICATION_SCOPE = "local_demo_care_notifications"
@@ -755,6 +755,19 @@ class PreferenceTransition(BaseModel):
     quote: Optional[PreferenceQuote] = None
 
 
+class PreferenceSemanticReview(BaseModel):
+    """A model's bounded classification, not an independent truth or consent."""
+
+    model_config = ConfigDict(extra="forbid")
+    version: Literal["preference_semantics_v1"]
+    kind: Literal["communication_style", "permission_boundary", "action_request",
+                  "fact", "person_inference", "unclear"]
+    owner_requested: StrictBool
+    quote_supported: StrictBool
+    scope_preserved: StrictBool
+    no_permission_claim: StrictBool
+
+
 class StatedPreference(BaseModel):
     """本人明确提出的交流说明；独立于人物推断，也不是分享授权。"""
 
@@ -769,6 +782,9 @@ class StatedPreference(BaseModel):
     supersedes: Optional[str] = Field(default=None, pattern=r"^pref_[A-Za-z0-9_-]{1,59}$")
     history: List[PreferenceTransition] = Field(default_factory=list)
     extraction_source: Literal["rule", "model"] = "model"
+    # Missing on old profiles. Preserve history, but never infer that an old
+    # confirmation also completed the current semantic admission contract.
+    semantic_review: Optional[PreferenceSemanticReview] = None
     created_at: str
     updated_at: str
 

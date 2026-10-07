@@ -22,7 +22,8 @@ from ..engine.memory.atomic_file import replace_with_retry
 from ..engine.memory.offline_queue import OfflineSessionQueue
 from ..engine.memory.persona_store import PersonaStore
 from ..engine.memory.stated_preferences import (
-    heuristic_preferences, merge_preferences, transition_preference,
+    heuristic_preferences, merge_preferences, preference_admission, preference_is_usable,
+    transition_preference,
 )
 from ..engine.minimal_care import MinimalCareService
 from ..engine.minimal_care_context import build_care_context
@@ -237,7 +238,11 @@ class MinimalWebApp(TextWebApp):
         return {
             "facts": [item.model_dump() for item in persona.episodic_memory],
             "hypotheses": hypotheses,
-            "stated_preferences": [item.model_dump() for item in persona.stated_preferences],
+            "stated_preferences": [{**item.model_dump(), "admission": preference_admission(item),
+                                    "can_confirm": preference_is_usable(item, allow_rule_preview=self.mode == "local_preview"),
+                                    "usable": item.status == "confirmed" and preference_is_usable(
+                                        item, allow_rule_preview=self.mode == "local_preview")}
+                                   for item in persona.stated_preferences],
             "evidence": [item.model_dump() for item in persona.evidence_review_ledger],
             "changes": [change for review in [*self._run["reviews"], *self._run["preference_reviews"]]
                         for change in review.get("changes", [])],
@@ -330,7 +335,7 @@ class MinimalWebApp(TextWebApp):
                 return self._result(False, "没有已保存的相处说明。")
             candidate = persona.model_copy(deep=True)
             try:
-                transition_preference(candidate, preference_id, action)
+                transition_preference(candidate, preference_id, action, allow_rule_preview=self.mode == "local_preview")
             except (ValueError, KeyError):
                 return self._result(False, "这条说明已变化或操作不适用，请刷新后查看。")
             try:
@@ -483,6 +488,9 @@ class MinimalWebApp(TextWebApp):
             started = time.perf_counter()
             try:
                 ctx.working_memory.pop("prompt_evidence_snapshot", None)
+                # Only the explicitly model-disabled preview can expose local
+                # rule proposals. Reopening the same profile live resets this.
+                ctx.working_memory["_local_preference_preview"] = self.mode == "local_preview"
                 if "care_context" in row:
                     ctx.working_memory["minimal_care_context"] = deepcopy(row["care_context"])
                 with self._model_scope("turn", turn_id, session_id):

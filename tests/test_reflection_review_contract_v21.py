@@ -74,11 +74,11 @@ def fixture(index=1, old=None, words=None):
 
 
 def test_prompt_contract_revision_does_not_change_data_protocol_or_legacy_prompt():
-    assert EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION == "2.3"
+    assert EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION == "2.4"
     assert EVIDENCE_REVIEW_PROTOCOL_VERSION == "2.0"
     prompt = reflection_system_prompt(True)
     for statement in (
-        "prompt contract 2.3", 'protocol_version 仍必须为字符串 "2.0"',
+        "prompt contract 2.4", 'protocol_version 仍必须为字符串 "2.0"',
         "response/big_five/disc/attachment/cbt", "general 只能单独使用",
         "每个引用对象必须完全复制", "不能缩短成另一子串", "1..3 项数组",
         "2..240 个字符", "各最多 100", "总长度不得超过 180", "最多 240 个字符",
@@ -86,7 +86,7 @@ def test_prompt_contract_revision_does_not_change_data_protocol_or_legacy_prompt
         "observed_response 必须为用户有据的反应字符串", "只允许 change.relation=support",
     ):
         assert statement in prompt
-    assert "prompt contract 2.3" not in reflection_system_prompt(False)
+    assert "prompt contract 2.4" not in reflection_system_prompt(False)
 
 
 @pytest.mark.parametrize(("mutation", "expected"), [

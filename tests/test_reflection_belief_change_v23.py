@@ -385,7 +385,7 @@ def test_old_persisted_profile_roundtrips_without_confidence_migration():
 def test_prompt_separates_evidence_strength_minimum_scope_and_real_unknown():
     prompt = reflection_system_prompt(True)
     for part in (
-        "prompt contract 2.3", "不是人物假设更新后", "不能直接复制为本次 confidence",
+        "prompt contract 2.4", "不是人物假设更新后", "不能直接复制为本次 confidence",
         "最小推断范围", "紧急性和阶段", "最多保留该次同类", "对该方式的偏好仍是 unknown",
         "不能为形成标签强改 within_scope", "证据入账、信念实际变化、实际撤回",
         "低于 0.7 按", "不要为了越过阈值抬高 confidence",

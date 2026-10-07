@@ -1,7 +1,6 @@
-"""R1 software boundaries with author-written local inputs; no model calls."""
+"""R1 software boundaries; explicit model labels do not measure semantic accuracy."""
 from __future__ import annotations
 
-import hashlib
 import json
 
 import pytest
@@ -19,6 +18,7 @@ from aria.engine.model.persona import PersonaProfile, StatedPreference
 from aria.engine.policy.online_decision import ONLINE_DECISION_VERSION_V2, single_pass_messages
 from aria.engine.policy.prompt import build_messages
 from aria.scenes.registry import get_scene
+from tests.preference_fixtures import communication_review
 
 
 def _context(session="session_original"):
@@ -30,6 +30,7 @@ def _context(session="session_original"):
 
 def _row():
     return {"do": "涉及本人的安排先询问意愿，再一起商量具体时间", "scope": "安排前",
+            "semantic_review": communication_review(),
             "quotes": [{"turn_index": 0, "text": "报名前先问问我，别替我决定。"}],
             "confirmation": {"turn_index": 1, "text": "对，就这么记。"}}
 
@@ -47,22 +48,24 @@ def _profile(*, confirmed=True):
     return profile
 
 
-@pytest.mark.parametrize("kind,sha", [
-    ("blank", "b4b9f40820ce72da0b036756bd9afc425e10879b9b8e1149552910c13b757c97"),
-    ("facts", "037d668c7cec923132d32041d9d336e66dbfa1a8ec50f4a16d1b230b5a45570c"),
-])
-def test_no_confirmed_preferences_preserves_original_prompt_bytes(kind, sha):
-    # Recorded from the immutable 20261001-07 pre-change prompt builder,
-    # before any preferences were injected. No local artifact needed to test.
+@pytest.mark.parametrize("kind", ["blank", "facts"])
+def test_no_confirmed_preferences_does_not_inject_proposals_or_change_messages(kind):
+    # Historical 20261001-07 prompt SHA-256 values, not current-version goldens:
+    # blank: b4b9f40820ce72da0b036756bd9afc425e10879b9b8e1149552910c13b757c97
+    # facts: 037d668c7cec923132d32041d9d336e66dbfa1a8ec50f4a16d1b230b5a45570c
+    # reply_contract 1.6 intentionally changes all current prompts. Check the
+    # same-version non-injection invariant instead of refreshing old goldens.
     profile = PersonaProfile(user_id="preference_test")
     ctx = EngineContext(user_id="preference_test", scene_id="companion_elder", session_id="stable_session")
     if kind == "facts":
         ctx.add_turn("我以前修公交车。", "愿意说说吗？")
         ctx.working_memory["recalled_episodes"] = ["本人说喜欢修东西", "本人说今天想休息"]
     messages = build_messages(get_scene("companion_elder"), profile, ctx, "纸风车还在。", delivery_block="mode_v1")
-    assert hashlib.sha256(json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest() == sha
+    assert 'source="stated_preference_confirmed"' not in messages[0]["content"]
+    assert ctx.working_memory["prompt_evidence_snapshot"]["stated_preferences"] == []
     profile.stated_preferences = _profile(confirmed=False).stated_preferences
     assert build_messages(get_scene("companion_elder"), profile, ctx, "纸风车还在。", delivery_block="mode_v1") == messages
+    assert ctx.working_memory["prompt_evidence_snapshot"]["stated_preferences"] == []
 
 
 def test_old_profile_load_and_full_preference_roundtrip(tmp_path):
@@ -81,8 +84,8 @@ def test_old_profile_load_and_full_preference_roundtrip(tmp_path):
     ({"quotes": [{"turn_index": True, "text": "报名前先问问我，别替我决定。"}]}, "preference_quote_not_verbatim_user_source"),
     ({"quotes": [{"turn_index": 0, "text": "这样记下好吗？"}]}, "preference_quote_not_verbatim_user_source"),
     ({"quotes": [{"turn_index": 0, "text": "报名前先问问我，别替我决定。", "session_id": "future"}]}, "preference_quote_not_verbatim_user_source"),
-    ({"do": "每次先问女儿再帮我安排"}, "preference_not_safe_explicit_instruction"),
-    ({"do": "帮我通知女儿"}, "preference_not_safe_explicit_instruction"),
+    ({"do": "每次先问女儿再帮我安排", "semantic_review": communication_review(kind="action_request")}, "preference_not_safe_explicit_instruction"),
+    ({"do": "帮我通知女儿", "semantic_review": communication_review(kind="permission_boundary", no_permission_claim=False)}, "preference_not_safe_explicit_instruction"),
     ({"supersedes": "pref_unknown"}, "preference_superseded_target_invalid"),
 ])
 def test_bad_sources_or_invented_instruction_rejected(change, reason):
@@ -94,6 +97,8 @@ def test_bad_sources_or_invented_instruction_rejected(change, reason):
 
 @pytest.mark.parametrize("instruction", ["他喜欢热闹，会更愿意参加活动", "安排任何事情都听女儿的"])
 def test_unrelated_non_dangerous_paraphrase_is_not_automatically_confirmed(instruction):
+    # Deliberately false communication label: model self-report is not proof
+    # that its paraphrase is grounded. The owner must still review a proposal.
     rows, rejected = extract_preference_rows([{**_row(), "do": instruction}], _context(), PersonaProfile(user_id="test"))
     assert not rejected and rows[0].status == "proposed" and rows[0].confirmation is None
     assert rows[0].quotes[0].text == _context().turns[0].user
@@ -126,13 +131,22 @@ def test_confirmation_is_full_user_turn_and_after_quote():
         assert rows[0].status == "proposed"
 
 
-@pytest.mark.parametrize("full", ["不要先问我。", "我不希望你每次都先问我。", "她说先问我。", "女儿说先问我。", "女儿对我说：先问我。", "我希望你说我是内向的人，先问我。", "如果是她说先问我，你就别信。"])
-def test_quote_cropping_cannot_remove_negation_reported_speech_or_trait(full):
+@pytest.mark.parametrize("full,review,reason", [
+    ("不要先问我。", communication_review(owner_requested=False), "preference_not_communication_style"),
+    ("我不希望你每次都先问我。", communication_review(owner_requested=False), "preference_not_communication_style"),
+    ("她说先问我。", communication_review(kind="fact", owner_requested=False), "preference_not_communication_style"),
+    ("女儿说先问我。", communication_review(kind="fact", owner_requested=False), "preference_not_communication_style"),
+    ("女儿对我说：先问我。", communication_review(kind="fact", owner_requested=False), "preference_not_communication_style"),
+    ("我希望你说我是内向的人，先问我。", communication_review(kind="person_inference"), "preference_full_user_context_unsafe"),
+    ("如果是她说先问我，你就别信。", communication_review(kind="unclear", owner_requested=False), "preference_not_communication_style"),
+])
+def test_quote_cropping_cannot_remove_negation_reported_speech_or_trait(full, review, reason):
     ctx = _context()
     ctx.turns[0].user = full
-    row = {"do": "先问我", "quotes": [{"turn_index": 0, "text": "先问我"}]}
+    row = {"do": "先问我", "quotes": [{"turn_index": 0, "text": "先问我"}],
+           "semantic_review": review}
     rows, rejected = extract_preference_rows([row], ctx, PersonaProfile(user_id="test"))
-    assert rows == [] and rejected == ["preference_full_user_context_unsafe"]
+    assert rows == [] and rejected == [reason]
 
 
 @pytest.mark.parametrize("question", [
@@ -181,7 +195,7 @@ def test_llm_proposes_and_reports_rejected_rows_without_trusting_status():
             assert "stated_preferences" in messages[0]["content"]
             return json.dumps({"episodes": [], "relationships": [], "cognitive_privacy": [], "stated_preferences": [
                 {**_row(), "confirmation": None, "status": "confirmed"},
-                {**_row(), "do": "帮我通知女儿"},
+                {**_row(), "do": "帮我通知女儿", "semantic_review": communication_review(kind="permission_boundary", no_permission_claim=False)},
             ]}, ensure_ascii=False)
     ctx = _context()
     result = LLMExtractor(LocalResponse()).extract(ctx, PersonaProfile(user_id="test"))

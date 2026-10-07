@@ -599,7 +599,9 @@
       if(!items.length)placeholder(container,'还没有相处说明。会后可从本人原话提议，经确认后才使用。');
       items.forEach(item=>{
         const card=evidenceCard(item,'preference');
-        const actions=item.status==='proposed'?[['confirm','按这句话记下'],['decline','不记']]:item.status==='confirmed'?[['withdraw','撤回']]:[];
+        if(item.admission==='needs_review')card.append(text('p','旧说明及已有操作记录已保留，目前不会使用。请在新会话重新表达，并明确启动会后整理；再次点确认不能代替审核。','subtle'));
+        if(item.admission==='local_rule_preview')card.append(text('p','本地规则示意，仅用于未启用模型的预览，不进入真实模型请求。','subtle'));
+        const actions=item.status==='proposed'?(item.can_confirm?[['confirm','按这句话记下'],['decline','不记']]:[['decline','不记']]):item.status==='confirmed'?[['withdraw','撤回']]:[];
         if(actions.length){const row=document.createElement('div');row.className='row';actions.forEach(([action,title])=>{const button=text('button',title);button.type='button';button.dataset.preferenceAction=action;button.addEventListener('click',()=>{if(replayMode || viewingHistory())return;mutate('preference',{action,id:item.id});});row.append(button);});card.append(row);}
         const history=array(item.history);if(history.length){const details=document.createElement('details');details.className='inline-detail';details.append(text('summary','查看形成与本人操作记录'));history.forEach(entry=>details.append(text('p',`${displayTime(entry.at)} · ${label(entry.from || entry.from_status) || '新提议'} → ${label(entry.to)} · ${entry.source==='rule'?'本地规则提议':label(entry.source)}`)));card.append(details);}
         container.append(card);

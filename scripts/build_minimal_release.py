@@ -17,7 +17,8 @@ import tempfile
 import zipfile
 
 
-POLICY_VERSION = "aria-minimal-source-13"
+POLICY_VERSION = "aria-minimal-source-14"
+V13_POLICY_VERSION = "aria-minimal-source-13"
 V12_POLICY_VERSION = "aria-minimal-source-12"
 V11_POLICY_VERSION = "aria-minimal-source-11"
 V10_POLICY_VERSION = "aria-minimal-source-10"
@@ -29,7 +30,7 @@ V5_POLICY_VERSION = "aria-minimal-source-5"
 V4_POLICY_VERSION = "aria-minimal-source-4"
 PREVIOUS_POLICY_VERSION = "aria-minimal-source-3"
 LEGACY_POLICY_VERSION = "aria-minimal-source-2"
-SUPPORTED_POLICIES = frozenset({POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V10_POLICY_VERSION, V9_POLICY_VERSION, V8_POLICY_VERSION, V7_POLICY_VERSION, V6_POLICY_VERSION, V5_POLICY_VERSION, V4_POLICY_VERSION, PREVIOUS_POLICY_VERSION, LEGACY_POLICY_VERSION})
+SUPPORTED_POLICIES = frozenset({POLICY_VERSION, V13_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V10_POLICY_VERSION, V9_POLICY_VERSION, V8_POLICY_VERSION, V7_POLICY_VERSION, V6_POLICY_VERSION, V5_POLICY_VERSION, V4_POLICY_VERSION, PREVIOUS_POLICY_VERSION, LEGACY_POLICY_VERSION})
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_BYTES = 64 * 1024 * 1024
 LEGACY_MEDIA_FILES = frozenset({"docs/media/minimal-stage.png", "docs/media/minimal-local-preview.mp4"})
@@ -122,6 +123,11 @@ V13_POLICY_FILES = frozenset({
     "scripts/run_e1c_v2.py", "docs/E1C_V2_EXECUTION.md",
     "docs/DESIGN_AUDIT.md", "docs/DESIGN_REPAIR_2026_10_06.md",
 })
+V14_POLICY_FILES = frozenset({
+    "docs/E1CV2_RESULTS_2026_10_07.md", "docs/E1C_REPAIR_2026_10_07.md",
+    "docs/VALIDATION_PREPARATION_2026_10_07.md", "docs/THREE_SESSION_ACCEPTANCE_2026_10_07.md",
+    "docs/VALIDATION_RESULTS_2026_10_07.md",
+})
 FIXED_FILES = frozenset({
     "README.md", "README.zh.md", "LICENSE", "THIRD_PARTY_NOTICES.md", ".env.example",
     "SECURITY.md", "CONTRIBUTING.md", "pyproject.toml", "MANIFEST.in", "AGENTS.md",
@@ -141,7 +147,7 @@ FIXED_FILES = frozenset({
     "aria/scenes/companion_elder/elder_kb.yaml",
     "aria/assets/voice/minimal.html", "aria/assets/voice/care.html",
     "aria/assets/voice/README.md", "tests/fixtures/followthrough_synthetic.json",
-}) | NEW_POLICY_FILES | V4_POLICY_FILES | V5_POLICY_FILES | V6_POLICY_FILES | V7_POLICY_FILES | V8_POLICY_FILES | V9_POLICY_FILES | V10_POLICY_FILES | V11_POLICY_FILES | V12_POLICY_FILES | V13_POLICY_FILES
+}) | NEW_POLICY_FILES | V4_POLICY_FILES | V5_POLICY_FILES | V6_POLICY_FILES | V7_POLICY_FILES | V8_POLICY_FILES | V9_POLICY_FILES | V10_POLICY_FILES | V11_POLICY_FILES | V12_POLICY_FILES | V13_POLICY_FILES | V14_POLICY_FILES
 REQUIRED_FILES = frozenset({
     "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "pyproject.toml",
     "aria/cli.py", "aria/runtime.py", "aria/voice/minimal.py",
@@ -300,7 +306,7 @@ V12_SCOPE_TEXT = V11_SCOPE_TEXT.replace(
 )
 
 
-SCOPE_TEXT = V12_SCOPE_TEXT.replace(
+V13_SCOPE_TEXT = V12_SCOPE_TEXT.replace(
     "No preview PNG/MP4 or other media is included by policy version 12. ",
     "No preview PNG/MP4 or other media is included by policy version 13. "
     "Version 13 adds five explicitly named E1c-v2 execution, guarded-call, "
@@ -309,6 +315,18 @@ SCOPE_TEXT = V12_SCOPE_TEXT.replace(
     "responses, approvals and spending ledgers remain excluded. Tool inclusion "
     "does not authorize spending or establish model effects. Prior version 12 "
     "archives retain their original scope. ",
+)
+
+
+SCOPE_TEXT = V13_SCOPE_TEXT.replace(
+    "No preview PNG/MP4 or other media is included by policy version 13. ",
+    "No preview PNG/MP4 or other media is included by policy version 14. "
+    "Version 14 adds only the explicitly named E1c-v2 aggregate result, "
+    "local repair report, independent validation preparation, three-session "
+    "acceptance plan and subsequent aggregate validation result when present. "
+    "Private questions, model replies, first labels, approvals and ledgers "
+    "remain excluded. Inclusion is neither effectiveness acceptance nor "
+    "public release approval. Prior version 13 archives retain their original scope. ",
 )
 
 
@@ -328,25 +346,27 @@ def _allowed(relative: str, policy: str = POLICY_VERSION) -> bool:
             or relative != value.as_posix() or ":" in relative
             or any(part in SKIP_DIRS for part in value.parts)):
         return False
-    if relative in V4_POLICY_FILES and policy not in {V4_POLICY_VERSION, V5_POLICY_VERSION, V6_POLICY_VERSION, V7_POLICY_VERSION, V8_POLICY_VERSION, V9_POLICY_VERSION, V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, POLICY_VERSION}:
+    if relative in V4_POLICY_FILES and policy not in {V4_POLICY_VERSION, V5_POLICY_VERSION, V6_POLICY_VERSION, V7_POLICY_VERSION, V8_POLICY_VERSION, V9_POLICY_VERSION, V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, V13_POLICY_VERSION, POLICY_VERSION}:
         return False
-    if relative in V5_POLICY_FILES and policy not in {V5_POLICY_VERSION, V6_POLICY_VERSION, V7_POLICY_VERSION, V8_POLICY_VERSION, V9_POLICY_VERSION, V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, POLICY_VERSION}:
+    if relative in V5_POLICY_FILES and policy not in {V5_POLICY_VERSION, V6_POLICY_VERSION, V7_POLICY_VERSION, V8_POLICY_VERSION, V9_POLICY_VERSION, V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, V13_POLICY_VERSION, POLICY_VERSION}:
         return False
-    if relative in V6_POLICY_FILES and policy not in {V6_POLICY_VERSION, V7_POLICY_VERSION, V8_POLICY_VERSION, V9_POLICY_VERSION, V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, POLICY_VERSION}:
+    if relative in V6_POLICY_FILES and policy not in {V6_POLICY_VERSION, V7_POLICY_VERSION, V8_POLICY_VERSION, V9_POLICY_VERSION, V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, V13_POLICY_VERSION, POLICY_VERSION}:
         return False
-    if relative in V7_POLICY_FILES and policy not in {V7_POLICY_VERSION, V8_POLICY_VERSION, V9_POLICY_VERSION, V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, POLICY_VERSION}:
+    if relative in V7_POLICY_FILES and policy not in {V7_POLICY_VERSION, V8_POLICY_VERSION, V9_POLICY_VERSION, V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, V13_POLICY_VERSION, POLICY_VERSION}:
         return False
-    if relative in V8_POLICY_FILES and policy not in {V8_POLICY_VERSION, V9_POLICY_VERSION, V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, POLICY_VERSION}:
+    if relative in V8_POLICY_FILES and policy not in {V8_POLICY_VERSION, V9_POLICY_VERSION, V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, V13_POLICY_VERSION, POLICY_VERSION}:
         return False
-    if relative in V9_POLICY_FILES and policy not in {V9_POLICY_VERSION, V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, POLICY_VERSION}:
+    if relative in V9_POLICY_FILES and policy not in {V9_POLICY_VERSION, V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, V13_POLICY_VERSION, POLICY_VERSION}:
         return False
-    if relative in V10_POLICY_FILES and policy not in {V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, POLICY_VERSION}:
+    if relative in V10_POLICY_FILES and policy not in {V10_POLICY_VERSION, V12_POLICY_VERSION, V11_POLICY_VERSION, V12_POLICY_VERSION, V13_POLICY_VERSION, POLICY_VERSION}:
         return False
-    if relative in V11_POLICY_FILES and policy not in {V11_POLICY_VERSION, V12_POLICY_VERSION, POLICY_VERSION}:
+    if relative in V11_POLICY_FILES and policy not in {V11_POLICY_VERSION, V12_POLICY_VERSION, V13_POLICY_VERSION, POLICY_VERSION}:
         return False
-    if relative in V12_POLICY_FILES and policy not in {V12_POLICY_VERSION, POLICY_VERSION}:
+    if relative in V12_POLICY_FILES and policy not in {V12_POLICY_VERSION, V13_POLICY_VERSION, POLICY_VERSION}:
         return False
-    if relative in V13_POLICY_FILES and policy != POLICY_VERSION:
+    if relative in V13_POLICY_FILES and policy not in {V13_POLICY_VERSION, POLICY_VERSION}:
+        return False
+    if relative in V14_POLICY_FILES and policy != POLICY_VERSION:
         return False
     if relative in FIXED_FILES and not (policy == LEGACY_POLICY_VERSION and relative in NEW_POLICY_FILES):
         return True
@@ -592,6 +612,7 @@ def verify_release(value: str | Path) -> dict:
                  V10_POLICY_VERSION: V10_SCOPE_TEXT,
                  V11_POLICY_VERSION: V11_SCOPE_TEXT,
                  V12_POLICY_VERSION: V12_SCOPE_TEXT,
+                 V13_POLICY_VERSION: V13_SCOPE_TEXT,
                  POLICY_VERSION: SCOPE_TEXT}[policy]
         if archive.read("RELEASE_SCOPE.md") != scope.encode("utf-8"):
             raise ReleaseError("archive_scope_changed")

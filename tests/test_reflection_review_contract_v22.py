@@ -72,11 +72,11 @@ def source_context():
 
 
 def test_prompt_declares_new_scope_and_event_context_without_upgrading_schema():
-    assert EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION == "2.3"
+    assert EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION == "2.4"
     assert EVIDENCE_REVIEW_PROTOCOL_VERSION == "2.0"
     prompt = reflection_system_prompt(True)
     for statement in (
-        "prompt contract 2.3", "atomic_claim.conditions", "本身不是 unknown",
+        "prompt contract 2.4", "atomic_claim.conditions", "本身不是 unknown",
         "低置信候选", "不能为形成标签强改 within_scope",
         "附属 context_only review 也遵守相同事件合同",
         "没有已知 event_id 时不得填 same_event", "审查完成也不代表人物已经学会",
@@ -143,7 +143,7 @@ def test_exact_single_json_wrapper_is_audited_but_content_is_unchanged(eol):
     updater, persona, llm = replay(wrapped, ctx)
     assert updater.last_status == "ok" and len(persona.person_hypotheses) == 1
     assert updater.last_response_transport == {
-        "prompt_contract_version": "2.3", "format": "single_json_fence",
+        "prompt_contract_version": "2.4", "format": "single_json_fence",
         "wrapper_removed": True, "json_status": "parsed", "content_repaired": False,
     }
     assert llm.raw == wrapped

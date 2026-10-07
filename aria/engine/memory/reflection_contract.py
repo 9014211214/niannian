@@ -1,4 +1,4 @@
-"""Machine-readable output shape for offline reflection prompt contract 2.3.
+"""Machine-readable output shape for offline reflection prompt contract 2.4.
 
 This schema constrains syntax, enums, counts and preference/outcome shape. It
 cannot establish quote ownership, scope entailment, old identity or event
@@ -135,6 +135,8 @@ def reflection_response_schema() -> dict:
     change["properties"]["dimension"]["enum"] = sorted(set().union(*_FRAMEWORK_DIMENSIONS.values()))
     change["properties"]["scope_tags"]["items"]["enum"] = sorted(_SCOPE_TAGS)
     change["properties"]["scope_tags"]["uniqueItems"] = True
+    # This identifies the frozen schema shape, separately from prompt contract 2.4.
+    # Keep archived strict-wire bytes stable while the body prompt evolves.
     schema["title"] = "AriaOfflineEvidenceReview2_3"
     return schema
 

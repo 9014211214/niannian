@@ -17,7 +17,7 @@ from ...interfaces.scene import Scene
 from ..context import EngineContext
 from ..cognitive import online_cognitive_block
 from ..model.persona import PersonaProfile
-from ..memory.stated_preferences import confirmed_preference_payloads
+from ..memory.stated_preferences import PREFERENCE_PROTOCOL_VERSION, confirmed_preference_payloads
 from ..perception.external_emotion import external_emotion_payload
 from .reply_contract import contract_prompt, reply_quality_contract
 from .strategy import select_strategies
@@ -913,7 +913,9 @@ def build_messages(
     # epistemic and capability boundaries also apply to ordinary short replies.
     blocks.append(contract_prompt(reply_quality_contract(ctx, utterance=utterance)))
 
-    preferences = confirmed_preference_payloads(persona)
+    preferences = confirmed_preference_payloads(
+        persona, allow_rule_preview=ctx.working_memory.get("_local_preference_preview") is True,
+    )
     if preferences:
         blocks.append(
             "本人当下新的明确说法优先于这些记录。\n"
@@ -932,7 +934,7 @@ def build_messages(
         "schema_version": "prompt_evidence_v1",
         "status": "prepared",
         "passed_to_client": False,
-        "stated_preference_protocol_version": "1.0",
+        "stated_preference_protocol_version": PREFERENCE_PROTOCOL_VERSION,
         "recalled_episodes": _clean_untrusted(recalled),
         "recalled_provenance_not_injected": [
             {"content": text, "sources": [

@@ -1,7 +1,6 @@
 """EM-1 software fixtures only: no external services or emotion-effect claims."""
 from copy import deepcopy
 from dataclasses import asdict
-import hashlib
 import json
 from pathlib import Path
 
@@ -203,17 +202,34 @@ def test_experiment_does_not_relax_old_acoustic_simulation(tmp_path):
         engine(store=store, simulation_mode=True)
 
 
-def test_missing_external_input_preserves_frozen_prompt_bytes(monkeypatch):
-    # Digests were captured from the unmodified pre-EM-1 builder, not generated
-    # from this implementation. Includes neutral, unknown and a nonneutral case.
+def test_missing_external_input_has_no_same_version_prompt_delta(monkeypatch):
+    # The pre-EM-1 SHA fixture stays unchanged as historical evidence. Reply
+    # contract changes mean it is not a golden for the current complete prompt.
+    # Compare missing/default and explicit None using the same current builder.
+    import aria.engine.policy.prompt as prompt_module
+
+    def unexpected_external_payload(_reading):
+        raise AssertionError("Missing input must not serialize an external reading")
+
     monkeypatch.delenv("ARIA_DELIVERY_BLOCK", raising=False)
+    monkeypatch.setattr(prompt_module, "external_emotion_payload", unexpected_external_payload)
     fixture = json.loads((Path(__file__).parent / "fixtures" / "external_emotion_no_input_prompts.json").read_text(encoding="utf-8"))
+    encoded_by_label = {}
     for row in fixture:
-        ctx = context()
-        ctx.emotion = EmotionState(label=row["label"])
-        messages = build_messages(get_scene(ctx.scene_id), None, ctx, "窗边有一架纸风车。")
-        encoded = json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode()
-        assert hashlib.sha256(encoded).hexdigest() == row["sha256"]
+        missing = context()
+        missing.emotion = EmotionState(label=row["label"])
+        explicit_none = deepcopy(missing)
+        explicit_none.emotion.external_reading = parse_external_emotion(None)
+        encoded = []
+        for ctx in (missing, explicit_none):
+            messages = build_messages(get_scene(ctx.scene_id), None, ctx, "窗边有一架纸风车。")
+            encoded.append(json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode())
+            assert "外部情绪读数的使用边界" not in messages[0]["content"]
+            assert "external_emotion_hint" not in ctx.working_memory["prompt_evidence_snapshot"]
+        assert encoded[0] == encoded[1]
+        encoded_by_label[row["label"]] = encoded[0]
+    assert encoded_by_label["neutral"] == encoded_by_label["unknown"]
+    assert encoded_by_label["happy"] != encoded_by_label["neutral"]
 
 
 def test_web_round_trip_and_replay_preserve_reading_without_duplicate_model_call(tmp_path):

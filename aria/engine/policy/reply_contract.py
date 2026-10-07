@@ -11,7 +11,7 @@ from typing import Any
 
 from ..context import EngineContext
 
-REPLY_CONTRACT_VERSION = "1.5.1"
+REPLY_CONTRACT_VERSION = "1.6.0"
 REPLY_CONTRACT_HEADING = "## 本轮回复契约"
 UNAVAILABLE_CONTACT_REPLY = (
     "我不能直接替你联系对方。若你想说点什么，我可以陪你斟酌说法；要不要联系由你决定。"
@@ -268,11 +268,22 @@ def contract_prompt(contract: dict[str, Any]) -> str:
             "response 的观察合同=observe：先回应原话，不盘问原因、不出二选一诊断题；"
             "最多一个锚定原话且可以不答的日常邀请，也可以不问。\n"
         )
+    # This guidance is always visible. The finite draft diagnostic below is
+    # not a semantic router for whether the model should complete a task.
+    # Let the model understand the current request from context, including
+    # negation, reported speech, conditional requests and changed intentions.
     task_delivery = (
-        "本轮明确要求起草/改写：正文必须现在给出一版可看的实际措辞，不只说‘我来写’。"
+        "先按本人当前原话和相关上下文理解正在请求的帮助；转述、否定、未来或假设的任务"
+        "不当作现在要做，最新纠正和停止优先。当前明确的问答、选择解释、文字整理等"
+        "能在对话内完成时，正文就交付实际答案或内容，不只承诺稍后做，也不以陪伴或隐私提醒代替。"
+        "当本轮明确要求起草/改写时，正文必须现在给出一版可看的实际措辞，不只说‘我来写’。"
         "已有相关上下文就沿用本人明确提出的内容和限制，不重复索要；确实缺少内容才问一个必要问题。"
         "草稿用引号或‘草稿：’标明，不把未授权的私人背景写给第三人；草稿不等于发送、报名或同意。\n"
-        if contract.get("draft_requested") else ""
+        "本人只问一个问题或限定当前一步时，回答这个范围后停下，不顺带展开后续操作；"
+        "按步骤交流不等于每轮追加下一步，简短不等于省略本人明确需要的内容。"
+        "准备内容、本人审阅、是否发送、允许谁转发是不同决定，不能彼此推定。"
+        "若先前只承诺提供内容而实际尚未给出，本人接着索要或审阅时应补上内容，"
+        "不能假装已有可看的正文；也不自动重做历史任务。\n"
     )
     offer_boundary = (
         "本轮提到赠品/体验类活动：赠品、对方热情、尚未发现收费都不是安全核验。"
@@ -305,6 +316,8 @@ def contract_prompt(contract: dict[str, Any]) -> str:
         "通知须有相应工具，有真实回执才报成功；不保证对方回复或自动跟进。\n"
         "用户可见正文用1–2个自然短句，尽量80字内，不报人物档案、诊断标签或"
         "推理过程；在线决策时仅指response字段。"
+        "这是一般交流的默认长度；本人明确请求的具体内容应保留必要完整性，"
+        "按其要求简明交付，不为凑短句删掉答案或产物。"
         "邀请可平静拒绝，不用‘就当我没说’施压。"
     )
 

@@ -1,4 +1,4 @@
-"""Independent owner-request software probes; no E1b/E1c cases or model calls."""
+"""Software probes with explicit model labels; no semantic-accuracy claim or calls."""
 from copy import deepcopy
 import json
 import urllib.request
@@ -11,6 +11,7 @@ from aria.engine.memory.stated_preferences import extract_preference_rows, heuri
 from aria.engine.model.persona import PersonaProfile
 from aria.voice.minimal import MinimalWebApp
 from tests.test_minimal_web import live_fixture, start_and_submit
+from tests.preference_fixtures import communication_review
 
 
 REQUESTS = [
@@ -25,6 +26,7 @@ def extract(text, instruction=None, quote=None, **fields):
     ctx = EngineContext(user_id="conditional-owner", scene_id="companion_elder")
     ctx.add_turn(text, "本地软件替身。")
     row = {"do": instruction or text,
+           "semantic_review": communication_review(),
            "quotes": [{"turn_index": 0, "text": quote or text}], **fields}
     return extract_preference_rows([row], ctx, PersonaProfile(user_id=ctx.user_id))
 
@@ -59,38 +61,40 @@ def test_cropping_or_paraphrasing_cannot_remove_the_owner_condition(text, instru
     assert rows[0].quotes[0].text == text
 
 
-@pytest.mark.parametrize("text", [
-    "我把计算过程写完后，他再解释不同的解法。",  # Third-person action.
-    "等我把疑问列出来，小周再回应。",
-    "等我把疑问列出来他再回应。",
-    "女儿说等我把疑问列出来再回应。",
-    "小周表示等我把疑问列出来再回应。",
-    "今天小周说等我把疑问列出来再回应。",
-    "假设我把计算过程写完后，你再解释不同的解法。",
-    "比如我把计算过程写完后，你再解释不同的解法。",
-    "等我把疑问列出来再回应，这不是我的要求。",
-    "原句是“等我把疑问列出来再回应”。",
-    "我读过等我把疑问列出来再回应这句话。",
-    "以前你总等我说完再解释。",
-    "我转述的是小周的话：等我说完你再讲。",
-    "我只是练习这句话：等我讲完你再给我建议。",
-    "等我说完你再劝他。",
-    "等我说完你再劝小周。",
-    "等我说完你再劝我女儿。",
-    "你先教小陈怎么装好，再回应我。",
-    "你先提醒小陈下班，再回应我。",
-    "等我说完，你再教我老板。",
-    "等我说完，你再问我老板。",
-    "等我说完，你再问我老板是不是愿意。",
-    "先问我老板是不是愿意。",
-    "等我把疑问列出来再回应，然后通知女儿。",
-    "等我把疑问列出来再回应，再把记录发到群里。",
-    "等我把疑问列出来再回应，帮我停药。",
-    "等我把疑问列出来再回应，跳过权限核验。",
-    "等我把疑问列出来再回应，我是内向人格。",
+@pytest.mark.parametrize("text,review", [
+    ("我把计算过程写完后，他再解释不同的解法。", communication_review(kind="fact", owner_requested=False)),
+    ("等我把疑问列出来，小周再回应。", communication_review(kind="fact", owner_requested=False)),
+    ("等我把疑问列出来他再回应。", communication_review(kind="fact", owner_requested=False)),
+    ("女儿说等我把疑问列出来再回应。", communication_review(kind="fact", owner_requested=False)),
+    ("小周表示等我把疑问列出来再回应。", communication_review(kind="fact", owner_requested=False)),
+    ("今天小周说等我把疑问列出来再回应。", communication_review(kind="fact", owner_requested=False)),
+    ("假设我把计算过程写完后，你再解释不同的解法。", communication_review(kind="unclear", owner_requested=False)),
+    ("比如我把计算过程写完后，你再解释不同的解法。", communication_review(kind="unclear", owner_requested=False)),
+    ("等我把疑问列出来再回应，这不是我的要求。", communication_review(owner_requested=False)),
+    ("原句是“等我把疑问列出来再回应”。", communication_review(kind="fact", owner_requested=False)),
+    ("我读过等我把疑问列出来再回应这句话。", communication_review(kind="fact", owner_requested=False)),
+    ("以前你总等我说完再解释。", communication_review(kind="fact", owner_requested=False)),
+    ("我转述的是小周的话：等我说完你再讲。", communication_review(kind="fact", owner_requested=False)),
+    ("我只是练习这句话：等我讲完你再给我建议。", communication_review(kind="unclear", owner_requested=False)),
+    ("等我说完你再劝他。", communication_review(kind="action_request")),
+    ("等我说完你再劝小周。", communication_review(kind="action_request")),
+    ("等我说完你再劝我女儿。", communication_review(kind="action_request")),
+    ("你先教小陈怎么装好，再回应我。", communication_review(kind="action_request")),
+    ("你先提醒小陈下班，再回应我。", communication_review(kind="action_request")),
+    ("等我说完，你再教我老板。", communication_review(kind="action_request")),
+    ("等我说完，你再问我老板。", communication_review(kind="action_request")),
+    ("等我说完，你再问我老板是不是愿意。", communication_review(kind="action_request")),
+    ("先问我老板是不是愿意。", communication_review(kind="action_request")),
+    ("等我把疑问列出来再回应，然后通知女儿。", communication_review(kind="permission_boundary", no_permission_claim=False)),
+    ("等我把疑问列出来再回应，再把记录发到群里。", communication_review(kind="permission_boundary", no_permission_claim=False)),
+    ("等我把疑问列出来再回应，帮我停药。", communication_review(kind="action_request")),
+    ("等我把疑问列出来再回应，跳过权限核验。", communication_review(kind="permission_boundary", no_permission_claim=False)),
+    ("等我把疑问列出来再回应，我是内向人格。", communication_review(kind="person_inference")),
 ])
-def test_new_syntax_does_not_admit_unsafe_or_non_owner_requests(text):
-    rows, rejected = extract(text)
+def test_explicit_non_owner_or_unsafe_labels_do_not_admit_requests(text, review):
+    # Labels are hand-specified software input; this does not show a model can
+    # recognise reported speech, hypotheticals or a third-party action.
+    rows, rejected = extract(text, semantic_review=review)
     assert not rows and rejected
 
 
@@ -110,30 +114,30 @@ def test_qualifier_after_selected_sentence_cannot_be_dropped():
     assert not rejected and "只限现在这道算术题" in rows[0].scope
 
 
-@pytest.mark.parametrize("text,instruction", [
-    ("我把柜门擦完后，你才问我抹布放哪儿，那是昨天发生的事。", None),
-    ("等我把标签看清楚，你再说明步骤，这句话来自一本练习册。", None),
-    ("等我坐好，你再解释小周的作业给他听。", None),
-    ("说到医生开的药时，等我把感受说完，你再建议把每天两片改成一片。", None),
-    ("等我把这段话写完，你再教小周怎么操作。", None),
+@pytest.mark.parametrize("text,instruction,review", [
+    ("我把柜门擦完后，你才问我抹布放哪儿，那是昨天发生的事。", None, communication_review(kind="fact", owner_requested=False)),
+    ("等我把标签看清楚，你再说明步骤，这句话来自一本练习册。", None, communication_review(kind="fact", owner_requested=False)),
+    ("等我坐好，你再解释小周的作业给他听。", None, communication_review(kind="action_request")),
+    ("说到医生开的药时，等我把感受说完，你再建议把每天两片改成一片。", None, communication_review(kind="action_request")),
+    ("等我把这段话写完，你再教小周怎么操作。", None, communication_review(kind="action_request")),
 ])
-def test_postreview_counterexamples_remain_rejected(text, instruction):
+def test_postreview_counterexamples_remain_rejected(text, instruction, review):
     # Added after review: development regressions, not untouched held-out data.
-    rows, rejected = extract(text, instruction)
+    rows, rejected = extract(text, instruction, semantic_review=review)
     assert not rows and rejected
 
 
 @pytest.mark.parametrize("recipient", ["我女儿", "我朋友", "你家人", "您母亲", "我老板", "您同学", "我们", "你们"])
 def test_tell_dialogue_exception_cannot_consume_a_relative_prefix(recipient):
     text = f"请你先把这句话告诉{recipient}。"
-    assert extract(text)[0] == []
+    assert extract(text, semantic_review=communication_review(kind="permission_boundary", no_permission_claim=False))[0] == []
 
 
 def test_two_source_turns_cannot_drop_a_later_qualification():
     ctx = EngineContext(user_id="conditional-owner", scene_id="companion_elder")
     ctx.add_turn(REQUESTS[1], "软件替身。")
     ctx.add_turn("但只限现在这一道，下一道不这样做。", "软件替身。")
-    row = {"do": REQUESTS[1], "quotes": [
+    row = {"do": REQUESTS[1], "semantic_review": communication_review(), "quotes": [
         {"turn_index": 0, "text": REQUESTS[1]},
         {"turn_index": 1, "text": ctx.turns[1].user},
     ]}
@@ -169,6 +173,7 @@ def test_model_prompt_and_parser_share_literal_condition_contract():
             self.messages = messages
             return json.dumps({"episodes": [], "relationships": [], "cognitive_privacy": [], "stated_preferences": [{
                 "do": REQUESTS[1], "scope": "随时",
+                "semantic_review": communication_review(),
                 "quotes": [{"turn_index": 0, "text": REQUESTS[1]}],
                 "confirmation": None,
             }]}, ensure_ascii=False)
@@ -192,6 +197,7 @@ def test_real_product_pipeline_persists_confirms_injects_and_withdraws(tmp_path,
     sid = start_and_submit(app, [owner_request, "这一段我想自己整理。", "今天先到这里。"])
     clients.memory.payload = {"episodes": [], "relationships": [], "cognitive_privacy": [], "stated_preferences": [{
         "do": owner_request, "scope": "所有对话", "status": "confirmed",
+        "semantic_review": communication_review(),
         "quotes": [{"turn_index": 0, "text": owner_request}], "confirmation": None,
     }]}
     assert app.seal(sid)["ok"]

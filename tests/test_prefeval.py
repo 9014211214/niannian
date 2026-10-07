@@ -12,6 +12,7 @@ from aria.bench.prefeval_runner import (
     GENERAL_SYSTEM, PrefEvalClients, PrefEvalFixtureClient, PrefEvalRunner, PrefEvalStopped, arm_messages,
 )
 import aria.bench.prefeval_runner as runner_module
+from tests.preference_fixtures import communication_review
 
 
 @pytest.fixture
@@ -169,8 +170,11 @@ def test_product_confirmation_is_used_for_a_valid_authored_communication_fixture
 
     def memory(messages):
         captured.append(messages)
+        # Hand-set software label for this authored fixture, not semantic
+        # classification or an accuracy measurement.
         return json.dumps({"episodes": [], "relationships": [], "cognitive_privacy": [], "stated_preferences": [{
-            "do": quote, "quotes": [{"turn_index": 0, "text": quote}], "confirmation": None}]}, ensure_ascii=False)
+            "do": quote, "quotes": [{"turn_index": 0, "text": quote}], "confirmation": None,
+            "semantic_review": communication_review()}]}, ensure_ascii=False)
 
     monkeypatch.setattr(clients.memory, "complete", memory)
     generated = PrefEvalRunner(suite, root=tmp_path / "valid-authored-fixture", clients=clients).run()

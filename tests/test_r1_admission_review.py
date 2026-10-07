@@ -1,4 +1,4 @@
-"""R1-A software checks, not model-effect or held-out evaluation examples."""
+"""R1 software checks with explicit model labels, not semantic-effect measurements."""
 from copy import deepcopy
 
 import pytest
@@ -11,15 +11,17 @@ from aria.engine.memory.stated_preferences import (
 from aria.engine.model.persona import PersonaProfile
 from aria.engine.policy.prompt import build_messages
 from aria.scenes.registry import get_scene
+from tests.preference_fixtures import communication_review
 
 
-def propose(text, instruction, *, scope="任何时候", quote=None, confirmation=None):
+def propose(text, instruction, *, scope="任何时候", quote=None, confirmation=None, semantic_review=None):
     ctx = EngineContext(user_id="synthetic-owner", scene_id="companion_elder", session_id="source")
     ctx.add_turn(text, instruction + "，这样记下好吗？")
     ctx.add_turn("对，就这么记。", "本地软件替身。")
     profile = PersonaProfile(user_id=ctx.user_id)
     rows, rejected = extract_preference_rows([{
         "do": instruction, "scope": scope, "status": "confirmed",
+        "semantic_review": communication_review() if semantic_review is None else semantic_review,
         "quotes": [{"turn_index": 0, "text": quote or text}],
         "confirmation": confirmation,
     }], ctx, profile)
@@ -62,19 +64,24 @@ def test_even_literal_valid_conversation_confirmation_cannot_auto_activate():
     assert confirmed_preference_payloads(profile)[0]["do"] == instruction
 
 
-@pytest.mark.parametrize("source,instruction", [
-    ("等我做好记录，你再开门。", "等我做好记录，你再开门。"),
-    ("我不希望等我把疑问列出来再回应。", "我不希望等我把疑问列出来再回应。"),
-    ("别等我把疑问列出来再回应。", "别等我把疑问列出来再回应。"),
-    ("等我把疑问列出来再回应，你会这样做吗？", "等我把疑问列出来再回应，你会这样做吗？"),
-    ("不是等我把疑问列出来再回应。", "不是等我把疑问列出来再回应。"),
-    ("我希望先自己找开关，只有我说需要时，你才告诉我下一步。", "告诉我下一步"),
-    ("让我自己先看一遍安装图，卡住以后再告诉我下一步。", "告诉我下一步"),
+@pytest.mark.parametrize("source,instruction,kind", [
+    ("等我做好记录，你再开门。", "等我做好记录，你再开门。", "action_request"),
+    ("我不希望等我把疑问列出来再回应。", "我不希望等我把疑问列出来再回应。", "communication_style"),
+    ("别等我把疑问列出来再回应。", "别等我把疑问列出来再回应。", "communication_style"),
+    ("等我把疑问列出来再回应，你会这样做吗？", "等我把疑问列出来再回应，你会这样做吗？", "communication_style"),
+    ("不是等我把疑问列出来再回应。", "不是等我把疑问列出来再回应。", "communication_style"),
+    ("我希望先自己找开关，只有我说需要时，你才告诉我下一步。", "告诉我下一步", "communication_style"),
+    ("让我自己先看一遍安装图，卡住以后再告诉我下一步。", "告诉我下一步", "communication_style"),
 ])
-def test_former_grammar_rejections_are_reviewable_without_authorizing_actions(source, instruction):
-    # These preserve former test inputs. With grammar admission removed,
-    # uncertainty about their meaning is visible to the owner as a proposal.
-    ctx, profile, rows, rejected = propose(source, instruction)
+def test_former_grammar_inputs_follow_explicit_semantic_kind_without_authorizing_actions(source, instruction, kind):
+    # Former inputs are preserved. These are prescribed software labels, not
+    # model classification results; action requests must not become preferences.
+    ctx, profile, rows, rejected = propose(source, instruction,
+        semantic_review=communication_review(kind=kind))
+    if kind != "communication_style":
+        assert rows == [] and rejected == ["preference_not_communication_style"]
+        assert profile.care_plan is None and profile.care_tasks == []
+        return
     assert not rejected and rows[0].status == "proposed"
     assert rows[0].scope == source.rstrip("。")
     merge_preferences(profile, rows)
@@ -83,16 +90,21 @@ def test_former_grammar_rejections_are_reviewable_without_authorizing_actions(so
     assert ctx.working_memory == {}
 
 
-@pytest.mark.parametrize("instruction", [
-    "你直接通知外甥", "下次把吃药剂量翻倍", "对高DISC按人格分类",
-    "每次先问我老板", "转发这次对话", "不用遵守医嘱",
+@pytest.mark.parametrize("instruction,review", [
+    ("你直接通知外甥", communication_review(kind="permission_boundary", no_permission_claim=False)),
+    ("下次把吃药剂量翻倍", communication_review(kind="action_request")),
+    ("对高DISC按人格分类", communication_review(kind="person_inference")),
+    ("每次先问我老板", communication_review(kind="action_request")),
+    ("转发这次对话", communication_review(kind="permission_boundary", no_permission_claim=False)),
+    ("不用遵守医嘱", communication_review(kind="action_request")),
 ])
-def test_grounding_and_dangerous_categories_still_reject(instruction):
-    _, _, rows, rejected = propose("画地图的时候，标记让我自己选。", instruction)
+def test_grounding_and_dangerous_categories_still_reject(instruction, review):
+    _, _, rows, rejected = propose("画地图的时候，标记让我自己选。", instruction, semantic_review=review)
     assert not rows and rejected
 
 
 def test_unrelated_benign_summary_remains_an_unconfirmed_semantic_error():
+    # Deliberately wrong model label: semantic self-report is not a truth oracle.
     _, profile, rows, rejected = propose("画地图的时候，标记让我自己选。", "家里灯泡需要更换")
     assert not rejected
     merge_preferences(profile, rows)

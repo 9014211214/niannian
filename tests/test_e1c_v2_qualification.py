@@ -13,10 +13,13 @@ from aria.engine.policy.online_decision import DETERMINISTIC_MODEL_FAILURE_REPLY
 from scripts.e1c_v2_scoring import accepted_proposal_ids
 from scripts.e1c_v2_qualification import bind_memory, bind_online, preflight_evidence
 from scripts import e1b_evaluation as common
+from tests.preference_fixtures import communication_review
 
 
 def candidate():
-    return {"do":"报名时先问本人意愿","scope":"报名", "quotes":[{"turn_index":0,"text":"先问问我"}]}
+    # A prescribed model-output label only verifies current parser plumbing.
+    return {"do":"报名时先问本人意愿","scope":"报名", "quotes":[{"turn_index":0,"text":"先问问我"}],
+            "semantic_review": communication_review()}
 
 
 @pytest.mark.parametrize("with_session",[False,True])

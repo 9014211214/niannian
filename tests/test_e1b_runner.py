@@ -17,6 +17,7 @@ from aria.engine.model.persona import (
 )
 from aria.engine.perception.external_emotion import SyntheticEmotionExperiment
 from aria.runtime import MinimalModelClients
+from tests.preference_fixtures import communication_review
 
 
 @pytest.fixture(autouse=True)
@@ -118,11 +119,15 @@ class ProposingClient(E1bLocalFixtureClient):
         rows = re.findall(r"\[turn (\d+)\] 用户:([^\n]+)", messages[-1]["content"])
         # This test fixture derives a proposal from the already shown utterance,
         # not from the YAML's desired answer. The product validates/activates it.
+        # This existing hard-coded match is only a software fake, not a product rule.
+        # semantic_review is a hand-set software label, not semantic classification
+        # or an accuracy measurement.
         for index, text in rows:
             if "先问问我愿不愿意" in text:
                 payload = json.loads(result)
                 payload["stated_preferences"] = [{
-                    "do": "先问问我愿不愿意", "quotes": [{"turn_index": int(index), "text": text}]}]
+                    "do": "先问问我愿不愿意", "quotes": [{"turn_index": int(index), "text": text}],
+                    "semantic_review": communication_review()}]
                 return json.dumps(payload, ensure_ascii=False)
         return result
 

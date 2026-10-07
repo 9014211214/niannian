@@ -11,6 +11,7 @@ from aria.engine.model.persona import EpisodicMemoryEntry, PersonHypothesis, Per
 from tests.test_minimal_web import (
     live_fixture, local_server, request, snapshot_files, start_and_submit,
 )
+from tests.preference_fixtures import communication_review
 
 __all__ = ["local_server"]  # Reuse the HTTP fixture without a second server helper.
 
@@ -205,6 +206,7 @@ def test_grounded_model_preference_proposal_survives_offline_queue_commit(tmp_pa
     words = ["安排之前先问问我。", "我喜欢和大家一起做风车。", "具体什么时候我还想想。"]
     sid = start_and_submit(app, words)
     clients.memory.payload = {"episodes": [], "relationships": [], "cognitive_privacy": [], "stated_preferences": [{
+        "semantic_review": communication_review(),  # Software label, not a model-effect result.
         "do": "涉及本人的安排先询问意愿，再一起商量具体时间",
         "quotes": [{"session_id": sid, "turn_index": 0, "text": words[0]}],
     }]}

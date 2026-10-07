@@ -30,7 +30,9 @@ from ..model.persona import (
     StatedPreference,
 )
 from .persona_store import PersonaStore
-from .stated_preferences import extract_preference_rows, heuristic_preferences, merge_preferences
+from .stated_preferences import (
+    confirmed_preference_payloads, extract_preference_rows, heuristic_preferences, merge_preferences,
+)
 from ..cognitive import (
     cognitive_extraction_prompt, cognitive_sources, cognitive_sensitive,
     extract_cognitive_rows, consolidate_cognitive,
@@ -322,9 +324,9 @@ class LLMExtractor:
             return ConsolidationResult()
         if persona.stated_preferences:
             previous = [
-                {"id": row.id, "do": row.do, "scope": row.scope}
-                for row in persona.stated_preferences if row.status == "confirmed"
-            ][-4:]
+                {"id": row["id"], "do": row["do"], "scope": row["scope"]}
+                for row in confirmed_preference_payloads(persona)
+            ]
             if previous:
                 convo += (
                     "\n\n旧相处说明（只供supersedes引用，不是本次用户原话或新证据）：\n"
@@ -345,7 +347,10 @@ class LLMExtractor:
                 '{"do":"本人提出的相处方式，60字内；可忠实转述quotes，不新增条件、权限、人格或医疗结论",'
                 '"scope":"本人说明的适用场景","quotes":[{"turn_index":0,"text":"逐字用户原话"}],'
                 '"confirmation":null,'
-                '"supersedes":null}],"cognitive_privacy":[{"turn_index":0,"evidence_quote":"认知隐私的逐字本人原话"}]'
+                '"supersedes":null,"semantic_review":{"version":"preference_semantics_v1",'
+                '"kind":"communication_style|permission_boundary|action_request|fact|person_inference|unclear",'
+                '"owner_requested":false,"quote_supported":false,"scope_preserved":false,'
+                '"no_permission_claim":false}}],"cognitive_privacy":[{"turn_index":0,"evidence_quote":"认知隐私的逐字本人原话"}]'
                 + (
                     ',"cognitive_observations":[{"domain":"memory|language|orientation|daily_function|repetition",'
                     '"evidence_quote":"逐字本人原话","turn_index":0,"functional_impact":false,'
@@ -365,6 +370,17 @@ class LLMExtractor:
                 "此隐私排除不等于开启变化提醒，未开启时禁止输出认知观察或累计趋势。"
                 "不要输出 consent_to_share，系统永远不会因模型抽取自动授权分享。"
                 "相处说明只记录本人明确要求怎样交流，不是人格标签、因果推测或分享通知权限。"
+                "[preference_semantics_v1]每个候选必须按完整语境作semantic_review分类，布尔值只可为true/false。"
+                "communication_style只改变本人和助手之间怎样交流；permission_boundary是向谁披露什么、"
+                "允许或禁止代办、参加、代为承诺等权限边界，即使是限制性要求也不能记成相处方式。"
+                "action_request是本次具体任务，fact是事实，person_inference是人物推断，含糊则unclear。"
+                "owner_requested指本人当前确实提出该要求，不是他人引述、本人否认或撤回该要求、举例；"
+                "本人用否定句提出有效交流要求，与否认该要求不同；肯定或否定句式本身不决定类别，按实际意思判断。"
+                "quote_supported指do有逐字原话支持；scope_preserved指条件、对象、时限完整；"
+                "no_permission_claim指do与scope都不包含授予、限制或推断现实行动/披露权限的内容。"
+                "混合句中如无法独立保留完整的交流要求，不能改写成宽泛说明；不要把权限要求剥去对象伪装成交流方式。"
+                "只将communication_style且四项均为true的候选放入stated_preferences；其他类别不在此保存。"
+                "这一分类不创建护理授权，也不让隐私要求变成可主动引用的公开事实；仍遵守上述referenceable隐私约束。"
                 "do须保留原话里的条件、先后顺序和适用范围；条件式请求应忠实保留完整含义，"
                 "不能只截取条件之后的动作，不能从本人反对、第三人转述或假设举例中提取。"
                 "quotes保留该轮完整本人原话（最多240字）；不能为了满足60字上限丢掉限定，"
