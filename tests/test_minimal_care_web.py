@@ -1,5 +1,6 @@
 """HTTP authentication and assembly checks, with no paid/external services."""
 from __future__ import annotations
+from tests._model_http_stub import stub_model_http
 
 from datetime import datetime, timezone
 import http.client
@@ -18,7 +19,7 @@ import aria.voice.minimal as minimal
 
 @pytest.fixture
 def care_server(tmp_path, monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("external request"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("external request"))
     care = MinimalCareService(tmp_path / "care.sqlite3", clock=lambda: datetime(2026, 9, 20, tzinfo=timezone.utc))
     care.bootstrap("nurse", "fixture-only-long-password", ["fictional-chen"])
     care.bootstrap("other", "another-fixture-password", ["other-elder"])
@@ -172,6 +173,26 @@ def test_fixed_elder_care_actions_idempotent_and_reads_side_effect_free(care_ser
         assert call(app, server, "/api/minimal/state")[0] == 200
     assert {str(p): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
     assert app.state()["turns"] == []
+
+
+@pytest.mark.parametrize("action", ["occurrence.ack", "occurrence.decline", "occurrence.snooze", "occurrence.displayed"])
+def test_logged_caregiver_api_cannot_report_elder_response(care_server, action):
+    app, server = care_server
+    app.care_action("reminder.create", {"request_id": "response-boundary-reminder", "label": "拿纸和本子",
+        "schedule": "once", "date": "2026-09-21", "time": "15:30", "timezone": "Asia/Shanghai"})
+    app.care.tick(datetime(2026, 9, 21, 7, 30, tzinfo=timezone.utc))
+    before = app.care_state()
+    occurrence = before["occurrences"][0]
+    cookie = login(app, server)
+    status, _, body = call(app, server, "/api/care/action", cookie=cookie, data={
+        "elder_id": "fictional-chen", "action": action,
+        "payload": {"request_id": "caregiver-response", "occurrence_id": occurrence["id"], "minutes": 5, "generation": 0}})
+    assert status == 403 and body["ok"] is False
+    assert app.care_state() == before
+    assert call(app, server, "/api/minimal/care", data={"action": action,
+        "payload": {"request_id": "elder-response", "occurrence_id": occurrence["id"], "minutes": 5, "generation": 0}})[0] == 200
+    actor_field = "displayed_by" if action == "occurrence.displayed" else "responded_by"
+    assert app.care_state()["occurrences"][0][actor_field] == "elder:fictional-chen"
 
 
 def test_shutdown_drains_accepted_http_start_before_sealing(tmp_path, monkeypatch):

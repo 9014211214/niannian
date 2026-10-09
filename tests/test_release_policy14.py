@@ -9,7 +9,7 @@ from scripts import build_minimal_release as release
 
 
 def test_policy14_scope_is_exactly_public_aggregate_and_preparation_documents():
-    assert release.POLICY_VERSION == "aria-minimal-source-14"
+    assert release.V14_POLICY_VERSION == "aria-minimal-source-14"
     assert release.V14_POLICY_FILES == {
         "docs/E1CV2_RESULTS_2026_10_07.md", "docs/E1C_REPAIR_2026_10_07.md",
         "docs/VALIDATION_PREPARATION_2026_10_07.md", "docs/THREE_SESSION_ACCEPTANCE_2026_10_07.md",
@@ -17,7 +17,7 @@ def test_policy14_scope_is_exactly_public_aggregate_and_preparation_documents():
     }
     assert all(release._allowed(p) for p in release.V14_POLICY_FILES)
     assert all(not release._allowed(p, policy) for p in release.V14_POLICY_FILES
-               for policy in release.SUPPORTED_POLICIES - {release.POLICY_VERSION})
+               for policy in release.SUPPORTED_POLICIES - {release.V14_POLICY_VERSION, release.POLICY_VERSION})
     for name in ("artifacts/local/tasks/cases.json", "artifacts/local/first-labels.json",
                  "docs/private_answers.md", ".env", "data/persona.json", "docs/media/demo.mp4"):
         assert not release._allowed(name)

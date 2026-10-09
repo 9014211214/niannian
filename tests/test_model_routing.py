@@ -1,5 +1,6 @@
 """严格双轨：在线只调用快速模型，深度人物模型只在会后运行。"""
 from __future__ import annotations
+from tests.memory_source_fixtures import episode_source, relationship_evidence
 
 import pytest
 
@@ -893,6 +894,7 @@ def test_identity_guard_blocks_stronger_need_than_grounded_possibility():
             facts=["孙女在做机器人项目，老陈的机械经验可能帮得上忙"],
             referenceable=True,
             first_observed_at="2026-09-01T09:00:00",
+            evidence=relationship_evidence("孙女在做机器人项目，老陈的机械经验可能帮得上忙"),
         )],
     )
     fast = _ProtocolAwareFast(decision)
@@ -931,6 +933,7 @@ def test_grounded_event_still_cannot_override_current_request_to_stop():
             facts=[response_text],
             referenceable=True,
             first_observed_at="2026-09-01T09:00:00",
+            evidence=relationship_evidence(response_text),
         )],
     )
     fast = _ProtocolAwareFast(decision)
@@ -1038,6 +1041,7 @@ def test_returning_user_uses_person_model_with_one_fast_generation():
             summary="年轻时在厂里修机器，擅长排查电机故障",
             keywords=["修机器", "电机"],
             referenceable=True,
+            **episode_source("年轻时在厂里修机器，擅长排查电机故障"),
         )],
         person_hypotheses=[PersonHypothesis(
             id="general-low-pressure",

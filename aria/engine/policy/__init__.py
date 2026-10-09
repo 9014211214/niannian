@@ -129,13 +129,19 @@ class PolicyEngine:
         else:
             messages = _fast_delivery_messages(messages, ctx)
         deterministic_fallback = False
+        readiness_dispatch = None
+        readiness_outcome = "abandoned"
         try:
+            from ..cognitive import begin_cognitive_readiness_dispatch
+            readiness_dispatch = begin_cognitive_readiness_dispatch(persona, ctx, utterance)
             snapshot = ctx.working_memory.get("prompt_evidence_snapshot")
             if isinstance(snapshot, dict):
                 # This is the local client boundary, not a provider receipt.
                 snapshot["passed_to_client"] = True
             response = selected.complete(messages)
+            readiness_outcome = "client_returned"
         except Exception:
+            readiness_outcome = "client_error"
             response = DETERMINISTIC_MODEL_FAILURE_REPLY
             deterministic_fallback = True
             single_pass = False
@@ -143,6 +149,9 @@ class PolicyEngine:
                 "deterministic_fallback",
                 (*route.reasons, "fast_model_failed"),
             )
+        finally:
+            from ..cognitive import finish_cognitive_readiness_dispatch
+            finish_cognitive_readiness_dispatch(ctx, readiness_dispatch, readiness_outcome)
         if deterministic_fallback and (
             self.online_decision_version == ONLINE_DECISION_VERSION_SAFETY
             or (ctx.working_memory.get("model_route") or {})

@@ -1,4 +1,5 @@
 """C-test software fixtures; no real model or clinical effect conclusions."""
+from tests._model_http_stub import stub_model_http
 from datetime import datetime, timezone
 import json
 import urllib.request
@@ -11,7 +12,7 @@ from aria.bench.ctest_runner import CTestLocalMemoryFixture, CTestRunner, CTestR
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: (_ for _ in ()).throw(
+    stub_model_http(monkeypatch, lambda *_a, **_k: (_ for _ in ()).throw(
         AssertionError("C-test unit tests cannot use network")))
 
 

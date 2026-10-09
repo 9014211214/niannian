@@ -139,11 +139,13 @@ def test_functional_impact_uses_model_semantics_without_keyword_prerequisite():
     assert result[0].source_quote == ctx.turns[0].user
 
 
-def test_same_event_requires_known_identity_and_code_matching():
+def test_same_event_has_c1_identity_without_personality_ledger():
     p = enabled()
     ctx = context_with(p)
-    assert extract_cognitive_rows([{"domain": "repetition", "evidence_quote": ctx.turns[0].user,
-                                   "turn_index": 0, "event_kind": "same_event", "prior_event_id": "invented"}], p, ctx) == []
+    rows = extract_cognitive_rows([{"domain": "repetition", "evidence_quote": ctx.turns[0].user,
+                                   "turn_index": 0, "event_kind": "same_event", "prior_event_id": "invented"}], p, ctx)
+    assert len(rows) == 1 and not rows[0].counting
+    assert rows[0].event_id != "invented"
 
 
 def test_repetition_requires_three_known_same_events_within_seven_days():
@@ -356,12 +358,19 @@ def test_enabled_global_guard_and_emergency_priority():
     assert [source.text for source in cognitive_sources(p, ctx)] == ["今天挺好的。"]
 
 
-def test_natural_decline_and_disable_use_owner_current_words():
+def test_natural_decline_and_bound_semantic_disable_use_owner_current_words():
     p = calibrated(enabled()); ctx = EngineContext(user_id=p.user_id, scene_id="companion_elder")
     ctx.add_turn("你好", "要不要下次体检时和医生说一句？")
     capture_cognitive_turn(ctx, p, "不用了", now=T0+timedelta(days=20))
     assert p.cognitive_trend.declines == 1
-    capture_cognitive_turn(ctx, p, "这种事别提醒我", now=T0+timedelta(days=21))
+    text = "这种事别提醒我"
+    import hashlib
+    ctx.working_memory["online_turn_decision"] = {
+        "version": "online_turn_decision_v3", "status": "parsed", "turn_index": len(ctx.turns),
+        "owner_message_sha256": hashlib.sha256(text.encode()).hexdigest(),
+        "cognitive_control": {"version": "cognitive_permission_v1", "action": "disable_observation", "evidence_quote": text},
+    }
+    capture_cognitive_turn(ctx, p, text, now=T0+timedelta(days=21))
     assert not p.cognitive_health_consent.has_text_monitoring_consent()
 
 

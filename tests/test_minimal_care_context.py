@@ -7,7 +7,7 @@ import pytest
 
 from aria.engine.minimal_care_context import build_care_context
 from tests.test_minimal_care import (
-    ELDER, START, advance, care, command, queue_without_dispatch, reminder, setup_rule,
+    ELDER, START, advance_visible_page, care, command, queue_without_dispatch, reminder, setup_rule,
 )
 
 
@@ -56,8 +56,8 @@ def test_snapshot_does_not_tick_deliver_or_change_database(care, tmp_path, monke
 def test_private_contact_auth_message_and_followup_never_project(care):
     service, token, clock = care
     setup_rule(service)
-    advance(service, clock, 30)
-    advance(service, clock, 60)
+    advance_visible_page(service, clock, 30)
+    advance_visible_page(service, clock, 60)
     view = service.elder_view(ELDER)
     task = view["tasks"][0]
     delivery = view["deliveries"][0]
@@ -114,9 +114,9 @@ def test_bounds_and_daily_history_omissions_are_explicit(care):
     for index in range(4):
         reminder(service, request_id=f"rem-{index}", label=f"earlier-{index}")
     rule, _contact, _consent = setup_rule(service, schedule="daily")
-    advance(service, clock, 30)
-    advance(service, clock, 60)
-    advance(service, clock, 24 * 60 + 30)
+    advance_visible_page(service, clock, 30)
+    advance_visible_page(service, clock, 60)
+    advance_visible_page(service, clock, 24 * 60 + 30)
     result = build_care_context(service, ELDER)
     assert result["counts"]["reminders"] == {"total": 5, "included": 3, "omitted": 2}
     latest = result["reminders"][0]
@@ -134,8 +134,8 @@ def test_related_consent_and_delivery_limits_keep_omission_counts(care):
         command(service, "consent.grant", f"grant-{index}", contact_id=contact["id"], reminder_id=rule["id"],
                 trigger="unconfirmed", scope="reminder_status", source="simulation", confirmed=True,
                 expires_at="2026-12-01T00:00:00+00:00")
-    advance(service, clock, 30)
-    advance(service, clock, 60)
+    advance_visible_page(service, clock, 30)
+    advance_visible_page(service, clock, 60)
     row = item(service)
     for kind in ("consents", "deliveries"):
         assert row["counts"][kind] == {"total": 3, "included": 2, "omitted": 1}
@@ -146,7 +146,7 @@ def test_related_consent_and_delivery_limits_keep_omission_counts(care):
 def test_cross_elder_records_cannot_enter_projection_even_with_broad_view(care, monkeypatch):
     service, _token, clock = care
     own = reminder(service)
-    advance(service, clock, 30)
+    advance_visible_page(service, clock, 30)
     view = service.elder_view(ELDER)
     view["reminders"].append({**own, "elder_id": "other", "label": "OTHER_ELDER_SECRET"})
     view["occurrences"].append({**view["occurrences"][0], "elder_id": "other", "status": "acknowledged"})

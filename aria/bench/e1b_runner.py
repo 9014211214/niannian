@@ -721,7 +721,7 @@ class E1bRunner:
                     app.reflection_capture = self.reflection_capture_class(app, case_root, case_id=case.id, session=number,
                         session_id=session_id, source_sha256=self.suite.source_sha256)
                     try:
-                        self._operation(app, "reflect", lambda: app.reflect(f"e1b-review-{session_id}"),
+                        self._operation(app, "reflect", lambda: app.reflect(f"e1b-review-{session_id}", wait=True),
                                         detail={"case_id": case.id, "session": number})
                     finally:
                         app.proposal_capture = None

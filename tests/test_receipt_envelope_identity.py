@@ -1,4 +1,5 @@
 """HTTP 200 error bodies and rejected identity evidence use local fixtures only."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 from decimal import Decimal
 from email.message import Message
@@ -23,7 +24,7 @@ from tests.test_bounded_http_recovery import guarded
 
 @pytest.fixture(autouse=True)
 def deny_network(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("unstubbed network"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("unstubbed network"))
 
 
 @pytest.mark.parametrize("error", [{}, {"code": 502, "type": "api_error"},
@@ -118,7 +119,7 @@ def test_known_error_metadata_does_not_overwrite_request_header_or_promote_neste
         response.headers = Message()
         response.headers["x-request-id"] = "req-reviewfixture1234"
         return response
-    monkeypatch.setattr(urllib.request, "urlopen", headers_like_http_message)
+    stub_model_http(monkeypatch, headers_like_http_message)
     with pytest.raises(MinimalCallStopped):
         call(g, c)
     row = g.snapshot()["attempts"][0]; observed = row["observation"]

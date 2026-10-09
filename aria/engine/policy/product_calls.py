@@ -4,6 +4,8 @@ Physical request receipts retain their original accounting. Logical operations
 and explicit owner recoveries are append-only events; three failed operations,
 not three transport attempts, pause the product. Unknown charges, uncertain
 storage, and budget limits cannot be resumed through this interface.
+The inherited default transport rejects HTTP redirects, and product recovery
+does not retry these failures or release their unknown-charge reservations.
 """
 from __future__ import annotations
 

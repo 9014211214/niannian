@@ -109,10 +109,12 @@ def test_actual_ui_allows_only_privacy_reduction_under_unknown_and_locks_replay(
         pytest.skip("Node unavailable for UI function execution; backend tests still run")
     page = (Path(__file__).parents[1] / "aria/assets/voice/minimal.html").read_text(encoding="utf-8")
     controls = page[page.index("function updateControls() {"):page.index("function framesFor(turns) {")]
+    sharing_controls = page[page.index("function sharingControls() {"):page.index("function sharingAction(action,payload) {")]
     mutation = page[page.index("async function mutate(endpoint, body, onSuccess) {"):page.index("$('composer').addEventListener")]
     setup = """
 const assert=require('assert');
 let busy=false, careBusy=false, replayMode=false, history=false;
+let sharingSelectionDirty=false;
 let uncertain={endpoint:'text',id:'unresolved-model-turn'};
 let state={requires_review:true,storage_failed:true,turns:[],sessions:[]};
 const buttons=[{dataset:{cognitiveReduction:'true'}},{dataset:{}}];
@@ -145,6 +147,6 @@ const request=async(endpoint,body)=>{calls.push({endpoint,body});if(fail)throw n
  console.log('cognitive UI privacy/replay checks passed');
 })().catch(error=>{console.error(error);process.exit(1)});
 """
-    result = subprocess.run([node, "-e", setup + controls + mutation + checks], capture_output=True,
+    result = subprocess.run([node, "-e", setup + sharing_controls + controls + mutation + checks], capture_output=True,
                             text=True, encoding="utf-8", check=False)
     assert result.returncode == 0, result.stderr

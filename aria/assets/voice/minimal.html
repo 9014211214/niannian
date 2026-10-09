@@ -231,18 +231,27 @@
         <details class="understanding"><summary>模型调用与费用 <span id="model-usage-summary" class="number">正在读取</span></summary><div id="model-usage" class="detail-body"></div></details>
         <p id="model-guard-notice" class="error" role="status" hidden></p>
         <button id="resume-models" type="button" hidden>我确认恢复后续模型调用</button>
-        <div class="offline"><strong id="offline-title">会后整理尚未运行</strong><p id="offline-status">封存与整理分开。离开页面只尝试封存，不会自动调用会后模型。</p><details class="inline-detail"><summary>查看整理阶段记录</summary><div id="offline-stages" class="detail-body"></div></details></div>
+        <div class="offline"><strong id="offline-title">会后整理尚未运行</strong><p id="offline-status">默认由本人手动启动；也可在下方明确开启自动整理。</p><details class="inline-detail"><summary>自动整理 · 由我选择</summary><p>默认关闭。开启后，之后新结束或闲置封存的会话会调用云模型整理；每天最多启动所选次数。单次可能含事实整理和人物审核两次调用，仍受费用限额控制。失败或费用不明时停止，不自动重试。</p><label for="auto-review-limit">每天最多整理会话数</label><select id="auto-review-limit"><option value="1">1 次</option><option value="2">2 次</option><option value="3">3 次</option><option value="4">4 次</option><option value="5">5 次</option><option value="6">6 次</option><option value="7">7 次</option><option value="8">8 次</option></select><p id="auto-review-state" role="status"></p><div class="row"><button id="auto-review-enable" type="button">我同意开启自动整理</button><button id="auto-review-disable" type="button" hidden>关闭自动整理</button></div></details><details class="inline-detail"><summary>查看整理阶段记录</summary><div id="offline-stages" class="detail-body"></div></details></div>
       </aside>
     </div>
     <section class="panel timeline" aria-labelledby="timeline-title"><div class="timeline-head"><div><h2 id="timeline-title">几次相遇，慢慢了解</h2><p class="subtle">会话与理解变化时间线</p></div><p class="subtle">选择已有会话，只读回看保存的文字。</p></div><div id="timeline-items" class="timeline-items"></div><p class="timeline-note">按真实运行时间记录，不把故事中的“明天”改写成跨天证据。保存回放只改变浏览器中的字幕与演出，不再次执行模型、提醒或通知。</p></section>
     <details id="cognitive-panel" class="panel care-panel"><summary>记忆与日常变化提醒 · 由我决定</summary><div class="care-content">
-      <p class="subtle">默认关闭。开启后，只在明确启动会后整理时留意我自己说出的变化，并和我自己的过去比较。不会判断疾病，不会自动告诉家人。这里是虚构角色的本人操作页面，护理员不能代开。</p>
+      <p class="subtle">默认关闭。开启后，在手动启动或本人已开启的自动会后整理中留意我自己说出的变化，并和我自己的过去比较。不会判断疾病，不会自动告诉家人。这里是虚构角色的本人操作页面，护理员不能代开。</p>
       <p id="cognitive-state" role="status"></p>
-      <div class="row"><button id="cognitive-enable" type="button">我愿意开启留意变化</button><button id="cognitive-disable" type="button" data-cognitive-reduction="true" hidden>关闭留意变化</button><button id="cognitive-arranged" type="button" hidden>我已自行安排，暂时不再提</button></div>
+      <p id="cognitive-entry-notice" class="subtle"></p>
+      <div class="row"><button id="cognitive-enable" type="button">我愿意开启留意变化</button><button id="cognitive-disable" type="button" data-cognitive-reduction="true" hidden>关闭留意变化</button><button id="cognitive-talk" type="button" hidden>现在愿意聊这些记录</button><button id="cognitive-arranged" type="button" hidden>我已自行安排，暂时不再提</button></div>
+      <p id="cognitive-talk-notice" class="subtle" hidden>只允许接下来一次当前会话的请求。点击后会填入一句话，再点发送才调用模型；编辑这句话会取消本次许可。不会开启长期主动提醒或通知家人。</p>
       <div id="cognitive-disable-choice" class="delete-confirm" hidden><p>关闭后不再采集或主动提醒。已有观察记录要保留还是删除？</p><div class="row"><button id="cognitive-keep" type="button" data-cognitive-reduction="true">关闭并保留记录</button><button id="cognitive-delete-all" type="button" data-cognitive-reduction="true">关闭并删除记录</button><button id="cognitive-cancel" type="button" data-cognitive-reduction="true">先不关闭</button></div></div>
       <div id="cognitive-observations"></div>
       <p class="subtle">下方只展示本人原话，可逐条删除。删除观察不会删除原聊天；清除整段虚构体验可删除聊天。校准期至少 14 天、6 次会话，期间只记录；重复回放和护理提醒未确认均不计作变化。</p>
     </div></details>
+    <details id="explicit-sharing" class="panel care-panel"><summary>只转达我选定的一句话</summary><div class="care-content">
+      <p class="subtle">默认只保存在本机。选择当前活动会话已经保存的一整句本人原话和本地演示联系人，先核对预览，再明确批准，最后另点发送。不会改写、抽取聊天或发送人物假设；提醒通知授权不能授权这句话。预览五分钟内有效。</p>
+      <p id="sharing-notice" role="status"></p><button id="sharing-refresh" type="button">只刷新转达记录</button>
+      <form id="sharing-form" class="care-form"><label>我选定的完整原话<select id="sharing-source" required></select></label><label>转达给谁<select id="sharing-contact" required></select></label><p class="subtle">联系人在下方“我的提醒与通知授权”中添加。这里使用独立本地模拟收件箱，不联系真实家属。</p><button id="sharing-prepare" type="submit">核对这句话与收件人</button></form>
+      <div id="sharing-records"></div><p class="subtle">“本地模拟接收”只是本机回执，不代表真实送达或真人阅读。结果未知时只刷新和撤回，不换编号重发。发送尝试开始后撤回不能保证消息没有被接收。</p>
+    </div></details>
+    <p id="care-due-notice" class="subtle" role="status" hidden>有到点提醒。展开“我的提醒与通知授权”查看；未展示时不会计为未确认。</p>
     <details id="elder-care" class="panel care-panel"><summary>我的提醒与通知授权</summary><div class="care-content">
       <p id="care-mode" class="notice">护理数据尚未读取。展开后只读取本人的结构化提醒与授权。</p>
       <p class="subtle">这里的操作以护理服务保存结果为准。确认只表示回应了提醒，不证明已服药或完成了具体活动；未确认也不等于发生危险。</p>
@@ -259,7 +268,7 @@
       <section class="care-block"><h3>通知记录</h3><p class="subtle">排队、通道受理、本地模拟接收、真实送达及家属确认分别记录。模拟结果不代表家属收到。</p><div id="care-deliveries"></div></section>
     </div></details>
     <p id="status" class="status-line" role="status" aria-live="polite"></p>
-    <footer class="footer"><p>这是虚构角色演示，请勿输入真实私人资料。声音、摄像头与情绪模拟未启用。退出时尝试封存；处理中的会话由后台闲置机制封存，不自动整理。已独立启用的护理后台不因关闭页面而停止。</p><button id="forget" class="quiet" type="button" disabled>清除本次体验资料</button></footer>
+    <footer class="footer"><p>这是虚构角色演示，请勿输入真实私人资料。声音、摄像头与情绪模拟未启用。退出时尝试封存；处理中的会话由后台闲置机制封存。自动整理默认关闭，本人明确开启后按每日次数和费用限制处理新封存会话。已独立启用的护理后台不因关闭页面而停止。</p><button id="forget" class="quiet" type="button" disabled>清除本次体验资料</button></footer>
     <div id="delete-confirm" class="delete-confirm" role="region" aria-label="确认清除体验资料" hidden><p>将清除这个最小体验保存的会话与理解资料，无法从本页恢复。不会撤回已经发生的外部操作。</p><p id="forget-usage-note" hidden>调用次数和费用记录会保留；清除资料不会恢复调用额度。</p><div class="row"><button id="confirm-forget" type="button">确认清除</button><button id="cancel-forget" class="quiet" type="button">保留资料</button></div></div>
   </main>
   <script>
@@ -274,10 +283,15 @@
     ];
     const names = {candidate:'待观察',working:'适用中',stable:'较稳定',retired:'已撤回',open:'进行中',active:'进行中',sealed:'已封存',reviewed:'已整理',expired:'已到期',completed:'已完成',pending:'等待处理',idle:'暂无待办',blocked:'需核查后再继续',failed:'失败',unknown:'结果未知',not_run:'未执行',not_started:'未开始',disabled:'未启用',local_preview:'本地流程占位',live:'真实生成',model:'真实模型生成',rule:'安全规则接管',rule_protection:'规则调整后的回复',rule_safety:'安全规则接管',support:'支持',counter:'反证',not_applied:'未应用',applied:'已应用',conversation:'对话原话',synthetic_demo:'虚构角色演示',added:'新增',revised:'修订',removed:'撤回',unchanged:'维持',facts:'事实',fact:'事实',hypotheses:'人物假设',hypothesis:'人物假设',unavailable:'未观测'};
     let state = null, busy = false, uncertain = null, selectedSession = null, activeSession = null;
+    let autoReviewDraft = null;
     Object.assign(names,{proposed:'待本人确认',confirmed:'本人已确认',declined:'不记这条',withdrawn:'本人已撤回',superseded:'已由新说明取代',stated_preferences:'本人相处说明',local_rule:'本地规则示意',ui:'本人页面操作',result_unknown:'生成或保存结果不明',model_failed:'模型调用或返回失败',local_request_rejected:'本地预检拒绝（未发送）',rule_fallback:'系统兜底（非模型生成）'});
     let renderingTurns = '', suggestedSession = null, leavingSeal = false;
     let stagePlaying=false, replayMode=false, replayFrames=[], replayIndex=0, replayTimer=null;
     let careState=null, careBusy=false, careUnknown=null;
+    let sharingSelectionDirty=false;
+    const sharingApprovals=new Map();
+    const displayedAttempts=new Set();
+    let carePolling=false, backgroundPolling=false;
     const array = value => Array.isArray(value) ? value : [];
     const scalar = value => value === undefined || value === null ? '' : typeof value === 'object' ? '' : String(value);
     const label = value => names[value] || scalar(value);
@@ -309,31 +323,42 @@
       container.append(text('p','调用尝试在发送前登记；结果不明时，不能确定是否已发出。未知费用不算作零费用。','subtle'));
       container.append(text('p','达到次数或费用阈值，或费用、结果不明时，停止后续模型请求。费用阈值只阻止后续请求，不保证单次账单上限。','subtle'));
       container.append(text('p','清除体验资料会保留调用记录，不恢复调用额度。','subtle'));
+      if(usage.offline_call_inflight)container.append(text('p','会后模型请求正在进行。费用展示为启动前快照；可先输入下一句话，待回执确定后发送。封存、查看及撤回仍可操作。','subtle'));
       if(usage.recovery_contract)container.append(text('p',`连续失败 ${scalar(usage.consecutive_failures)} 次。单次格式失败用有标识的兜底回复，可继续下一轮；仅无模型内容且费用明确的429/5xx最多额外尝试两次。`,'subtle'));
     }
     function updateControls() {
       const pending=[...array(state?.turns),...allReviews()].some(row=>['pending','unknown'].includes(row.status) || row.requires_review);
       const locked=busy || careBusy || replayMode || !!uncertain || pending || state?.storage_failed || state?.requires_review || !state;
-      const writable=!locked && !modelCallsStopped() && isCurrentOpen() && !viewingHistory();
+      const awaitingInvitation=state?.preference_invitation?.session_id===state?.session_id && state?.preference_invitation?.status==='awaiting_display';
+      const writable=!locked && !modelCallsStopped() && isCurrentOpen() && !viewingHistory() && !awaitingInvitation;
       $('message-input').disabled=!writable;
-      $('send').disabled=!writable || !$('message-input').value.trim();
+      $('send').disabled=!writable || state?.model_usage?.offline_call_inflight || !$('message-input').value.trim();
       $('send').textContent=busy ? '处理中…' : '发送这句话 ↗';
       $('start').disabled=locked || isCurrentOpen();
       $('start').textContent=array(state?.sessions).length ? '开始下一次会话' : '开始第一次会话';
-      $('seal').disabled=locked || !isCurrentOpen();
+      // Sealing is a bounded safety operation, available even when a model
+      // result needs review. It cannot resume or resend that request.
+      $('seal').disabled=busy || careBusy || replayMode || !state || !isCurrentOpen() || viewingHistory();
       $('reflect').hidden=state?.mode==='local_preview';
-      $('reflect').disabled=locked || modelCallsStopped() || isCurrentOpen() || !array(state?.sessions).length;
+      $('reflect').disabled=locked || state?.offline_review_running || modelCallsStopped() || isCurrentOpen() || !array(state?.sessions).length;
       $('resume-models').disabled=locked || viewingHistory() || state?.model_usage?.can_resume!==true;
       $('preference-review').hidden=state?.mode!=='local_preview';
       $('preference-review').disabled=locked || isCurrentOpen() || viewingHistory() || !array(state?.sessions).length;
+      $('auto-review-enable').disabled=locked || viewingHistory() || state?.mode!=='live' || modelCallsStopped();
+      $('auto-review-limit').disabled=locked || viewingHistory() || state?.mode!=='live';
+      $('auto-review-disable').disabled=busy || careBusy || replayMode || !state || viewingHistory() || state?.storage_failed;
       $('stated-preferences').querySelectorAll('button').forEach(button=>{const cannotWithdraw=busy || careBusy || replayMode || !!uncertain || state?.storage_failed || !state || viewingHistory();button.disabled=button.dataset.preferenceAction==='withdraw'?cannotWithdraw:locked || viewingHistory();});
+      $('stated-preferences').querySelectorAll('[data-preference-action="ask"]').forEach(button=>{button.disabled=locked || viewingHistory() || !isCurrentOpen() || modelCallsStopped();});
+      const invitationButton=$('conversation').querySelectorAll('[data-invitation-ack]')[0];if(invitationButton)invitationButton.disabled=locked || viewingHistory() || !isCurrentOpen();
       $('cognitive-panel').querySelectorAll('button').forEach(button=>{const cannotReduce=busy || careBusy || replayMode || !state || viewingHistory();button.disabled=button.dataset.cognitiveReduction==='true'?cannotReduce:locked || viewingHistory();});
+      $('cognitive-talk').disabled=locked || viewingHistory() || !isCurrentOpen() || modelCallsStopped() || state?.mode!=='live';
       $('forget').disabled=locked;
       $('confirm-forget').disabled=locked;
       $('refresh').disabled=busy || replayMode;
       $('return-current').hidden=!viewingHistory();
       $('choices').querySelectorAll('button').forEach(button=>button.disabled=!writable);
       $('replay-start').disabled=busy || careBusy || !array(state?.turns).some(turn=>turn.session_id===(selectedSession || activeSession));
+      sharingControls();
       $('takeover').disabled=busy || careBusy;
       updateCareControls();
     }
@@ -449,15 +474,23 @@
     function careButton(card,title,action,payload) {const button=text('button',title);button.type='button';button.addEventListener('click',()=>careAction(action,payload));let row=card.querySelector('.row');if(!row){row=document.createElement('div');row.className='row';card.append(row);}row.append(button);return button;}
     function populateOptions(id,items,labeler) {const select=$(id),previous=select.value;select.replaceChildren();const prompt=text('option',items.length?'请选择':'暂无可选记录');prompt.value='';select.append(prompt);items.forEach(item=>{const option=text('option',labeler(item));option.value=item.id;select.append(option);});if(items.some(item=>item.id===previous))select.value=previous;}
     function renderCare(next) {
+      // Refreshes must keep unsent drafts for the same owner's occurrence generation.
+      const snoozeDrafts=new Map();let focusedSnooze=null,focusTarget=null;
+      const snoozeKey=card=>JSON.stringify([card.dataset.elderId,card.dataset.occurrenceId,card.dataset.generation]);
+      if(next.configured && careState?.configured)for(const card of $('care-occurrences').children){
+        const input=card.querySelector('input[data-snooze-minutes]');
+        if(input){const key=snoozeKey(card);snoozeDrafts.set(key,input.value);if(document.activeElement===input)focusedSnooze=key;}
+      }
       careState={...next,maintenance_errors:next.maintenance_errors===undefined?careState?.maintenance_errors || {}:next.maintenance_errors};next=careState;
       $('care-mode').textContent=Object.keys(next.maintenance_errors || {}).length?'后台调度或保存出现故障，请核查。当前展示最后可读取的记录，不能认定调度正常完成。':next.configured?'本地护理流程已配置。有效模拟授权满足规则后自动写入本地通知记录，无真实家属外发。关闭聊天不会暂停护理调度。':'护理后台尚未配置。请由护理员在本机配置账号和负责的老人后使用；没有预置默认密码。';
       const contacts=array(next.contacts),reminders=array(next.reminders);
       [['care-occurrences',next.occurrences,'暂无到点提醒。'],['care-reminders',reminders,'还没有设置提醒。'],['care-contacts',contacts,'还没有演示联系人。'],['care-consents',next.consents,'没有通知授权；未取得授权不会自动通知。'],['care-deliveries',next.deliveries,'暂无通知记录。']].forEach(([id,items,empty])=>{$(id).replaceChildren();if(!array(items).length)placeholder($(id),empty);});
       array(next.occurrences).forEach(item=>{
-        const card=careCard($('care-occurrences'),item.label,[['状态',careLabel(item.status)],['原定时间',item.due_at],['时区',item.timezone],['未确认时限',item.deadline_at],['延后至',item.snoozed_until]]);
+        const card=careCard($('care-occurrences'),item.label,[['状态',careLabel(item.status)],['页面展示',item.delivery_status==='awaiting_display'?'尚未展示，不计未确认':item.displayed_at?'页面已记录展示，不代表本人已阅读或回应':'无可核查展示回执'],['原定时间',item.due_at],['时区',item.timezone],['未确认时限',item.deadline_at],['延后至',item.snoozed_until]]);
+        card.dataset.elderId=String(item.elder_id);card.dataset.occurrenceId=item.id;card.dataset.generation=String(item.generation);
         if(['pending','unconfirmed','snoozed'].includes(item.status)) {
           careButton(card,'确认收到提醒','occurrence.ack',{occurrence_id:item.id});careButton(card,'我不接受这次提醒','occurrence.decline',{occurrence_id:item.id});
-          const row=document.createElement('div');row.className='row';const minutes=document.createElement('input');minutes.type='number';minutes.min='1';minutes.max='1440';minutes.value='10';minutes.setAttribute('aria-label','延后分钟');const snooze=text('button','延后（分钟）');snooze.type='button';snooze.addEventListener('click',()=>{if(!minutes.checkValidity()){minutes.reportValidity();return;}careAction('occurrence.snooze',{occurrence_id:item.id,minutes:Number(minutes.value)});});row.append(minutes,snooze);card.append(row);
+          const row=document.createElement('div');row.className='row';const minutes=document.createElement('input');minutes.type='number';minutes.min='1';minutes.max='1440';minutes.required=true;minutes.dataset.snoozeMinutes='true';const key=snoozeKey(card);minutes.value=snoozeDrafts.has(key)?snoozeDrafts.get(key):'10';minutes.setAttribute('aria-label','延后分钟');if(key===focusedSnooze)focusTarget=minutes;const snooze=text('button','延后（分钟）');snooze.type='button';snooze.addEventListener('click',()=>{if(!minutes.checkValidity()){minutes.reportValidity();return;}careAction('occurrence.snooze',{occurrence_id:item.id,minutes:Number(minutes.value)});});row.append(minutes,snooze);card.append(row);
         }
       });
       reminders.forEach(item=>{const card=careCard($('care-reminders'),item.label,[['状态',careLabel(item.status)],['安排',`${careLabel(item.schedule)} · ${item.date} ${item.time} · ${item.timezone}`],['未确认宽限',`${item.grace_minutes} 分钟`],['下次到点',item.next_due_at],['断机遗漏',item.skipped_total?`${item.skipped_total} 次未提供，不算已送达`:null]]);if(item.status==='active')careButton(card,'取消提醒及未发通知','reminder.cancel',{reminder_id:item.id});});
@@ -465,12 +498,32 @@
       array(next.consents).forEach(item=>{const card=careCard($('care-consents'),`${contacts.find(contact=>contact.id===item.contact_id)?.name || item.contact_id} · ${careLabel(item.status)}`,[['提醒',reminders.find(reminder=>reminder.id===item.reminder_id)?.label || item.reminder_id],['触发', '超过该提醒宽限时间仍未确认'],['分享范围','仅提醒状态，不含聊天或心理假设'],['有效至',item.expires_at],['授权来源',careLabel(item.source)]]);if(item.status==='active')careButton(card,'撤回这条授权','consent.revoke',{consent_id:item.id});});
       array(next.deliveries).forEach(item=>careCard($('care-deliveries'),careLabel(item.status),[['通知内容',item.message],['联系人',contacts.find(contact=>contact.id===item.contact_id)?.name || item.contact_id],['稳定事件编号',item.id],['来源','本轮仅本地模拟，未真实外发']]));
       populateOptions('consent-contact',contacts,item=>item.name);populateOptions('consent-reminder',reminders.filter(item=>item.status==='active'),item=>item.label);updateCareControls();
+      $('care-due-notice').hidden=!array(next.occurrences).some(item=>item.status==='pending' && item.delivery_status==='awaiting_display');
+      if(focusTarget && !focusTarget.disabled)focusTarget.focus({preventScroll:true});
     }
-    async function readCare() {
-      if(replayMode || careBusy || busy)return;
-      careBusy=true;updateControls();
+    async function readCare({passive=false}={}) {
+      if(replayMode || careBusy || busy || carePolling || document.visibilityState!=='visible')return;
+      carePolling=true;
+      if(!passive){careBusy=true;updateControls();}
       try {const response=await fetch('/api/minimal/care',{credentials:'same-origin',cache:'no-store',headers:{'X-Aria-Demo-Token':TOKEN}}),data=await response.json();if(!response.ok || data.ok===false)throw new Error(data.error || '读取护理状态失败。');renderCare(data.state || data);careError(careUnknown?`上次护理操作结果仍需核查，不会自动重发。请求编号：${careUnknown.id}`:'');}
-      catch(error){careError(error.message);}finally{careBusy=false;updateControls();}
+      catch(error){careError(error.message);}finally{carePolling=false;if(!passive){careBusy=false;updateControls();}ackVisibleReminders();}
+    }
+    function ackVisibleReminders() {
+      if(replayMode || viewingHistory() || busy || careBusy || careUnknown || document.visibilityState!=='visible' || !$('elder-care').open)return;
+      const item=array(careState?.occurrences).find(row=>{
+        if(row.status!=='pending' || row.delivery_status!=='awaiting_display' || !Number.isInteger(row.generation))return false;
+        const key=`${row.id}:${row.generation}`;
+        if(displayedAttempts.has(key))return false;
+        const card=[...$('care-occurrences').children].find(el=>el.dataset.occurrenceId===row.id && el.dataset.generation===String(row.generation));
+        if(!card || !card.getClientRects().length)return false;
+        const rect=card.getBoundingClientRect();
+        return rect.bottom>0 && rect.top<window.innerHeight && rect.right>0 && rect.left<window.innerWidth;
+      });
+      if(!item)return;
+      displayedAttempts.add(`${item.id}:${item.generation}`);
+      // One attempt per current visible generation. Unknown outcomes are
+      // retained by careAction and never resent by polling or replay.
+      careAction('occurrence.displayed',{occurrence_id:item.id,generation:item.generation});
     }
     async function careAction(action,payload) {
       if(replayMode || busy || careBusy || careUnknown || !careState?.configured)return;
@@ -483,7 +536,61 @@
         if(!Array.isArray(view.reminders))throw new Error('未取得护理保存状态，不能确认结果。');
         status('护理操作已返回；以结构化状态和回执为准，没有生成模型回复。');
       }catch(error){if(!error.confirmed)careUnknown={id:requestId,action};careError((careUnknown?'结果不明，停止后续护理写入；刷新仅核查，不重发。\n':'')+error.message+(careUnknown?`\n请求编号：${requestId}`:''));}
-      finally{careBusy=false;updateControls();}
+      finally{careBusy=false;updateControls();ackVisibleReminders();}
+    }
+    function sharingControls() {
+      const value=state?.sharing;
+      const locked=busy || careBusy || replayMode || viewingHistory() || !!uncertain || !value?.writable || value?.storage_failed || value?.requires_review;
+      $('sharing-source').disabled=locked;$('sharing-contact').disabled=locked;$('sharing-prepare').disabled=locked;
+      $('sharing-refresh').disabled=busy || careBusy || replayMode;
+      $('sharing-records').querySelectorAll('button').forEach(button=>{
+        const reduction=button.dataset.sharingAction==='revoke';
+        button.disabled=reduction?(busy || careBusy || replayMode || viewingHistory() || value?.storage_failed):locked || sharingSelectionDirty || button.dataset.matchesSelection!=='true';
+      });
+      $('sharing-records').querySelectorAll('input').forEach(input=>{input.disabled=locked || sharingSelectionDirty;});
+    }
+    function sharingAction(action,payload) {
+      if(replayMode || viewingHistory())return;
+      const requestId=crypto.randomUUID();
+      mutate('sharing',{action,payload:{...payload,request_id:requestId},request_id:requestId,session_id:state?.session_id || null,replay:false},()=>{
+        if(action==='prepare'){sharingSelectionDirty=false;sharingApprovals.clear();renderSharing();}
+      });
+    }
+    function renderSharing() {
+      const value=state?.sharing || {}, source=$('sharing-source'), contact=$('sharing-contact');
+      const oldSource=source.value,oldContact=contact.value;
+      source.replaceChildren(text('option','请选择已经保存的一整句原话'));source.firstChild.value='';
+      for(const item of array(value.sources)){const option=text('option',`会话原话 ${item.turn_index+1}：${item.text}`);option.value=item.turn_id;source.append(option);}
+      contact.replaceChildren(text('option','请选择本人的本地演示联系人'));contact.firstChild.value='';
+      for(const item of array(value.contacts)){const option=text('option',`${item.name} · 本地模拟`);option.value=item.id;contact.append(option);}
+      source.value=oldSource;contact.value=oldContact;
+      const container=$('sharing-records');container.replaceChildren();
+      const statuses={draft:'待核对批准',approved:'已由本人批准 · 尚未发送',reserved:'发送结果待核查',sending:'发送尝试中',unknown:'结果未知 · 禁止重发',revoked:'已撤回',superseded:'已有新的选择',expired:'预览已失效',accepted:'本地通道受理 · 未证明接收',delivered_local:'本地模拟接收'};
+      for(const item of array(value.records)){
+        const card=document.createElement('article');card.className='care-card';card.dataset.sharingId=item.id;
+        card.append(text('h3',statuses[item.status] || '旧记录'),text('p',`原话：${item.message || '本地内容已清除'}`),text('p',`收件人：${item.recipient?.name || '已清除'} · 独立本地模拟收件箱`),text('p',`有效至：${displayTime(item.expires_at)} · 请求记录 ${item.id}`,'subtle'));
+        if(item.receipt)card.append(text('p',`回执：${item.receipt.source==='local_simulation'?'本地模拟':'未核查'} · ${item.receipt.id}`,'subtle'));
+        const matches=item.source?.turn_id===source.value && item.recipient?.id===contact.value;
+        const addButton=(title,action,callback)=>{const button=text('button',title);button.type='button';button.dataset.sharingAction=action;button.dataset.matchesSelection=String(matches);button.addEventListener('click',callback);card.append(button);};
+        if(item.status==='draft'){
+          const labelNode=document.createElement('label');labelNode.className='check-label';const check=document.createElement('input');check.type='checkbox';check.checked=sharingApprovals.get(item.id)===item.preview_sha256;check.addEventListener('change',()=>{if(check.checked)sharingApprovals.set(item.id,item.preview_sha256);else sharingApprovals.delete(item.id);});labelNode.append(check,document.createTextNode('我核对并同意仅把上面这句原话转达给这个联系人，使用本地模拟通道。'));card.append(labelNode);
+          addButton('我批准这份完整预览','approve',()=>{if(!check.checked){status('请先核对完整预览，并明确勾选批准。');return;}sharingAction('approve',{id:item.id,preview_sha256:item.preview_sha256,confirmed:true});});
+        }
+        if(item.status==='approved')addButton('发送到本地模拟收件箱','send',()=>sharingAction('send',{id:item.id,preview_sha256:item.preview_sha256}));
+        if(['draft','approved','reserved','sending','unknown'].includes(item.status))addButton('撤回这次转达','revoke',()=>sharingAction('revoke',{id:item.id}));
+        container.append(card);
+      }
+      if(!array(value.records).length)placeholder(container,value.available===false?'转达记录无法读取，结果未知；不能判断是否已有批准或发送。':'尚未选择或批准转达内容。');
+      for(const hold of array(value.holds))if(!array(value.records).some(record=>record.id===hold.id))container.append(text('p',`此前转达结果未知 · ${hold.id}。原内容已清除，仍不会换编号重发。`,'subtle'));
+      $('sharing-notice').textContent=value.requires_review?'有转达尝试结果未知。只刷新查看或撤回，不会自动重发。':value.notice || '仅本地模拟，尚未真实发送。';
+      sharingControls();
+    }
+    async function readSharing() {
+      if(busy || careBusy || replayMode)return;
+      busy=true;updateControls();
+      try {const data=await request('sharing');state.sharing=data;renderSharing();const command=uncertain?.endpoint==='sharing' && array(data.commands).find(row=>row.request_id===uncertain.id && row.action===uncertain.action);const saved=command && array(data.records).some(row=>row.id===command.sharing_id && !['reserved','sending','unknown'].includes(row.status));if(saved){uncertain=null;setError('');}status('只读取转达记录，没有发送。');}
+      catch(error){setError('读取转达记录失败：'+error.message);}
+      finally{busy=false;updateControls();}
     }
     function renderChoices() {
       const index=Number($('story-select').value), used=new Set(array(state?.turns).map(turn=>turn.text));
@@ -504,7 +611,8 @@
     function renderConversation() {
       const sessionId=selectedSession || activeSession;
       const turns=array(state.turns).filter(turn=>!sessionId || turn.session_id===sessionId);
-      const stamp=JSON.stringify([sessionId,turns]);
+      const invitation=state.preference_invitation?.session_id===sessionId && !viewingHistory() && !replayMode?state.preference_invitation:null;
+      const stamp=JSON.stringify([sessionId,turns,invitation]);
       if(stamp!==renderingTurns) {
         renderingTurns=stamp; $('conversation').replaceChildren();
         if(!turns.length) {
@@ -536,12 +644,13 @@
           }
           $('conversation').append(wrapper);
         });
+        if(invitation){const card=document.createElement('article');card.className='turn';card.append(message('assistant',scalar(invitation.question),'相处说明 · 待确认的固定复述'));if(invitation.status==='awaiting_display'){const button=text('button','回答这条说明');button.type='button';button.dataset.invitationAck=invitation.id;button.addEventListener('click',()=>{if(replayMode || viewingHistory() || state.preference_invitation?.id!==invitation.id)return;mutate('preference-invitation-ack',{id:invitation.id,question_sha256:invitation.question_sha256,session_id:state.session_id},()=>{$('message-input').focus();status('请用自己的话回答；也可以纠正、拒绝或换话题。');});});card.append(button);}else card.append(text('p','问句已展示。请用自己的话回答，也可以纠正、拒绝或换话题。','subtle'));$('conversation').append(card);}
         if(!viewingHistory())$('conversation').scrollTop=$('conversation').scrollHeight;
       }
       const session=array(state.sessions).find(s=>s.session_id===sessionId);
       const number=session?.number || turns[0]?.session_number || state.session_number;
       $('conversation-title').textContent=number ? `第 ${number} 次相遇${viewingHistory()?' · 只读回看':''}` : '留一点时间，听他说';
-      $('session-caption').textContent=viewingHistory()?'展示已保存原文，不重新生成或执行动作。':isCurrentOpen()?'正在继续同一次会话；可随时改变话题。':'会话已封存后，可以明确启动整理，再开始下一次相遇。';
+      $('session-caption').textContent=viewingHistory()?'展示已保存原文，不重新生成或执行动作。':isCurrentOpen()?'正在继续同一次会话；可随时改变话题。':(state.auto_review?.enabled?'会话已封存，后台按本人开启的次数和费用限制整理；可以开始下一次相遇。':'会话已封存后，可以明确启动整理，再开始下一次相遇。');
       $('turn-count').textContent=`${turns.length} 条老人输入`;
       const last=turns.at(-1);
       renderStage();
@@ -605,6 +714,7 @@
         if(item.admission==='local_rule_preview')card.append(text('p','本地规则示意，仅用于未启用模型的预览，不进入真实模型请求。','subtle'));
         const actions=item.status==='proposed'?(item.can_confirm?[['confirm','按这句话记下'],['decline','不记']]:[['decline','不记']]):item.status==='confirmed'?[['withdraw','撤回']]:[];
         if(actions.length){const row=document.createElement('div');row.className='row';actions.forEach(([action,title])=>{const button=text('button',title);button.type='button';button.dataset.preferenceAction=action;button.addEventListener('click',()=>{if(replayMode || viewingHistory())return;mutate('preference',{action,id:item.id});});row.append(button);});card.append(row);}
+        if(item.status==='proposed' && item.admission==='model_reviewed'){const button=text('button','让我听听这条复述');button.type='button';button.dataset.preferenceAction='ask';button.addEventListener('click',()=>{if(replayMode || viewingHistory() || !isCurrentOpen())return;mutate('preference-invitation',{id:item.id,session_id:state.session_id});});card.append(button);}
         const history=array(item.history);if(history.length){const details=document.createElement('details');details.className='inline-detail';details.append(text('summary','查看形成与本人操作记录'));history.forEach(entry=>details.append(text('p',`${displayTime(entry.at)} · ${label(entry.from || entry.from_status) || '新提议'} → ${label(entry.to)} · ${entry.source==='rule'?'本地规则提议':label(entry.source)}`)));card.append(details);}
         container.append(card);
       });
@@ -613,11 +723,21 @@
       const value=state.cognitive || {}, enabled=value.enabled===true;
       $('cognitive-enable').hidden=enabled;$('cognitive-disable').hidden=!enabled;
       $('cognitive-arranged').hidden=!enabled || value.status!=='review_suggested';
+      $('cognitive-talk').hidden=!enabled || value.text_readiness_available!==true;
+      $('cognitive-talk-notice').hidden=$('cognitive-talk').hidden;
       const statusNames={disabled:'已关闭',calibrating:'正在了解我自己的日常',watch:'已完成初步记录',review_suggested:'有持续变化，等待合适时机由我决定是否聊聊'};
       $('cognitive-state').textContent=(statusNames[value.status] || '已关闭')+(value.cooldown_until?` · 暂不主动提起至 ${displayTime(value.cooldown_until)}`:'');
+      $('cognitive-entry-notice').textContent=value.text_entry_notice || '文字入口没有外部情绪读数时不会主动提起变化；可在此查看原话记录。';
       const container=$('cognitive-observations');container.replaceChildren();
       if(!array(value.observations).length)placeholder(container,'目前没有已保存的变化观察。');
       array(value.observations).forEach(item=>{const card=document.createElement('article');card.className='care-card';card.append(text('p',displayTime(item.at),'subtle'),text('p',scalar(item.quote) || '旧记录没有可展示原话。'));if(item.context_only)card.append(text('p','仅作背景，不计入变化规则。','subtle'));const button=text('button','删除这条观察');button.type='button';button.dataset.cognitiveReduction='true';button.addEventListener('click',()=>{if(replayMode || viewingHistory())return;mutate('cognitive',{action:'delete',id:item.id});});card.append(button);container.append(card);});
+    }
+    function renderAutoReview() {
+      const value=state.auto_review || {}, enabled=value.enabled===true;
+      $('auto-review-limit').value=String(autoReviewDraft ?? value.daily_limit ?? 1);
+      $('auto-review-enable').textContent=enabled?'保存自动整理次数':'我同意开启自动整理';
+      $('auto-review-disable').hidden=!enabled;
+      $('auto-review-state').textContent=state.mode!=='live'?'预览模式没有模型，不执行自动整理。':(enabled?`已开启 · 每天最多 ${value.daily_limit || 1} 次会话。`:'自动整理已关闭。')+(value.message?' '+scalar(value.message):'');
     }
     function renderProfile() {
       const profile=state.profile || {};
@@ -626,9 +746,10 @@
       });
       renderPreferences();
       renderCognitive();
+      renderAutoReview();
       const offline=state.offline || {}, review=array(state.reviews).at(-1), localReview=array(state.preference_reviews).at(-1);
       $('offline-title').textContent=`会后整理 · ${label(review?.status || offline.status) || '尚未运行'}`;
-      $('offline-status').textContent=scalar(review?.error || offline.message || offline.notice || offline.error) || (state.mode==='local_preview'?'本地规则只从已封存原话提议相处说明，需本人确认；未执行模型、事实抽取或人物反思。'+(localReview?` 最近一次规则提取：${label(localReview.status)}。`:''):'封存后，只有点击“明确启动会后整理”才调用模型；memory 整理事实，reflection 审核人物假设。');
+      $('offline-status').textContent=scalar(review?.error || offline.message || offline.notice || offline.error) || (state.mode==='local_preview'?'本地规则只从已封存原话提议相处说明，需本人确认；未执行模型、事实抽取或人物反思。'+(localReview?` 最近一次规则提取：${label(localReview.status)}。`:''):(state.auto_review?.enabled?'已明确开启自动整理；之后新封存的会话按每日次数和费用限制处理。':'封存后，由本人明确启动会后整理。')+' memory 整理事实，reflection 审核人物假设。');
       if(offline.pending_count!==undefined)$('offline-status').append(document.createTextNode(` 待整理：${offline.pending_count} 次会话。`));
       const stages=$('offline-stages'), records=[...array(offline.audit).slice(-3),...array(offline.jobs)]; stages.replaceChildren();
       if(!records.length)placeholder(stages,'暂无已保存的整理阶段记录。');
@@ -659,14 +780,14 @@
       if(selectedSession && !array(state.sessions).some(s=>s.session_id===selectedSession))selectedSession=null;
       $('mode-badge').textContent=state.mode==='live' ? '真实生成模式' : '本地流程预览';
       $('mode-badge').classList.toggle('live',state.mode==='live');
-      $('mode-notice').textContent=state.mode==='live' ? '真实生成模式：显式发送会调用在线模型；明确启动会后整理会另行调用模型。故事输入来自虚构角色扮演。' : '本地流程预览 · 模型调用关闭。可检查输入、封存和连续会话；占位状态不是 Agent 回复，也不证明人物学习效果。';
+      $('mode-notice').textContent=state.mode==='live' ? '真实生成模式：发送会调用在线模型；手动整理或本人已开启的自动整理另行调用会后模型。故事输入来自虚构角色扮演。' : '本地流程预览 · 模型调用关闭。可检查输入、封存和连续会话；占位状态不是 Agent 回复，也不证明人物学习效果。';
       if(state.notice)$('mode-notice').append(document.createTextNode(' '+scalar(state.notice)));
       if(state.care_notice)$('mode-notice').append(document.createTextNode(' '+scalar(state.care_notice)));
       if(state.storage_failed)setError('保存失败，已停止写操作。请先核查本地保存问题；刷新仅查看状态，不会重发请求。');
-      else if(state.requires_review || [...array(state.turns),...allReviews()].some(row=>row.requires_review))setError('有请求需要核查结果与费用，已停止后续写操作。失败记录仍保留；刷新不会重发或创建新请求。');
+      else if(state.requires_review || [...array(state.turns),...allReviews()].some(row=>row.requires_review))setError('有请求需要核查结果与费用，发送与新增操作已停止；仍可封存当前会话或撤回。失败记录仍保留，刷新不会重发或创建新请求。');
       const suggested=Math.min(Math.max((state.session_number || 1)-1,0),2);
       if(suggestedSession!==state.session_number){$('story-select').value=String(suggested);suggestedSession=state.session_number;}
-      renderConversation();renderProfile();renderTimeline();renderChoices();renderModelUsage();updateControls();
+      renderConversation();renderProfile();renderTimeline();renderChoices();renderModelUsage();renderSharing();updateControls();
     }
     async function request(endpoint, body) {
       const response=await fetch('/api/minimal/'+endpoint,{method:body===undefined?'GET':'POST',credentials:'same-origin',cache:'no-store',headers:{'X-Aria-Demo-Token':TOKEN,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
@@ -685,30 +806,37 @@
           const sealed=uncertain.endpoint==='seal' && array(state.sessions).some(session=>session.session_id===uncertain.sessionId && !['open','active','in_progress'].includes(session.status));
           const started=uncertain.endpoint==='start' && state.session_id && !uncertain.sessionIds.includes(state.session_id);
           const forgotten=uncertain.endpoint==='forget' && !array(state.sessions).length && !array(state.turns).length;
-          const reflected=uncertain.endpoint==='reflect' && array(state.reviews).some(review=>review.request_id===uncertain.id && ['completed','failed'].includes(review.status));
+          const reflected=uncertain.endpoint==='reflect' && array(state.reviews).some(review=>review.request_id===uncertain.id && ['running','completed','failed'].includes(review.status));
           const resumed=uncertain.endpoint==='resume-models' && array(state.model_usage?.product_events).some(event=>event.event==='resumed' && event.request_id===uncertain.id);
           const localReviewed=uncertain.endpoint==='preference-review' && array(state.preference_reviews).some(review=>review.request_id===uncertain.id && ['completed','failed'].includes(review.status));
           const preferenceSaved=uncertain.endpoint==='preference' && array(state.profile?.stated_preferences).some(item=>item.id===uncertain.id && item.status===({confirm:'confirmed',decline:'declined',withdraw:'withdrawn'}[uncertain.action]));
           const cognitiveSaved=uncertain.endpoint==='cognitive' && ((uncertain.action==='enable' && state.cognitive?.enabled===true) || (uncertain.action==='disable' && state.cognitive?.enabled===false) || (uncertain.action==='delete' && !array(state.cognitive?.observations).some(item=>item.id===uncertain.id)) || (uncertain.action==='reminder_set' && state.cognitive?.status==='watch' && state.cognitive?.cooldown_until));
-          if((known && ['completed','failed'].includes(known.status)) || sealed || started || forgotten || reflected || resumed || localReviewed || preferenceSaved || cognitiveSaved){ uncertain=null; setError(''); status('已找到这次操作的保存结果；没有重新发送。'); }
-          else {setError('上次请求结果仍需核查，已停止写操作且不会自动重发。你可以继续刷新查看保存结果。'+(uncertain.id?`\n请求编号：${uncertain.id}`:''));status('已读取状态；未执行任何新的模型或护理操作。');}
+          const autoReviewSaved=uncertain.endpoint==='auto-review' && state.auto_review?.last_command_id===uncertain.id && state.auto_review?.enabled===uncertain.enabled && state.auto_review?.daily_limit===uncertain.dailyLimit;
+          const invitationDisplayed=uncertain.endpoint==='preference-invitation-ack' && state.preference_invitation?.id===uncertain.id && state.preference_invitation?.status==='delivered';
+          const invitationPrepared=uncertain.endpoint==='preference-invitation' && state.preference_invitation?.preference_id===uncertain.id && state.preference_invitation?.session_id===uncertain.sessionId && state.preference_invitation?.id!==uncertain.previousInvitationId;
+          const sharingCommand=uncertain.endpoint==='sharing' && array(state.sharing?.commands).find(command=>command.request_id===uncertain.id && command.action===uncertain.action);
+          const sharingSaved=sharingCommand && array(state.sharing?.records).some(record=>record.id===sharingCommand.sharing_id && !['reserved','sending','unknown'].includes(record.status));
+          const preparationClosed=['preference-invitation','preference-invitation-ack','cognitive-readiness'].includes(uncertain.endpoint) && array(state.sessions).some(session=>session.session_id===uncertain.sessionId && !['open','active','in_progress'].includes(session.status));
+          if((known && ['completed','failed'].includes(known.status)) || sealed || started || forgotten || reflected || resumed || localReviewed || preferenceSaved || cognitiveSaved || autoReviewSaved || invitationDisplayed || invitationPrepared || preparationClosed || sharingSaved){ uncertain=null; setError(''); status(preparationClosed?'会话已封存，本轮复述或文字许可已失效；没有重发或确认偏好。':'已找到这次操作的保存结果；没有重新发送。'); }
+          else {setError('上次请求结果仍需核查，发送及新会话已停止；仍可封存当前会话或关闭变化观察。不会自动重发，你可以继续刷新查看保存结果。'+(uncertain.id?`\n请求编号：${uncertain.id}`:''));status('已读取状态；未执行任何新的模型或护理操作。');}
         } else if(state.storage_failed) {setError('保存失败，已停止写操作。请先核查本地保存问题；刷新仅查看状态。');status('已读取状态；保存故障尚未解决。');}
-        else if(state.requires_review || [...array(state.turns),...allReviews()].some(row=>['pending','unknown'].includes(row.status) || row.requires_review)) {setError('存在等待处理、结果不明或需要核查费用的请求，已停止写操作。刷新只查看保存结果，不会重新发送。');status('已读取状态；仍有请求需要核查。');}
+        else if(state.requires_review || [...array(state.turns),...allReviews()].some(row=>['pending','unknown'].includes(row.status) || row.requires_review)) {setError('存在等待处理、结果不明或需要核查费用的请求，发送与新增操作已停止；仍可封存当前会话或撤回。刷新只查看保存结果，不会重新发送。');status('已读取状态；仍有请求需要核查。');}
         else {setError('');status('已读取保存状态。');}
-        if(!uncertain && (state.requires_review || [...array(state.turns),...allReviews()].some(row=>row.requires_review))) {setError('保存记录仍要求核查结果与费用，后续写操作保持停止。已读取的失败不会换新编号重发。');status('已取得保存状态；核查标记尚未解除。');}
+        if(!uncertain && (state.requires_review || [...array(state.turns),...allReviews()].some(row=>row.requires_review))) {setError('保存记录仍要求核查结果与费用，发送与新增操作保持停止；仍可封存当前会话或撤回。已读取的失败不会换新编号重发。');status('已取得保存状态；核查标记尚未解除。');}
       } catch(error){setError('读取状态失败：'+error.message);status('没有自动重试。');}
       finally {busy=false;updateControls();}
     }
     async function mutate(endpoint, body, onSuccess) {
-      const privacyReduction=endpoint==='cognitive' && ['disable','delete'].includes(body.action);
+      const privacyReduction=(endpoint==='cognitive' && ['disable','delete'].includes(body.action)) || (endpoint==='auto-review' && body.enabled===false) || (endpoint==='sharing' && body.action==='revoke');
+      const safeSeal=endpoint==='seal' && body.session_id===state?.session_id;
       const previousUncertain=uncertain;
-      if(busy || careBusy || replayMode || (uncertain && !privacyReduction) || (endpoint==='cognitive' && viewingHistory()))return;
+      if(busy || careBusy || replayMode || (uncertain && !privacyReduction && !safeSeal) || (['cognitive','sharing'].includes(endpoint) && viewingHistory()))return;
       if(modelCallsStopped() && ['text','reflect'].includes(endpoint)){renderModelUsage();status('后续模型调用已停止；请核查记录或调用限额。');return;}
-      const submitted={endpoint,id:body.turn_id || body.request_id || body.id || null,action:body.action || null,sessionId:body.session_id || null,sessionIds:array(state?.sessions).map(session=>session.session_id)};
+      const submitted={endpoint,id:body.turn_id || body.request_id || body.id || null,action:body.action || null,enabled:body.enabled,dailyLimit:body.daily_limit,sessionId:body.session_id || null,previousInvitationId:state?.preference_invitation?.id || null,sessionIds:array(state?.sessions).map(session=>session.session_id)};
       busy=true;setError('');updateControls();status(endpoint==='reflect'?'正在处理明确提出的会后整理请求…':'正在保存本次操作…');
       try {const data=await request(endpoint,body);if(data.state)render(data.state);if(onSuccess)onSuccess(data);status(endpoint==='reflect' && state?.mode==='local_preview'?'预览模式未运行模型；请查看会后状态。':'操作已返回，状态按保存记录展示。');}
       catch(error) {
-        if(!error.confirmed){uncertain=previousUncertain || submitted;setError('请求结果不明，已停止写操作。请刷新状态核查；不会自动重试或重新发送。\n'+error.message+(uncertain.id?`\n请求编号：${uncertain.id}`:''));}
+        if(!error.confirmed){uncertain=previousUncertain || submitted;setError('请求结果不明，发送及新会话已停止；仍可封存当前会话或关闭变化观察。请刷新状态核查，不会自动重试或重新发送。\n'+error.message+(uncertain.id?`\n请求编号：${uncertain.id}`:''));}
         else setError(error.message);
         status('本次操作没有被界面当作成功。');
       } finally {busy=false;updateControls();}
@@ -716,8 +844,16 @@
     $('composer').addEventListener('submit',event=>{event.preventDefault();const value=$('message-input').value.trim();if(!value || !isCurrentOpen() || viewingHistory())return;mutate('text',{text:value,turn_id:crypto.randomUUID(),session_id:state.session_id},()=>{$('message-input').value='';});});
     $('message-input').addEventListener('input',updateControls);
     $('message-input').addEventListener('keydown',event=>{if(event.key==='Enter' && (event.ctrlKey || event.metaKey)){event.preventDefault();$('composer').requestSubmit();}});
+    $('sharing-form').addEventListener('submit',event=>{event.preventDefault();if(!event.currentTarget.checkValidity())return;sharingAction('prepare',{source_id:$('sharing-source').value,contact_id:$('sharing-contact').value});});
+    for(const id of ['sharing-source','sharing-contact'])$(id).addEventListener('change',()=>{sharingSelectionDirty=true;sharingApprovals.clear();renderSharing();});
+    $('sharing-refresh').addEventListener('click',readSharing);
+    $('explicit-sharing').addEventListener('toggle',()=>{if($('explicit-sharing').open)readSharing();});
     $('story-select').addEventListener('change',renderChoices);
+    $('auto-review-limit').addEventListener('change',()=>{autoReviewDraft=Number($('auto-review-limit').value);});
+    $('auto-review-enable').addEventListener('click',()=>mutate('auto-review',{enabled:true,daily_limit:Number($('auto-review-limit').value),confirmed:true,request_id:crypto.randomUUID()},()=>{autoReviewDraft=null;renderAutoReview();}));
+    $('auto-review-disable').addEventListener('click',()=>mutate('auto-review',{enabled:false,daily_limit:state.auto_review?.daily_limit || 1,confirmed:true,request_id:crypto.randomUUID()},()=>{autoReviewDraft=null;renderAutoReview();}));
     $('cognitive-enable').addEventListener('click',()=>mutate('cognitive',{action:'enable'}));
+    $('cognitive-talk').addEventListener('click',()=>{if($('message-input').value.trim()){status('输入框已有草稿，请先发送或清空，再选择聊这些记录。');return;}mutate('cognitive-readiness',{session_id:state.session_id},data=>{if(typeof data.message==='string'){$('message-input').value=data.message;status('已填入本人选择，点发送后使用一次许可；编辑这句话会取消许可。');$('message-input').focus();}});});
     $('cognitive-arranged').addEventListener('click',()=>mutate('cognitive',{action:'reminder_set'}));
     $('cognitive-disable').addEventListener('click',()=>{$('cognitive-disable-choice').hidden=false;});
     $('cognitive-cancel').addEventListener('click',()=>{$('cognitive-disable-choice').hidden=true;});
@@ -730,7 +866,7 @@
     $('replay-restart').addEventListener('click',()=>{replayIndex=0;stagePlaying=true;renderStage();scheduleReplay();});
     $('replay-position').addEventListener('input',()=>{stopReplayTimer();stagePlaying=false;replayIndex=Number($('replay-position').value);renderStage();});
     $('replay-exit').addEventListener('click',()=>{exitReplay();status('已退出保存回放。没有发起新请求。');});
-    $('elder-care').addEventListener('toggle',()=>{if($('elder-care').open && !careState)readCare();});
+    $('elder-care').addEventListener('toggle',()=>{if($('elder-care').open){if(!careState)readCare();else ackVisibleReminders();}});
     $('care-refresh').addEventListener('click',readCare);
     $('reminder-form').addEventListener('submit',event=>{event.preventDefault();careAction('reminder.create',{label:$('reminder-label').value.trim(),schedule:$('reminder-schedule').value,date:$('reminder-date').value,time:$('reminder-time').value,timezone:$('reminder-timezone').value,grace_minutes:Number($('reminder-grace').value)});});
     $('contact-form').addEventListener('submit',event=>{event.preventDefault();careAction('contact.create',{name:$('contact-name').value.trim(),relation:$('contact-relation').value.trim(),channel:'local'});});
@@ -744,14 +880,25 @@
     $('return-current').addEventListener('click',()=>{selectedSession=null;render(state);status('已回到当前会话。');});
     $('forget').addEventListener('click',()=>{$('delete-confirm').hidden=false;$('confirm-forget').focus();});
     $('cancel-forget').addEventListener('click',()=>{$('delete-confirm').hidden=true;$('forget').focus();});
-    $('confirm-forget').addEventListener('click',()=>mutate('forget',{},()=>{$('delete-confirm').hidden=true;selectedSession=null;renderingTurns='';$('message-input').value='';careState=null;careUnknown=null;careError('');['care-occurrences','care-reminders','care-contacts','care-consents','care-deliveries'].forEach(id=>placeholder($(id),'本次体验资料已清除。'));['reminder-form','contact-form','consent-form'].forEach(id=>$(id).reset());$('care-mode').textContent='本次体验资料已清除；可刷新读取护理状态。';render(state);if($('elder-care').open)setTimeout(readCare,0);}));
+    $('confirm-forget').addEventListener('click',()=>mutate('forget',{},()=>{$('delete-confirm').hidden=true;selectedSession=null;renderingTurns='';sharingSelectionDirty=false;sharingApprovals.clear();$('message-input').value='';careState=null;careUnknown=null;careError('');['care-occurrences','care-reminders','care-contacts','care-consents','care-deliveries'].forEach(id=>placeholder($(id),'本次体验资料已清除。'));['reminder-form','contact-form','consent-form'].forEach(id=>$(id).reset());$('care-mode').textContent='本次体验资料已清除；可刷新读取护理状态。';render(state);if($('elder-care').open)setTimeout(readCare,0);}));
     function sealOnLeave() {
-      if(leavingSeal || busy || uncertain || replayMode || !isCurrentOpen())return;
+      if(leavingSeal || busy || replayMode || !isCurrentOpen())return;
       leavingSeal=true;
       fetch('/api/minimal/seal',{method:'POST',credentials:'same-origin',keepalive:true,headers:{'Content-Type':'application/json','X-Aria-Demo-Token':TOKEN},body:JSON.stringify({session_id:state.session_id})}).catch(()=>{});
     }
     window.addEventListener('pagehide',sealOnLeave);
     window.addEventListener('pageshow',event=>{leavingSeal=false;if(event.persisted)refresh();});
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){readCare({passive:true});ackVisibleReminders();}});
+    window.addEventListener('scroll',ackVisibleReminders,{passive:true});
+    window.addEventListener('resize',ackVisibleReminders);
+    setInterval(()=>readCare({passive:true}),5000);
+    setInterval(async()=>{
+      if(!state?.offline_review_running || busy || careBusy || replayMode || backgroundPolling || document.visibilityState!=='visible')return;
+      backgroundPolling=true;
+      try {const data=await request('state');if(data.state)render(data.state);else render(data);}
+      catch(error){setError('后台整理状态读取失败：'+error.message+'；没有重发整理请求。');}
+      finally{backgroundPolling=false;}
+    },1500);
     refresh();
   })();
   </script>

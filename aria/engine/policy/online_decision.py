@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import json
 import os
 import re
@@ -22,6 +23,7 @@ from .reply_contract import (
     REPLY_CONTRACT_HEADING, UNAVAILABLE_CONTACT_REPLY, contract_prompt, quality_violations,
     clarification_question_matches, reply_quality_contract, task_delivery_diagnostics,
 )
+from .user_grounding import user_grounding_sources
 
 ONLINE_DECISION_VERSION = "online_turn_decision_v1"
 ONLINE_ID_NAMESPACE_VERSION = "online_json_id_namespaces_v1"
@@ -476,6 +478,27 @@ def online_decision_tool_spec(version: str = ONLINE_DECISION_VERSION) -> dict:
     if version == ONLINE_DECISION_VERSION_SAFETY:
         parameters["properties"]["safety_concern"] = {"type": "string", "enum": list(SAFETY_CONCERNS)}
         parameters["required"].append("safety_concern")
+        # Optional for retained v3 outputs; only current validated owner
+        # decisions can reduce C1 permission. No enable/share action exists.
+        parameters["properties"]["cognitive_control"] = {
+            "type": "object", "properties": {
+                "version": {"type": "string", "enum": ["cognitive_permission_v1"]},
+                "action": {"type": "string", "enum": ["no_permission_change", "disable_observation"]},
+                "evidence_quote": {"type": "string", "maxLength": 2000},
+            }, "required": ["version", "action", "evidence_quote"],
+            "additionalProperties": False,
+        }
+        parameters["properties"]["preference_control"] = {
+            "type": "object", "properties": {
+                "version": {"type": "string", "enum": ["preference_confirmation_v1"]},
+                "action": {"type": "string", "enum": ["confirm", "decline", "defer", "unclear"]},
+                "invitation_id": {"type": "string"},
+                "target_id": {"type": "string"},
+                "target_sha256": {"type": "string"},
+                "evidence_quote": {"type": "string", "maxLength": 240},
+            }, "required": ["version", "action", "invitation_id", "target_id", "target_sha256", "evidence_quote"],
+            "additionalProperties": False,
+        }
     if version == ONLINE_DECISION_VERSION_V2:
         properties = parameters["properties"]
         properties["deliberation"] = deliberation_schema()
@@ -656,6 +679,15 @@ def single_pass_messages(
             format_style=format_style,
         )
         return copied
+    if version == ONLINE_DECISION_VERSION_SAFETY:
+        base += (
+            "\nC1本人权限语义：本轮若本人明确要求停止留意其日常/记忆变化，"
+            "cognitive_control用version=cognitive_permission_v1、action=disable_observation，"
+            "evidence_quote逐字复制完整当前本人原话。否定、引述、讨论措辞、询问功能、"
+            "仅拒谈某个话题均不能当关闭；其余用no_permission_change且evidence_quote为空。"
+            "不按某几个关键词决定，不开启、不删除旧记录、不授权分享。"
+            "关闭成功保留已有观察，本人可在面板另选删除；未取得保存回执不声称已关闭。"
+        )
     copied[0]["content"] = (
         base + delivery_contract
         + "\n\n## 在线单次情感决策\n"
@@ -860,7 +892,8 @@ def apply_single_pass_decision(
     observation = ctx.reasoning.observation_plan
     decision_basis = ctx.working_memory.get("personality_decision") or {}
     selection_lock_reason = ""
-    if observation is not None and observation.mode == "wait":
+    if (observation is not None and observation.mode == "wait"
+            and not reply_quality_contract(ctx, utterance=utterance)["observation_advisory"]):
         # wait 是风险/关系边界或已验证冷却形成的本地决定，不能让生成文本
         # 把它悄悄换回刚被拒绝的推动路线。
         selection_lock_reason = "observation_wait"
@@ -943,6 +976,7 @@ def apply_single_pass_decision(
         ],
         "selected_intervention_id": selected_id,
         "requested_intervention_id": requested_selected_id,
+        "parsed_response_sha256": hashlib.sha256(pre_guard_response.encode("utf-8")).hexdigest(),
         "selection_lock_reason": selection_lock_reason or None,
         "uncertainty": _clamp(payload.get("uncertainty"), 0.5),
         "delivery_guard": delivery_guard,
@@ -951,6 +985,24 @@ def apply_single_pass_decision(
     if _active_version(ctx) == ONLINE_DECISION_VERSION_SAFETY:
         trace["safety_concern"] = safety_concern
         trace["safety_source"] = "online_model_semantics"
+        control = payload.get("cognitive_control")
+        valid_control = (
+            type(control) is dict and set(control) == {"version", "action", "evidence_quote"}
+            and control["version"] == "cognitive_permission_v1"
+            and type(control["action"]) is str
+            and control["action"] in {"no_permission_change", "disable_observation"}
+            and type(control["evidence_quote"]) is str and len(control["evidence_quote"]) <= 2000
+            and (control["evidence_quote"] == utterance if control["action"] == "disable_observation"
+                 else control["evidence_quote"] == "")
+        )
+        trace["cognitive_control_status"] = "validated" if valid_control else "missing_or_invalid"
+        trace["cognitive_control"] = deepcopy(control) if valid_control else None
+        trace["owner_message_sha256"] = hashlib.sha256(utterance.encode()).hexdigest()
+        from ..memory.preference_dialogue import validate_preference_control
+        preference_control = validate_preference_control(payload.get("preference_control"), persona, ctx, utterance)
+        trace["preference_control_status"] = "validated" if preference_control is not None else "missing_or_invalid"
+        trace["preference_control"] = preference_control
+        trace["preference_control_supplied"] = "preference_control" in payload
     ctx.working_memory["online_turn_decision"] = trace
     history = ctx.working_memory.setdefault(
         "online_decision_history", []
@@ -1080,7 +1132,8 @@ def _guard_user_response(
     )
     question_count = question_surface.count("？") + question_surface.count("?")
     has_question = question_count > 0
-    if observation is not None and observation.mode == "wait":
+    if (observation is not None and observation.mode == "wait"
+            and not contract["observation_advisory"]):
         # wait 是本地形成的关系/结果边界。开放域文本无法可靠证明一句无问号
         # 建议没有换词继续推动，所以不信任模型自报的 route id，始终交付受控
         # 的允许式陪伴表达，并把这一拍排除出模型干预结果学习。
@@ -1089,6 +1142,7 @@ def _guard_user_response(
             violations.append("question_while_waiting")
     if (
         observation is not None
+        and not contract["observation_advisory"]
         and observation.mode == "observe"
         and question_count > 1
     ):
@@ -1214,18 +1268,15 @@ def _response_grounding_sources(
     persona: PersonaProfile | None,
 ) -> list[str]:
     """返回本轮允许引用的事实文本；只用于守卫，不写入审计日志。"""
-    sources = [str(utterance or "")]
+    sources = user_grounding_sources(ctx, str(utterance or ""))
     # Only user turns are evidence. Earlier model inventions cannot ground a
     # later assertion merely because they now appear in the chat history.
-    sources.extend(turn.user for turn in reversed(ctx.turns[-3:]))
     for item in list(
         ctx.working_memory.get("recalled_episodes") or []
     )[:2]:
         sources.append(_grounding_text(item))
     if persona is not None:
-        for item in persona.relationship_context[-6:]:
-            if not item.referenceable:
-                continue
+        for item in persona.referenceable_relationships()[-6:]:
             sources.extend(str(fact) for fact in item.facts[:3])
     return sources
 
@@ -1245,9 +1296,8 @@ def _external_actor_markers(
 ) -> list[str]:
     candidates = list(_GENERIC_EXTERNAL_ACTORS)
     if persona is not None:
-        for item in persona.relationship_context[-6:]:
-            if item.referenceable:
-                candidates.extend((item.name, item.relation or ""))
+        for item in persona.referenceable_relationships()[-6:]:
+            candidates.extend((item.name, item.relation or ""))
     return list(dict.fromkeys(
         marker for marker in candidates if marker and marker in response
     ))

@@ -1,5 +1,6 @@
 """Post-action grounding for real-world completion claims."""
 from __future__ import annotations
+from tests.memory_source_fixtures import relationship_evidence
 
 import json
 
@@ -275,6 +276,7 @@ def test_referenceable_relationship_fact_grounds_third_party_completion():
             facts=[fact],
             referenceable=True,
             first_observed_at="2026-09-01T08:00:00",
+            evidence=relationship_evidence(fact, context="女儿" + fact),
         )],
     )
     response = "女儿已经回复了，她安排好了复诊。"
@@ -333,17 +335,19 @@ def test_notification_receipt_must_match_named_target():
                 id="daughter",
                 name="陈小芳",
                 relation="女儿",
-                facts=[],
+                facts=["陈小芳是我女儿。"],
                 referenceable=True,
                 first_observed_at="2026-09-01T08:00:00",
+                evidence=relationship_evidence("陈小芳是我女儿。"),
             ),
             RelationshipContextEntry(
                 id="carer",
                 name="王护理员",
                 relation="护理员",
-                facts=[],
+                facts=["王护理员是负责我的护理员。"],
                 referenceable=True,
                 first_observed_at="2026-09-01T08:00:00",
+                evidence=relationship_evidence("王护理员是负责我的护理员。"),
             ),
         ],
     )

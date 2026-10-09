@@ -1,4 +1,5 @@
 """Prospective repair keeps the failed campaign and its fee; no network."""
+from tests._model_http_stub import stub_model_http
 from datetime import datetime, timezone, timedelta
 import io
 import json
@@ -13,7 +14,7 @@ from aria.bench.ctest_runner import CTestLocalMemoryFixture
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: pytest.fail("network not injected"))
+    stub_model_http(monkeypatch, lambda *_a, **_k: pytest.fail("network not injected"))
 
 
 @pytest.fixture
@@ -98,7 +99,7 @@ def test_real_client_with_local_receipts_preserves_both_campaigns(frozen, monkey
         return Response(json.dumps({"id": "gen-fixturerepair", "model": payload["model"],
             "provider": "Anthropic", "usage": usage,
             "choices": [{"finish_reason": "stop", "message": {"content": content}}]}).encode())
-    monkeypatch.setattr(urllib.request, "urlopen", receive)
+    stub_model_http(monkeypatch, receive)
     output = root / "out"
     result = repair.execute(root, root, registration, output, allow_local_env=True)
     assert result["calls_used"] == len(calls) == (96 if failure is None else 1)

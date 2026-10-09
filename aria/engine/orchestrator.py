@@ -12,6 +12,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime, timedelta
+import hashlib
 import json
 import time
 from typing import Any, Optional
@@ -38,6 +39,7 @@ from .model.persona import (
     PersonaProfile,
     PersistentTaskRecord,
     RiskEvent,
+    SafetyScreeningRecord,
     SessionCheckpointRecord,
     SessionTurnSnapshot,
 )
@@ -229,11 +231,9 @@ class Engine:
         semantic_screening = (
             self.policy.online_decision_version == ONLINE_DECISION_VERSION_SAFETY
         )
-        # Reducing privacy permission must never wait for a model's safety
-        # answer. This narrow helper does not collect, remind or notify anyone.
-        if semantic_screening and apply_cognitive_withdrawal(ctx, self.persona, utterance):
-            if self.store is not None and self.persona is not None:
-                self.store.save(self.persona)
+        # The observation planner runs before reply generation; give it the
+        # same explicit contract, including on the first turn of a session.
+        ctx.working_memory["_online_decision_version"] = self.policy.online_decision_version
         current_turn_id = ctx.working_memory.pop("_current_turn_id", None)
         acoustic = prepare_acoustic(
             acoustic, turn_index=len(ctx.turns), turn_id=current_turn_id,
@@ -269,6 +269,7 @@ class Engine:
             "perception_input",
             "perception_fusion",
             "prompt_evidence_snapshot",
+            "safety_screening_audit",
         ):
             ctx.working_memory.pop(key, None)
         ctx.reasoning.hypotheses = []
@@ -302,7 +303,18 @@ class Engine:
         # 明确高风险先于任何生成式调用接管，不能让胸痛/呼吸困难先排队等状态模型。
         signal = self._risk.assess(ctx)
         if signal is not None and signal.tier >= 2:
-            self._record_risk(ctx, signal)
+            from .cognitive import abandon_cognitive_readiness
+            abandon_cognitive_readiness(ctx, "keyword_safety_takeover")
+            # A keyword backstop protects immediately but does not establish
+            # whose symptoms these are. Keep a separate source-only audit.
+            self._record_safety_screening(ctx, signal, utterance)
+            excluded = ctx.working_memory.setdefault("_sensitive_memory_excluded_turns", [])
+            if len(ctx.turns) not in excluded:
+                excluded.append(len(ctx.turns))
+            ctx.working_memory["intervention_delivery"] = {
+                "status": "not_delivered", "turn_index": len(ctx.turns),
+                "intervention_id": None, "reason": "keyword_safety_takeover",
+            }
             ctx.working_memory["risk_flag"] = {
                 "tier": signal.tier,
                 "kind": signal.kind,
@@ -416,7 +428,7 @@ class Engine:
 
         # 2. 更新结构化状态(非 LLM):关系联盟 + 个案假设
         #    Existing trust was seeded before safety handling, including early returns.
-        update_alliance(ctx, utterance)
+        update_alliance(ctx, utterance, allow_surface_inference=not semantic_screening)
         update_formulation(ctx, self.persona)
 
         # 2a. 当前轮风险优先于主动观察和任务。tier1 先留下“降速”标志，
@@ -488,6 +500,12 @@ class Engine:
             model_route=reply_route,
         )
         online_trace = ctx.working_memory.get("online_turn_decision") or {}
+        # C1 reduction is checked before safety branches; a valid current
+        # semantic withdrawal can stop capture even if the safety answer is
+        # concerning. The model never gains enable, deletion or share power.
+        if semantic_screening and apply_cognitive_withdrawal(ctx, self.persona, utterance):
+            if self.store is not None and self.persona is not None:
+                self.store.save(self.persona)
         model_signal = semantic_safety_signal(ctx, utterance)
         semantic_clear = (
             online_trace.get("version") == ONLINE_DECISION_VERSION_SAFETY
@@ -555,6 +573,19 @@ class Engine:
                 self.store.save(self.persona)
             return response
         if semantic_screening:
+            from .memory.preference_dialogue import apply_preference_dialogue
+            preference_reply = apply_preference_dialogue(ctx, self.persona, utterance, store=self.store)
+            if preference_reply is not None:
+                from .policy.delivery_provenance import record_reply_stage
+                record_reply_stage(ctx, "preference_confirmation_commit", raw, preference_reply)
+                ctx.working_memory.pop("_delivery_response_candidate_for_turn", None)
+                ctx.working_memory["intervention_delivery"] = {
+                    "status": "not_delivered", "turn_index": len(ctx.turns),
+                    "intervention_id": None, "reason": "owner_preference_confirmation",
+                }
+                ctx.add_turn(utterance, preference_reply)
+                self._mark_interaction_started()
+                return preference_reply
             # These extension hooks can mutate consent, tasks or external care
             # state, so v3 may invoke them only after a current validated none.
             care_changed = (
@@ -1164,7 +1195,7 @@ class Engine:
         return safety_response(signal, self.persona)
 
     def _record_risk(self, ctx: EngineContext, signal: RiskSignal) -> None:
-        """风险事件落账(每会话每 kind 最多一条,避免刷屏)——纵向基线的原始信号。"""
+        """历史/模型分流事件落账；不据此断言主体或自动推导纵向变化。"""
         if self.persona is None:
             return
         logged: set = ctx.working_memory.setdefault("_risk_logged_kinds", set())
@@ -1176,3 +1207,31 @@ class Engine:
             at=datetime.now().isoformat(timespec="seconds"),
             tier=signal.tier, kind=signal.kind, note=note,
         ))
+
+    def _record_safety_screening(self, ctx: EngineContext, signal: RiskSignal,
+                                 utterance: str) -> None:
+        """Record provenance without classifying an unverified subject."""
+        if self.persona is None:
+            return
+        identity = (ctx.session_id, len(ctx.turns), signal.kind)
+        if any((row.session_id, row.turn_index, row.kind) == identity
+               for row in self.persona.safety_screenings):
+            return
+        try:
+            row = SafetyScreeningRecord(
+                at=datetime.now().isoformat(timespec="seconds"),
+                session_id=ctx.session_id, turn_index=len(ctx.turns),
+                tier=signal.tier, kind=signal.kind,
+                evidence_sha256=hashlib.sha256(utterance.encode("utf-8", errors="surrogatepass")).hexdigest(),
+            )
+        except (ValueError, TypeError, UnicodeError):
+            # Audit identity failure may never delay an urgent response.
+            ctx.working_memory["safety_screening_audit"] = {
+                "status": "not_recorded", "reason": "invalid_source_identity",
+            }
+            return
+        self.persona.safety_screenings.append(row)
+        ctx.working_memory["safety_screening_audit"] = {
+            "status": "recorded", "subject": "unverified",
+            "source": "keyword_backstop",
+        }

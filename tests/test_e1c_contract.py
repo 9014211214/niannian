@@ -1,4 +1,5 @@
 """Local, staged, explicitly synthetic structural checks. No holdout semantics."""
+from tests._model_http_stub import stub_model_http
 from collections import Counter
 from copy import deepcopy
 import hashlib
@@ -25,7 +26,7 @@ def encode(value):
 def block_network(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("software_preparation_network_forbidden")
-    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    stub_model_http(monkeypatch, forbidden)
     monkeypatch.setattr(socket.socket, "connect", forbidden)
     monkeypatch.setattr(socket, "create_connection", forbidden)
 

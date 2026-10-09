@@ -79,10 +79,11 @@ def test_engine_takeover_contains_hotline():
     out = _engine(persona).process_turn(_ctx(), "不想活了。")
     assert "12356" in out and "120" in out
     assert not out.startswith("[mock-llm")        # 没走 LLM
-    # 落账:安全账本记了一条 tier3
-    assert len(persona.risk_events) == 1
-    ev = persona.risk_events[0]
-    assert ev.tier == 3 and ev.kind == "ideation" and ev.note
+    # Keyword screening is operational evidence, not verified owner risk.
+    assert not persona.risk_events and len(persona.safety_screenings) == 1
+    ev = persona.safety_screenings[0]
+    assert ev.tier == 3 and ev.kind == "ideation" and ev.evidence_sha256
+    assert ev.subject == "unverified"
 
 
 def test_urgent_risk_is_not_learned_as_previous_intervention_outcome():
@@ -102,12 +103,13 @@ def test_urgent_risk_is_not_learned_as_previous_intervention_outcome():
     assert ctx.reasoning.outcomes == []
 
 
-def test_record_once_per_kind_per_session():
+def test_screening_records_each_actual_turn_without_promoting_owner_risk():
     persona = PersonaProfile(user_id="u")
     eng, ctx = _engine(persona), _ctx()
     eng.process_turn(ctx, "不想活了。")
     eng.process_turn(ctx, "真的活不下去。")
-    assert len(persona.risk_events) == 1          # 同会话同 kind 只落一条
+    assert not persona.risk_events
+    assert [ev.turn_index for ev in persona.safety_screenings] == [0, 1]
 
 
 # ── tier1 不接管:正常回应 + 降速旗 + 落账 ──────────────────────

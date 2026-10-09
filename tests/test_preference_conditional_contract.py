@@ -1,4 +1,5 @@
 """Software probes with explicit model labels; no semantic-accuracy claim or calls."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import json
 import urllib.request
@@ -35,7 +36,7 @@ def extract(text, instruction=None, quote=None, **fields):
 def no_network(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("This is software verification, not a model run")
-    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    stub_model_http(monkeypatch, forbidden)
 
 
 @pytest.mark.parametrize("text", REQUESTS)
@@ -202,7 +203,7 @@ def test_real_product_pipeline_persists_confirms_injects_and_withdraws(tmp_path,
     }]}
     assert app.seal(sid)["ok"]
     assert not clients.memory.calls and not clients.reflection.calls
-    result = app.reflect("conditional-software-review")
+    result = app.reflect("conditional-software-review", wait=True)
     assert result["ok"], result
     item = result["state"]["profile"]["stated_preferences"][0]
     assert item["status"] == "proposed" and item["extraction_source"] == "model"

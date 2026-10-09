@@ -1,4 +1,5 @@
 """Original synthetic fixtures and in-memory fakes; no CPED or model access."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 from dataclasses import replace
 import hashlib
@@ -150,7 +151,7 @@ def test_repeat_run_rejected_before_callback(completed, prepared):
 @pytest.mark.parametrize("reason", ["transport_failed", "provider_cost_unknown", "provider_tokens_unknown",
                                    "actual_model_missing_or_changed", "maximum_request_cost_exceeded"])
 def test_failure_unknown_cost_and_model_drift_stop_without_retry(reason, prepared, tmp_path, monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: pytest.fail("network access"))
+    stub_model_http(monkeypatch, lambda *_a, **_k: pytest.fail("network access"))
     calls = []
     def fake(payload):
         calls.append(payload)

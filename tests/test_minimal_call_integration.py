@@ -1,4 +1,5 @@
 """Real Engine/client assembly with synthetic responses, never real models."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import hashlib
 import json
@@ -48,7 +49,7 @@ class Response:
 
 @pytest.fixture(autouse=True)
 def deny_network(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("unstubbed network"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("unstubbed network"))
 
 
 def app_at(path, *, maximum=21):
@@ -84,7 +85,7 @@ def responses(monkeypatch, *rows):
         response.data["usage"].setdefault("completion_tokens", 12)
         return response
 
-    monkeypatch.setattr(urllib.request, "urlopen", receive)
+    stub_model_http(monkeypatch, receive)
     return calls
 
 
@@ -118,7 +119,7 @@ def test_unknown_cost_rejects_reply_and_seal_forget_restart_cannot_reset_allowan
     assert not app.submit("再说一遍", "second", sid)["ok"]
     assert len(app.state()["turns"]) == 1
     assert app.seal(sid)["ok"]
-    assert not app.reflect("review")["ok"]
+    assert not app.reflect("review", wait=True)["ok"]
     assert app.tick_care_all() == ["fictional-chen"]
     before = hashlib.sha256(app.call_guard.path.read_bytes()).hexdigest()
     for _ in range(3):
@@ -147,14 +148,14 @@ def test_three_roles_share_guard_and_explicit_review_context(tmp_path, monkeypat
     assert app.submit("囡囡她妈小时候，什么坏了都拿来找我。", "second", sid)["ok"]
     assert app.submit("她对我好，我知道。可有些事我自己愿意做。", "third", sid)["ok"]
     assert app.seal(sid)["ok"] and len(calls) == 3
-    result = app.reflect("review-one")
+    result = app.reflect("review-one", wait=True)
     assert result["ok"], result
     usage = result["state"]["model_usage"]
     assert [r["role"] for r in usage["attempts"]] == ["online_fast"] * 3 + ["memory", "reflection"]
     assert [r["operation_id"] for r in usage["attempts"]] == ["first", "second", "third", "review-one", "review-one"]
     assert {r["session_id"] for r in usage["attempts"]} == {sid}
     assert usage["calls_used"] == len(calls) == 5 and usage["stopped"]
-    assert app.reflect("review-one")["duplicate"] and len(calls) == 5
+    assert app.reflect("review-one", wait=True)["duplicate"] and len(calls) == 5
     next_sid = app.start()["state"]["session_id"]
     assert not app.submit("下一次", "next", next_sid)["ok"]
     assert app.seal(next_sid)["ok"]
@@ -167,7 +168,7 @@ def test_memory_protocol_failure_keeps_original_and_allows_new_conversation(tmp_
     app = app_at(tmp_path)
     sid = send_one(app)
     app.seal(sid)
-    result = app.reflect("invalid-memory")
+    result = app.reflect("invalid-memory", wait=True)
     assert not result["ok"]
     assert not result["state"]["reviews"][0]["requires_review"]
     assert not result["state"]["model_usage"]["stopped"]
@@ -176,14 +177,14 @@ def test_memory_protocol_failure_keeps_original_and_allows_new_conversation(tmp_
     assert result["state"]["offline"]["pending_count"] == 0
     audit = result["state"]["offline"]["audit"][-1]
     assert audit["outcome"] == "memory_failed" and not audit["memory_completed"] and not audit["reflection_completed"]
-    assert not app.reflect("do-not-retry-memory")["ok"]
+    assert not app.reflect("do-not-retry-memory", wait=True)["ok"]
     assert len(calls) == 2
     new_sid = app.start()["state"]["session_id"]
     assert app.submit("换一个话题", "another", new_sid)["ok"]
     assert len(calls) == 3
     assert len(app.state()["reviews"]) == 1
     assert app.seal(new_sid)["ok"]
-    assert app.reflect("new-session-memory")["ok"] and len(calls) == 4
+    assert app.reflect("new-session-memory", wait=True)["ok"] and len(calls) == 4
     assert app.state()["offline"]["audit"][0] == audit
     app.close()
 
@@ -239,7 +240,7 @@ def test_reasoning_contract_violation_preserves_fee_and_persistently_stops(route
         if violation == "details": message["reasoning_details"] = [{"type": "reasoning.text", "text": secret}]
         if violation == "tokens": response.data["usage"]["completion_tokens_details"] = {"reasoning_tokens": 3}
         return response
-    monkeypatch.setattr(urllib.request, "urlopen", receive)
+    stub_model_http(monkeypatch, receive)
     app = app_at(tmp_path)
     sid = app.start()["state"]["session_id"]
     app._sessions["fictional-chen"][1].working_memory["_force_reply_model"] = route

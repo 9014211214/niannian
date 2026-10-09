@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from ..model.persona import PersonaProfile
+from .atomic_file import replace_with_retry
 from .crypto import decrypt_if_needed, encrypt_if_keyed
 
 logger = logging.getLogger(__name__)
@@ -130,7 +131,7 @@ class PersonaStore:
             ),
             encoding="utf-8",
         )
-        tmp.replace(path)
+        replace_with_retry(tmp, path)
         logger.info(
             f"persona saved: {persona.user_id} "
             f"(episodes={len(persona.episodic_memory)})"

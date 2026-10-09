@@ -1,3 +1,4 @@
+from tests._model_http_stub import stub_model_http
 from contextlib import closing
 from copy import deepcopy
 import hashlib
@@ -23,7 +24,7 @@ def no_network(monkeypatch):
     def denied(*a, **k): raise AssertionError("network forbidden")
     monkeypatch.setattr(socket, "create_connection", denied)
     monkeypatch.setattr(socket.socket, "connect", denied)
-    monkeypatch.setattr(urllib.request, "urlopen", denied)
+    stub_model_http(monkeypatch, denied)
 
 
 def opener(monkeypatch, c, failures):

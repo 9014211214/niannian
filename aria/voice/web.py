@@ -483,6 +483,15 @@ class AriaWebServer(ThreadingHTTPServer):
                 self.maintenance_errors.pop(name, None)
             except Exception as exc:
                 self.maintenance_errors[name] = type(exc).__name__
+        # Hosts without an automatic-review option retain their existing
+        # maintenance contract. A review failure cannot stop care scheduling.
+        auto_review = getattr(self._aria_app, "tick_auto_review", None)
+        if callable(auto_review):
+            try:
+                auto_review()
+                self.maintenance_errors.pop("tick_auto_review", None)
+            except Exception as exc:
+                self.maintenance_errors["tick_auto_review"] = type(exc).__name__
 
     def shutdown(self) -> None:
         self._reaper_stop.set()

@@ -69,14 +69,18 @@ def test_web_live_source_is_preserved_for_only_outer_trim(tmp_path, text):
         app.close()
 
 
-def test_changed_guard_stays_rule_protection_and_next_turn_resets(tmp_path):
+def test_changed_guard_stays_rule_protection_and_next_turn_resets(tmp_path, monkeypatch):
     text = "alpha\nbeta\n"
     app, sid, engine, ctx, client = app_fixture(tmp_path, "wait", payload(text))
+    # Nonrisk v3 wait is advisory. Trigger a real deterministic scene replacement.
+    original_guard = engine.scene.guard_response
+    monkeypatch.setattr(engine.scene, "guard_response", lambda c, r: "软件守卫替换内容。")
     try:
         first = app.submit("中性软件输入。", "normalization-guard", sid)["state"]["turns"][-1]
         assert first["source"] == "rule_protection"
         assert first["delivery_protection"]["normalization_response_changed"]
         assert first["delivery_protection"]["protection_response_changed"]
+        monkeypatch.setattr(engine.scene, "guard_response", original_guard)
         engine._state_reasoner.mode = "ask"
         client.response = payload("alpha\nbeta")
         second = app.submit("中性软件输入。", "normalization-reset", sid)["state"]["turns"][-1]

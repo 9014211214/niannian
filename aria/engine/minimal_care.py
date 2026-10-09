@@ -27,7 +27,11 @@ _TIME = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 _KINDS = ("reminders", "occurrences", "contacts", "consents", "tasks", "deliveries")
 _ELDER_ACTIONS = {
     "reminder.create", "reminder.cancel", "occurrence.ack", "occurrence.decline",
-    "occurrence.snooze", "contact.create", "consent.grant", "consent.revoke",
+    "occurrence.snooze", "occurrence.displayed", "contact.create", "consent.grant", "consent.revoke",
+}
+_ELDER_RESPONSES = {"occurrence.ack", "occurrence.decline", "occurrence.snooze", "occurrence.displayed"}
+_CAREGIVER_ACTIONS = (_ELDER_ACTIONS - _ELDER_RESPONSES) | {
+    "contact.verify", "task.follow_up", "task.close", "receipt.record",
 }
 
 
@@ -125,6 +129,35 @@ class MinimalCareService:
                         for task in self._rows("tasks", row["elder_id"]):
                             if task["occurrence_id"] == row["occurrence_id"] and task["status"] != "closed":
                                 task["delivery_attention"] = "通知发送结果未知；请核查回执，禁止自动重发。"
+                                self._put("tasks", task)
+            # Old offered_local meant a database row was created, not that an
+            # elder page displayed it. Keep that historical state as evidence,
+            # but do not continue its grace window or unsent notifications.
+            legacy = [row for row in self._rows("occurrences")
+                      if row["status"] in {"pending", "unconfirmed", "snoozed"}
+                      and row.get("display_contract") != "elder_page_receipt_v1"]
+            if legacy:
+                with self._tx():
+                    for row in self._rows("occurrences"):
+                        if (row["status"] not in {"pending", "unconfirmed", "snoozed"}
+                                or row.get("display_contract") == "elder_page_receipt_v1"):
+                            continue
+                        row["legacy_visibility"] = {key: row.get(key) for key in
+                            ("status", "delivery_status", "offered_at", "deadline_at", "generation")}
+                        row["generation"] = row.get("generation", 0) + 1
+                        row.update(display_contract="elder_page_receipt_v1", delivery_status="awaiting_display",
+                                   displayed_at=None, displayed_by=None, displayed_generation=None,
+                                   display_source=None, offered_at=None, deadline_at=None,
+                                   display_history=[])
+                        if row["status"] == "unconfirmed":
+                            row["status"] = "pending"
+                        self._put("occurrences", row)
+                        self._cancel_queued(row["elder_id"], occurrence_id=row["id"],
+                            reason="旧生成记录没有本人页面展示回执；禁止发送。")
+                        for task in self._rows("tasks", row["elder_id"]):
+                            if task["occurrence_id"] == row["id"]:
+                                task.update(visibility_evidence="legacy_unverified",
+                                    delivery_attention="旧记录仅证明提醒已生成，不能证明本人页面展示；未发送通知已停止。")
                                 self._put("tasks", task)
 
     @contextmanager
@@ -252,11 +285,17 @@ class MinimalCareService:
             _identifier(elder_id)
             if not self._elder_exists(elder_id):
                 raise PermissionError("护理尚未配置，请由护理员明确初始化负责范围")
-            if action not in _ELDER_ACTIONS:
-                raise PermissionError("该动作仅限护理员")
             return self._command("elder:" + elder_id, elder_id, action, payload, caregiver=False)
 
     def _command(self, actor, elder_id, action, payload, *, caregiver):
+        # Check the current actor's authority before either applying a command
+        # or replaying a result saved under an older permissions contract.
+        if type(action) is not str:
+            raise ValueError("护理操作名称必须是字符串")
+        if caregiver and action in _ELDER_RESPONSES:
+            raise PermissionError("提醒展示回执、确认、拒绝和延后只能由本人操作；护理员请记录跟进。")
+        if action not in (_CAREGIVER_ACTIONS if caregiver else _ELDER_ACTIONS):
+            raise PermissionError("该角色无权执行此护理操作")
         if not isinstance(payload, dict):
             raise ValueError("操作参数必须是对象")
         request_id = _identifier(payload.get("request_id"))
@@ -313,6 +352,27 @@ class MinimalCareService:
             return row
         if action.startswith("occurrence."):
             row = self._get("occurrences", p.get("occurrence_id"), elder)
+            if action == "occurrence.displayed":
+                generation = p.get("generation")
+                if type(generation) is not int or generation != row.get("generation", 0):
+                    raise ValueError("提醒展示回执必须对应当前提醒代次")
+                if self._displayed(row):
+                    return row
+                if row["status"] != "pending":
+                    raise ValueError("不允许的提醒状态转换")
+                reminder = self._get("reminders", row["reminder_id"], elder)
+                stamp = _stamp(now)
+                event = {"generation": generation, "at": stamp, "actor": actor,
+                         "source": "elder_page_receipt_v1"}
+                row.setdefault("display_history", []).append(event)
+                # Client timestamps and role claims are never trusted. This
+                # receipt records the visible-page callback, not human reading.
+                row.update(display_contract="elder_page_receipt_v1", delivery_status="displayed_local",
+                           displayed_at=stamp, displayed_by=actor, displayed_generation=generation,
+                           display_source="elder_page_receipt_v1", offered_at=stamp,
+                           deadline_at=_stamp(now + timedelta(minutes=reminder["grace_minutes"])))
+                self._put("occurrences", row)
+                return row
             statuses = {"occurrence.ack": "acknowledged", "occurrence.decline": "declined", "occurrence.snooze": "snoozed"}
             if action not in statuses or row["status"] not in {"pending", "unconfirmed", "snoozed"}:
                 raise ValueError("不允许的提醒状态转换")
@@ -320,6 +380,8 @@ class MinimalCareService:
                 minutes = _integer(p.get("minutes"), "延后分钟", 1, 1440)
                 row["snoozed_until"] = _stamp(now + timedelta(minutes=minutes))
                 row["generation"] = row.get("generation", 0) + 1
+                row.update(delivery_status="awaiting_display", displayed_at=None, displayed_by=None,
+                           displayed_generation=None, display_source=None, offered_at=None, deadline_at=None)
             row.update(status=statuses[action], responded_at=_stamp(now), responded_by=actor)
             self._put("occurrences", row)
             self._cancel_queued(elder, occurrence_id=row["id"])
@@ -400,10 +462,11 @@ class MinimalCareService:
             return row
         raise ValueError("不支持的护理操作")
 
-    def _cancel_queued(self, elder, *, occurrence_id=None, consent_id=None):
+    def _cancel_queued(self, elder, *, occurrence_id=None, consent_id=None,
+                       reason="确认、拒绝、延后、取消或撤回阻止了尚未发送的通知"):
         for row in self._rows("deliveries", elder):
             if row["status"] == "queued" and (occurrence_id is None or row["occurrence_id"] == occurrence_id) and (consent_id is None or row["consent_id"] == consent_id):
-                row.update(status="cancelled", error="确认、拒绝、延后、取消或撤回阻止了尚未发送的通知")
+                row.update(status="cancelled", error=reason)
                 self._put("deliveries", row)
 
     def _eligible(self, consent, occurrence, now):
@@ -411,12 +474,28 @@ class MinimalCareService:
                 and _parse(consent["valid_from"]) <= now < _parse(consent["expires_at"])
                 and (not self.external or consent["source"] == "real"))
 
+    @staticmethod
+    def _displayed(occurrence):
+        try:
+            displayed_at = _parse(occurrence.get("displayed_at"))
+            deadline_at = _parse(occurrence.get("deadline_at"))
+        except ValueError:
+            return False
+        return (occurrence.get("display_contract") == "elder_page_receipt_v1"
+                and occurrence.get("delivery_status") == "displayed_local"
+                and occurrence.get("display_source") == "elder_page_receipt_v1"
+                and occurrence.get("displayed_by") == "elder:" + occurrence["elder_id"]
+                and type(occurrence.get("displayed_generation")) is int
+                and type(occurrence.get("generation")) is int
+                and occurrence["displayed_generation"] == occurrence.get("generation", 0)
+                and deadline_at > displayed_at)
+
     def tick(self, now=None):
-        """Offer due local reminders, queue authorized events, then dispatch once.
+        """Generate due reminders, queue shown-and-unconfirmed events, dispatch once.
 
         A delayed daily rule offers only its most recent due instance. Skipped
         dates are counted explicitly, never marked delivered or unconfirmed.
-        Confirmation windows start on the actual local offer, not a past due.
+        Confirmation windows start only on an elder visible-page receipt.
         """
         current = self._now(now)
         with self._lock, self._tx():
@@ -442,9 +521,11 @@ class MinimalCareService:
                     occ_id = _stable("occ", reminder["id"], _stamp(due))
                     self._put("occurrences", {"id": occ_id, "elder_id": reminder["elder_id"],
                         "reminder_id": reminder["id"], "label": reminder["label"], "due_at": _stamp(due),
-                        "timezone": reminder["timezone"], "status": "pending", "offered_at": _stamp(current),
-                        "generation": 0, "delivery_status": "offered_local",
-                        "deadline_at": _stamp(current + timedelta(minutes=reminder["grace_minutes"]))})
+                        "timezone": reminder["timezone"], "status": "pending", "generated_at": _stamp(current),
+                        "generation": 0, "delivery_status": "awaiting_display", "offered_at": None,
+                        "display_contract": "elder_page_receipt_v1", "displayed_at": None, "displayed_by": None,
+                        "displayed_generation": None, "display_source": None, "display_history": [],
+                        "deadline_at": None})
                     if reminder["schedule"] == "once":
                         reminder["next_due_at"] = None
                     else:
@@ -454,10 +535,12 @@ class MinimalCareService:
                 elder = occurrence["elder_id"]
                 reminder = self._get("reminders", occurrence["reminder_id"], elder)
                 if occurrence["status"] == "snoozed" and _parse(occurrence["snoozed_until"]) <= current:
-                    occurrence.update(status="pending", offered_at=_stamp(current),
-                        deadline_at=_stamp(current + timedelta(minutes=reminder["grace_minutes"])))
+                    occurrence.update(status="pending", generated_at=_stamp(current), delivery_status="awaiting_display",
+                        displayed_at=None, displayed_by=None, displayed_generation=None, display_source=None,
+                        offered_at=None, deadline_at=None)
                     self._put("occurrences", occurrence)
-                if occurrence["status"] != "pending" or _parse(occurrence["deadline_at"]) > current:
+                if (occurrence["status"] != "pending" or not self._displayed(occurrence)
+                        or _parse(occurrence["deadline_at"]) > current):
                     continue
                 occurrence["status"] = "unconfirmed"
                 self._put("occurrences", occurrence)
@@ -465,7 +548,9 @@ class MinimalCareService:
                 if not self._db.execute("SELECT 1 FROM records WHERE kind='tasks' AND id=?", (task_id,)).fetchone():
                     self._put("tasks", {"id": task_id, "elder_id": elder, "occurrence_id": occurrence["id"],
                         "status": "open", "summary": "提醒未确认，请核查是否需要帮助；不能据此认定未服药或遇险。",
-                        "created_at": _stamp(current), "note": "", "history": []})
+                        "created_at": _stamp(current), "note": "", "history": [],
+                        "visibility_evidence": occurrence["display_source"],
+                        "displayed_at": occurrence["displayed_at"], "generation": occurrence.get("generation", 0)})
                 for consent in self._rows("consents", elder):
                     if not self._eligible(consent, occurrence, current):
                         continue
@@ -481,7 +566,8 @@ class MinimalCareService:
                         "contact_id": contact["id"], "consent_id": consent["id"], "status": "queued",
                         "channel": self.notifier.channel, "message": message, "event_id": delivery_id,
                         "created_at": _stamp(current), "provider_id": None, "receipt_history": [], "error": None,
-                        "source": consent["source"]})
+                        "source": consent["source"], "occurrence_generation": occurrence.get("generation", 0),
+                        "visibility_evidence": occurrence["display_source"], "displayed_at": occurrence["displayed_at"]})
         return self.dispatch_pending(now=now)
 
     def dispatch_pending(self, now=None):
@@ -504,7 +590,11 @@ class MinimalCareService:
                     occurrence = self._get("occurrences", row["occurrence_id"], elder)
                     consent = self._get("consents", row["consent_id"], elder)
                     contact = self._get("contacts", row["contact_id"], elder)
-                    if occurrence["status"] != "unconfirmed" or not self._eligible(consent, occurrence, current) or (self.external and not contact["verified"]):
+                    if (occurrence["status"] != "unconfirmed" or not self._displayed(occurrence)
+                            or type(row.get("occurrence_generation")) is not int
+                            or row["occurrence_generation"] != occurrence.get("generation", 0)
+                            or not self._eligible(consent, occurrence, current)
+                            or (self.external and not contact["verified"])):
                         row.update(status="cancelled", error="发送前复核：规则已失效或老人已回应")
                         self._put("deliveries", row)
                         continue

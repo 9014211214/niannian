@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import re
 import secrets
+import threading
 import time
 from urllib.parse import parse_qs, urlparse
 import uuid
@@ -20,23 +21,34 @@ import uuid
 from ..engine.memory.crypto import decrypt_if_needed, encrypt_if_keyed
 from ..engine.memory.atomic_file import replace_with_retry
 from ..engine.memory.offline_queue import OfflineSessionQueue
+from ..engine.memory.offline_merge import merge_offline_stage, OfflineReviewCancelled
 from ..engine.memory.persona_store import PersonaStore
 from ..engine.memory.stated_preferences import (
     heuristic_preferences, merge_preferences, preference_admission, preference_is_usable,
     transition_preference,
 )
+from ..engine.memory.preference_dialogue import (
+    prepare_preference_invitation, acknowledge_preference_invitation, preference_invitation_view,
+)
+from ..engine.explicit_sharing import ExplicitSharingService, SharingContext
 from ..engine.minimal_care import MinimalCareService
 from ..engine.minimal_care_context import build_care_context
 from ..engine.policy.llm import OpenRouterLLMClient
 from ..engine.policy.minimal_calls import MinimalCallGuard, validate_limits
 from ..engine.policy.product_calls import ProductCallGuard
 from ..engine.model.persona import PersonaProfile
-from ..engine.cognitive import cognitive_action, cognitive_owner_view
+from ..engine.cognitive import cognitive_action, cognitive_owner_view, stage_cognitive_readiness
 from ..engine.perception.external_emotion import parse_external_emotion, external_emotion_payload
 from ..engine.perception.signals import is_simulated
 from ..runtime import create_minimal_clients, create_minimal_engine
 from ..scenes.registry import get_scene
 from .web import AriaWebServer, TextWebApp, make_handler
+from .auto_review import (
+    default_settings as default_auto_review, validate_settings as validate_auto_review,
+    view as auto_review_view, stable_request_id as auto_review_request_id,
+    source_digest as auto_review_source_digest, command_digest as auto_review_command_digest,
+    local_day as auto_review_day, AutoReviewQuota,
+)
 
 _PAGE = Path(__file__).resolve().parents[1] / "assets" / "voice" / "minimal.html"
 _CARE_PAGE = _PAGE.with_name("care.html")
@@ -59,7 +71,7 @@ class MinimalWebApp(TextWebApp):
     """One local fictional run; its directory must not be a real profile store."""
 
     def __init__(self, data_dir: str | Path, *, clients=None,
-                 session_idle_seconds=1200, care_service=None,
+                 session_idle_seconds=1200, care_service=None, sharing_service=None,
                  model_max_requests=None, model_stop_cost_usd=None,
                  model_reservation_policy=None, model_call_guard=None):
         self.clients = clients or create_minimal_clients()
@@ -80,9 +92,14 @@ class MinimalWebApp(TextWebApp):
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.run_path = self.run_dir / "run.json"
         self._run = self._load_run()
+        self._auto_review_quota = AutoReviewQuota(self.run_dir / "auto_review_jobs.sqlite3")
+        self._auto_review_quota.validate_requests({row["request_id"]: row["started_on"]
+            for row in self._run["auto_review"]["events"] if row["started_on"] is not None})
         self._storage_failed = False
         if care_service is not None and (care_service.external or care_service.allow_external):
             raise ValueError("最小虚构Web只允许本地护理通知；真实外发服务须独立配置与验收。")
+        if sharing_service is not None:
+            raise ValueError("虚构Web固定使用独立本地转达；不能注入外部发送服务。")
         if network_clients:
             from ..engine.policy.reserved_calls import ReservedCallGuard, validate_reservation_policy
             ledger_path = self.run_dir / "model_calls.sqlite3"
@@ -132,6 +149,7 @@ class MinimalWebApp(TextWebApp):
             self.call_guard = guard
         try:
             self.care = care_service or MinimalCareService(self.run_dir / "care.sqlite3")
+            self.sharing = ExplicitSharingService(self.run_dir / "sharing.sqlite3", owner_id=_USER)
             super().__init__(
                 store=PersonaStore(self.run_dir / "profiles"), clients=self.clients,
                 checkpoint_turns=1,
@@ -141,16 +159,24 @@ class MinimalWebApp(TextWebApp):
         except BaseException:
             if self.call_guard and self._owns_call_guard:
                 self.call_guard.close()
+            if hasattr(self, "sharing"):
+                self.sharing.close()
             if care_service is None and hasattr(self, "care"):
                 self.care.close()
             raise
         # Local demo token is not caregiver authentication.
         self.allowed_hosts = {"127.0.0.1", "localhost", "::1"}
+        self._review_thread = None
+        self._review_usage_snapshot = None
+        self._auto_review_dispatching = None
+        self._closing = False
+        self._sharing_closed_view = None
 
     def _load_run(self):
         if not self.run_path.exists():
             return {"version": 1, "mode": self.mode, "run_id": uuid.uuid4().hex,
-                    "sessions": [], "turns": [], "reviews": [], "preference_reviews": []}
+                    "sessions": [], "turns": [], "reviews": [], "preference_reviews": [],
+                    "auto_review": default_auto_review()}
         value = json.loads(decrypt_if_needed(
             self.run_path.read_text(encoding="utf-8"), self.run_dir, who="minimal-run"))
         if (not isinstance(value, dict) or value.get("version") != 1
@@ -163,6 +189,10 @@ class MinimalWebApp(TextWebApp):
             value["preference_reviews"] = []
         if not isinstance(value["preference_reviews"], list):
             raise ValueError("minimal preference reviews are invalid; original files were retained")
+        if "auto_review" not in value:
+            value["auto_review"] = default_auto_review()
+        validate_auto_review(value["auto_review"], value["run_id"],
+                             {row["session_id"] for row in value["sessions"]})
         return value
 
     def _save_run(self):
@@ -178,22 +208,43 @@ class MinimalWebApp(TextWebApp):
 
     def _halt_models(self):
         if self.call_guard:
+            if self._review_is_running() and threading.current_thread() is not self._review_thread:
+                # Set the inherited dispatch stop immediately, without waiting
+                # for the worker's ledger lock while holding the owner lock.
+                self.call_guard._stop_requested.set()
+                threading.Thread(target=self._halt_models_when_free, daemon=True).start()
+                return
+            self._halt_models_when_free()
+
+    def _halt_models_when_free(self):
+        if self.call_guard:
             try:
                 self.call_guard.halt()
             except Exception:
                 # Its own fail-closed flag and durable pending record remain.
                 pass
 
+    def _review_is_running(self):
+        return self._review_thread is not None and self._review_thread.is_alive()
+
+    def _model_usage(self):
+        if self._review_is_running() and self.call_guard:
+            return {**deepcopy(self._review_usage_snapshot),
+                    "snapshot_status": "observed_before_background", "offline_call_inflight": True}
+        return self.call_guard.snapshot() if self.call_guard else {"configured": False}
+
     def _model_scope(self, kind, operation_id, session_id):
         return (self.call_guard.scope(kind, operation_id, session_id)
                 if self.call_guard else nullcontext())
 
     def _models_stopped(self):
-        return self.call_guard is not None and self.call_guard.snapshot()["stopped"]
+        return self.call_guard is not None and self._model_usage()["stopped"]
 
     def resume_models(self, request_id, pause_id, *, confirmed=False, read_only=False, actor=_USER):
         """The explicit local owner surface; replay never changes the ledger."""
         with self._user_lock(_USER):
+            if self._review_is_running():
+                return self._result(False, "会后整理仍在运行，当前不能改变模型调用状态。")
             if read_only:
                 return self._result(False, "回放只读，不能恢复模型调用。")
             if actor != _USER:
@@ -270,12 +321,18 @@ class MinimalWebApp(TextWebApp):
             return {
                 "ok": True, "mode": self.mode, "run_id": self._run["run_id"],
                 "model_calls_enabled": self.clients.model_calls_enabled,
-                "model_usage": self.call_guard.snapshot() if self.call_guard else {"configured": False},
+                "model_usage": self._model_usage(),
+                "offline_review_running": self._review_is_running(),
+                "auto_review": auto_review_view(self._run["auto_review"],
+                    running=self._review_is_running(), dispatching=self._auto_review_dispatching,
+                    quota_used=self._auto_review_quota.used(auto_review_day())),
                 "session_id": active["session_id"] if active else None,
                 "session_number": active["number"] if active else len(sessions),
                 "sessions": sessions, "turns": deepcopy(self._run["turns"]),
                 "reviews": deepcopy(self._run["reviews"]),
                 "preference_reviews": deepcopy(self._run["preference_reviews"]),
+                "preference_invitation": (preference_invitation_view(persona, self._sessions[_USER][1])
+                    if _USER in self._sessions else None),
                 "profile": self._understanding(persona),
                 "cognitive": cognitive_owner_view(persona),
                 "offline": OfflineSessionQueue(persona).status() if persona else {"pending_count": 0},
@@ -283,11 +340,66 @@ class MinimalWebApp(TextWebApp):
                 "requires_review": self._unresolved(),
                 "notice": ("本地流程示意：回复为占位；未执行模型、事实抽取或人物反思。"
                            if self.mode == "local_preview" else
-                           "真实生成：在线和手动会后整理会调用云模型；输入为虚构角色扮演。"),
+                           "真实生成：在线、手动会后整理以及明确开启的自动会后整理会调用云模型；输入为虚构角色扮演。"),
+                "sharing": self.sharing_state(),
                 "care_notice": "护理相关提问会附本人近期状态供本轮参考；动作仍按结构表单执行。通知仅写本地收件箱，未联系真实家属。关闭聊天后护理调度继续，停止服务后暂停。",
                 "services": {name: False for name in (
                     "tts", "asr", "embedding", "acoustic", "visual", "omni", "external_notifications")},
             }
+
+    def _sharing_context(self):
+        pair = self._sessions.get(_USER)
+        session_id = pair[1].session_id if pair is not None else None
+        try:
+            contacts = tuple(deepcopy(row) for row in self.care.elder_view(_USER)["contacts"])
+            contacts_available = True
+        except Exception:
+            # A care read failure stops this independent action only. Never
+            # reuse old recipients or expose private storage error details.
+            contacts, contacts_available = (), False
+        return SharingContext(_USER, self._run["run_id"], session_id,
+            bool(pair and contacts_available and not self._closing
+                 and not self._storage_failed and not self._unresolved()),
+            tuple(deepcopy(row) for row in self._run["turns"]
+                  if row.get("status") == "completed" and row.get("session_id") == session_id),
+            contacts, contacts_available)
+
+    def sharing_state(self):
+        with self._user_lock(_USER):
+            if self._sharing_closed_view is not None:
+                return deepcopy(self._sharing_closed_view)
+            try:
+                context = self._sharing_context()
+                value = self.sharing.view(context)
+                value["sources"] = [{key: row[key] for key in ("turn_id", "session_id", "turn_index", "text")}
+                                    for row in context.sources]
+                value["contacts"] = [row for row in context.contacts if row.get("channel") == "local"]
+                value["writable"] = context.writable
+                value["contacts_available"] = context.contacts_available
+                value["available"] = True
+                if not context.contacts_available:
+                    value["notice"] += " 联系人当前无法读取；转达暂停，不复用旧联系人。"
+                return value
+            except Exception:
+                # Unknown is not absence. Keep the independent permission
+                # stopped, without reusing cached records or blocking chat.
+                self.sharing.failed = True
+                return {"channel": "local_sharing_inbox", "external_enabled": False,
+                        "records": [], "commands": [], "sources": [], "contacts": [], "holds": [],
+                        "writable": False, "available": False, "contacts_available": False,
+                        "requires_review": True, "storage_failed": True,
+                        "notice": "转达记录读取失败，结果未知；停止转达，不复用旧记录或重发。普通聊天仍按原有保存与费用边界处理。"}
+
+    def sharing_action(self, action, payload, session_id, *, read_only=False, actor=_USER):
+        with self._user_lock(_USER):
+            if self._closing:
+                raise ValueError("服务已停止；转达记录只读，不再批准或发送。")
+            context = self._sharing_context()
+            if session_id != context.session_id:
+                raise ValueError("转达请求不属于当前本人会话。")
+            result = self.sharing.action(context, action, payload, actor=actor,
+                read_only=read_only, current_context=self._sharing_context)
+            return {"ok": True, **result, "state": self.state()}
 
     def care_state(self):
         # A public fictional elder surface never accepts a caller-selected ID.
@@ -306,6 +418,8 @@ class MinimalWebApp(TextWebApp):
             raise ValueError("护理请求格式无效。")
         if action == "consent.grant" and payload.get("source") != "simulation":
             raise ValueError("虚构体验只接受模拟授权，不能用它真实外发。")
+        # The service binds the authenticated caregiver and enforces action
+        # permissions; role or actor fields inside payload grant no authority.
         return {"ok": True, **self.care.mutate(token, elder_id, action, payload)}
 
     def tick_care_all(self):
@@ -317,8 +431,155 @@ class MinimalWebApp(TextWebApp):
         return {"ok": ok, **({"error": error} if error else {}), **extra, "state": self.state()}
 
     def _unresolved(self):
-        return self._storage_failed or any(row["status"] == "pending" or row.get("requires_review")
+        auto_uncertain = auto_review_view(self._run["auto_review"],
+            running=self._review_is_running(), dispatching=self._auto_review_dispatching)["requires_review"]
+        return self._storage_failed or auto_uncertain or any(row["status"] == "pending" or row.get("requires_review")
+            or (row["status"] == "running" and not self._review_is_running())
             for row in [*self._run["turns"], *self._run["reviews"], *self._run["preference_reviews"]])
+
+    def auto_review_action(self, enabled, daily_limit=1, *, request_id=None,
+                           confirmed=False, read_only=False, actor=_USER):
+        """Persist an explicit owner's setting; it does not review old sessions."""
+        with self._user_lock(_USER):
+            if actor != _USER:
+                raise PermissionError("只有本体验的本人可以设置自动会后整理。")
+            if type(read_only) is not bool or read_only:
+                return self._result(False, "回放只读，不能设置自动会后整理。")
+            if (type(enabled) is not bool or type(daily_limit) is not int
+                    or not 1 <= daily_limit <= 8 or (enabled and confirmed is not True)):
+                return self._result(False, "请明确选择开关和每日1至8个任务上限；开启须本人确认云模型费用。")
+            request_id = request_id if request_id is not None else "auto-setting_" + uuid.uuid4().hex
+            if not isinstance(request_id, str) or not _ID.fullmatch(request_id):
+                return self._result(False, "自动整理设置请求标识无效。")
+            settings = self._run["auto_review"]
+            digest = auto_review_command_digest(enabled, daily_limit)
+            old = next((row for row in settings["commands"] if row["request_id"] == request_id), None)
+            if old:
+                return self._result(old["digest"] == digest,
+                    None if old["digest"] == digest else "请求标识已用于不同设置，未执行。", duplicate=True)
+            if self._storage_failed or (enabled and self._unresolved()):
+                return self._result(False, "存在保存失败或结果不明；未开启自动整理，请先核查记录。")
+            candidate = deepcopy(settings)
+            stamp = _stamp()
+            candidate.update(enabled=enabled, daily_limit=daily_limit,
+                             enabled_at=stamp if enabled else None)
+            candidate["commands"].append({"request_id": request_id, "digest": digest, "at": stamp})
+            if not enabled:
+                for row in candidate["events"]:
+                    if row["status"] in {"queued", "deferred"}:
+                        row.update(status="blocked", reason="owner_disabled")
+            self._run["auto_review"] = candidate
+            try:
+                self._save_run()
+            except Exception:
+                self._run["auto_review"] = settings
+                return self._result(False, "自动整理设置保存失败，未显示为生效；请核查本地存储。")
+            return self._result()
+
+    def _queue_auto_review(self, session_id):
+        settings = self._run["auto_review"]
+        if not settings["enabled"] or any(row["session_id"] == session_id for row in settings["events"]):
+            return
+        persona = self._profile()
+        job = next((job for job in persona.offline_sessions if job.session_id == session_id), None) if persona else None
+        # Empty/omitted sessions create no billable automatic job. A seal which
+        # has no eligible source is still recorded as blocked, without raw text.
+        digest = auto_review_source_digest(job, _USER)
+        settings["events"].append({"request_id": auto_review_request_id(self._run["run_id"], session_id),
+            "session_id": session_id, "source_sha256": digest,
+            "authorized_at": settings["enabled_at"], "created_at": _stamp(),
+            "status": "blocked" if self._closing or job is None else "queued",
+            "reason": "application_closing" if self._closing else "no_eligible_source" if job is None else "",
+            "started_on": None})
+
+    def tick_auto_review(self):
+        """Start at most one first attempt. Reads, restart, and replay never tick."""
+        with self._user_lock(_USER):
+            settings = self._run["auto_review"]
+            waiting = [row for row in settings["events"] if row["status"] in {"queued", "deferred"}]
+            if not waiting:
+                return {"ok": True, "started": False}
+
+            def finish(row, status, reason):
+                if row["status"] != status or row["reason"] != reason:
+                    row.update(status=status, reason=reason)
+                    self._save_run()
+                return {"ok": True, "started": False, "status": status, "reason": reason}
+
+            if self._closing or not settings["enabled"]:
+                reason = "application_closing" if self._closing else "owner_disabled"
+                for row in waiting:
+                    row.update(status="blocked", reason=reason)
+                self._save_run()
+                return {"ok": True, "started": False, "status": "blocked", "reason": reason}
+            # A worker has a snapshot of its current budget. Do not acquire a
+            # transport/ledger lock while holding the owner lock during a call.
+            if self._review_is_running():
+                return finish(waiting[0], "deferred", "review_inflight")
+            if self._storage_failed or self._unresolved() or self._models_stopped():
+                reason = ("storage_failed" if self._storage_failed else
+                          "result_requires_review" if self._unresolved() else "models_stopped")
+                for row in waiting:
+                    row.update(status="blocked", reason=reason)
+                self._save_run()
+                return {"ok": True, "started": False, "status": "blocked", "reason": reason}
+            if not self.clients.model_calls_enabled:
+                return finish(waiting[0], "blocked", "models_disabled")
+            if self.state()["session_id"]:
+                return finish(waiting[0], "deferred", "active_session")
+            persona = self._profile()
+            status = OfflineSessionQueue(persona).status() if persona else {"jobs": []}
+            jobs = status["jobs"]
+            head = jobs[0] if jobs else None
+            row = next((value for value in waiting if head and value["session_id"] == head["session_id"]), None)
+            if row is None:
+                if not head:
+                    for value in waiting:
+                        value.update(status="blocked", reason="source_no_longer_queued")
+                    self._save_run()
+                    return {"ok": True, "started": False, "status": "blocked", "reason": "source_no_longer_queued"}
+                return finish(waiting[0], "deferred", "earlier_manual_job")
+            if head["attempts"] != 0 or head["state"] != "pending" or head["active_stage"] is not None:
+                return finish(row, "blocked", "previous_attempt")
+            if head["expired"] or head["source_completeness"] != "complete" or not head["turn_count"]:
+                return finish(row, "blocked", "source_incomplete_or_expired")
+            if head["memory_completed"] or head["reflection_completed"]:
+                return finish(row, "blocked", "prior_stage_result")
+            job = persona.offline_sessions[0]
+            if auto_review_source_digest(job, _USER) != row["source_sha256"]:
+                return finish(row, "blocked", "sealed_source_changed")
+            day = auto_review_day()
+            try:
+                reservation = self._auto_review_quota.reserve(row["request_id"], day, settings["daily_limit"])
+            except Exception:
+                self._storage_failed = True
+                self._halt_models()
+                raise RuntimeError("auto_review_quota_store_failed") from None
+            if reservation == "daily_limit":
+                return finish(row, "deferred", "daily_job_limit")
+            if reservation == "duplicate":
+                return finish(row, "blocked", "previous_dispatch")
+            # Consume a job slot durably before dispatch; a crash at any later
+            # point is a review-required attempt, never an automatic replay.
+            row.update(status="dispatching", reason="", started_on=day)
+            self._save_run()
+            self._auto_review_dispatching = row["request_id"]
+            try:
+                result = self.reflect(row["request_id"])
+            finally:
+                self._auto_review_dispatching = None
+            if result.get("accepted"):
+                row.update(status="running", reason="")
+            else:
+                review = next((value for value in self._run["reviews"]
+                               if value["request_id"] == row["request_id"]), None)
+                if review is not None and review["status"] == "pending":
+                    row.update(status="pending", reason="result_requires_review")
+                else:
+                    row.update(status="blocked", reason="start_rejected")
+            self._save_run()
+            return {"ok": True, "started": bool(result.get("accepted")),
+                    "request_id": row["request_id"], "status": row["status"]}
 
     def preference_action(self, action, preference_id, *, read_only=False):
         """An explicit owner operation; care authorization is never changed."""
@@ -348,6 +609,50 @@ class MinimalWebApp(TextWebApp):
             if pair is not None:
                 pair[0]._accept_offline_profile(candidate)
             return self._result()
+
+    def _owner_dialogue_context(self, session_id, *, read_only, actor):
+        if actor != _USER:
+            raise PermissionError("只有本体验的本人可以操作当前对话。")
+        if type(read_only) is not bool or read_only:
+            raise ValueError("回放只读，不能授权下一轮对话。")
+        if (self._closing or self._unresolved() or self._models_stopped()
+                or not self.clients.model_calls_enabled):
+            raise ValueError("当前未启用模型，或调用/保存需核查；未开启下一轮语义操作。")
+        pair = self._sessions.get(_USER)
+        if (pair is None or not isinstance(session_id, str) or session_id != pair[1].session_id
+                or pair[1].user_id != _USER or pair[0].persona is None
+                or pair[0].persona.user_id != _USER):
+            raise ValueError("当前本人会话已变化；未授权其他会话。")
+        return pair
+
+    def preference_invitation(self, preference_id, session_id, *, read_only=False, actor=_USER):
+        with self._user_lock(_USER):
+            try:
+                engine, ctx = self._owner_dialogue_context(session_id, read_only=read_only, actor=actor)
+                value = prepare_preference_invitation(engine.persona, ctx, preference_id, actor=_USER)
+            except ValueError as exc:
+                return self._result(False, str(exc))
+            return self._result(preference_invitation=value)
+
+    def preference_invitation_ack(self, invitation_id, question_sha256, session_id,
+                                  *, read_only=False, actor=_USER):
+        with self._user_lock(_USER):
+            try:
+                engine, ctx = self._owner_dialogue_context(session_id, read_only=read_only, actor=actor)
+                value = acknowledge_preference_invitation(engine.persona, ctx, invitation_id,
+                    question_sha256, actor=_USER)
+            except ValueError as exc:
+                return self._result(False, str(exc))
+            return self._result(preference_invitation=value)
+
+    def cognitive_readiness(self, session_id, *, read_only=False, actor=_USER):
+        with self._user_lock(_USER):
+            try:
+                engine, ctx = self._owner_dialogue_context(session_id, read_only=read_only, actor=actor)
+                value = stage_cognitive_readiness(engine.persona, ctx, actor=_USER)
+            except ValueError as exc:
+                return self._result(False, str(exc))
+            return self._result(**value)
 
     def cognitive_action(self, action, *, observation_id=None, delete_records=None, read_only=False, actor=_USER):
         """The single fictional owner surface; caregiver routes do not expose it."""
@@ -439,6 +744,9 @@ class MinimalWebApp(TextWebApp):
 
     def submit(self, text, turn_id, session_id, *, external_emotion=None):
         with self._user_lock(_USER):
+            if self.call_guard and self._review_is_running():
+                return self._result(False, "会后模型正在处理，输入尚未发送或保存；请稍后再发送。",
+                                    error_code="offline_call_inflight", transient=True, request_sent=False)
             try:
                 external_emotion = parse_external_emotion(external_emotion)
             except ValueError:
@@ -568,7 +876,8 @@ class MinimalWebApp(TextWebApp):
             return self._result(row["status"] == "completed", row.get("error"))
 
     def end(self, user_id=_USER, *, process_offline=None):
-        # Closing a tab/process always seals. Explicit review has its own endpoint.
+        # Seal first. Only the separately confirmed automatic option may start
+        # a first background review; process shutdown suppresses that option.
         with self._user_lock(_USER):
             if _USER not in self._sessions:
                 persona = self.store.load(_USER)
@@ -581,6 +890,8 @@ class MinimalWebApp(TextWebApp):
             result = super().end(_USER, process_offline=False)
             if not result["ok"]:
                 self._storage_failed = True
+            elif not self._closing:
+                self.tick_auto_review()
             return result
 
     def _seal_active_session(self, user_id, pair):
@@ -589,6 +900,7 @@ class MinimalWebApp(TextWebApp):
         for row in self._run["sessions"]:
             if row["session_id"] == session_id:
                 row.update(status="sealed", sealed_at=_stamp())
+        self._queue_auto_review(session_id)
         self._save_run()
 
     def seal(self, session_id):
@@ -604,13 +916,18 @@ class MinimalWebApp(TextWebApp):
             result = self.end()
             return self._result(result["ok"], result.get("error"))
 
-    def reflect(self, request_id):
+    def reflect(self, request_id, *, wait=False):
+        """Explicitly start one background review; optional wait is for batch callers."""
         with self._user_lock(_USER):
             if not isinstance(request_id, str) or not _ID.fullmatch(request_id):
                 return self._result(False, "整理请求标识无效。")
             old = next((row for row in self._run["reviews"] if row["request_id"] == request_id), None)
             if old:
-                return self._result(old["status"] == "completed", old.get("error"), duplicate=True)
+                running = old["status"] == "running" and self._review_is_running()
+                return self._result(running or old["status"] == "completed", old.get("error"),
+                                    duplicate=True, accepted=running)
+            if self._closing or self._review_is_running():
+                return self._result(False, "会后整理正在运行，请查看当前进度，不会重复启动。")
             if not self.clients.model_calls_enabled:
                 return self._result(False, "本地示意未启用模型；已封存原话，事实抽取和人物反思均未执行。")
             if self._models_stopped():
@@ -623,45 +940,108 @@ class MinimalWebApp(TextWebApp):
             job = persona.offline_sessions[0]
             if job.attempts:
                 return self._result(False, "上次会后整理未完成，不会盲目重试；请先核查失败记录与费用。")
-            before = self._understanding(persona)
             row = {"request_id": request_id, "session_id": job.session_id,
-                   "status": "pending", "created_at": _stamp()}
+                   "status": "running", "created_at": _stamp()}
             self._run["reviews"].append(row)
             self._save_run()
-            try:
-                engine = self._engine_for_persona(persona)
-                with self._model_scope("review", request_id, job.session_id):
-                    result = engine.recover_offline_sessions(max_jobs=1)
-                    success = result.get("last_run", {}).get("completed_jobs", 0) == 1
-                    if isinstance(self.call_guard, ProductCallGuard):
-                        audit = next((item for item in reversed(engine.persona.offline_session_audit)
-                                      if item.session_id == job.session_id), None)
-                        success = success and audit is not None and audit.outcome == "completed"
-                        if not success:
-                            self.call_guard.note_output_failure()
-                        if result.get("last_run", {}).get("error_code") == "offline_store_failed":
-                            self._storage_failed = True
-                            self._halt_models()
-                after = self._understanding(engine.persona)
-                row.update(status="completed" if success else "failed", result=result,
-                           changes=_changes(before, after, job.session_id), finished_at=_stamp())
-                if not success:
-                    if isinstance(self.call_guard, ProductCallGuard):
-                        reason = self.call_guard.snapshot()["stop_reason"]
-                        row["requires_review"] = reason not in {None, "consecutive_failures"}
-                        row["error"] = "本次会后整理未完成，阶段记录保留且不自动重发；其他对话是否可用以调用状态为准。"
-                    else:
-                        row["requires_review"] = True
+            self._review_usage_snapshot = self.call_guard.snapshot() if self.call_guard else None
+            arguments = (request_id, self._run["run_id"], job.session_id, persona.model_copy(deep=True))
+            worker = (threading.current_thread() if wait else threading.Thread(
+                target=self._run_review, args=arguments, name="aria-offline-review", daemon=True))
+            self._review_thread = worker
+            if not wait:
+                try:
+                    worker.start()
+                except Exception:
+                    # A raised start does not prove that no work ran. Retain
+                    # the durable request and quota as uncertain; never replay.
+                    # An unstarted Thread cannot be joined during shutdown.
+                    if worker.ident is None:
+                        self._review_thread = None
+                        self._review_usage_snapshot = None
+                    row.update(status="pending", requires_review=True,
+                               error="会后任务启动结果不明；请核查原记录，不会自动重发。")
+                    self._halt_models()
+                    self._save_run()
+                    return self._result(False, row["error"], accepted=False, review_pending=True)
+                return self._result(accepted=True, review_pending=True)
+        # Registered batch callers keep their existing thread-local experiment
+        # scope. They still release the owner lock before slow work.
+        self._run_review(*arguments)
+        with self._user_lock(_USER):
+            final = next((value for value in self._run["reviews"] if value["request_id"] == request_id), None)
+            if final is None:
+                return self._result(False, "原体验已清除，旧整理结果未写回。")
+            return self._result(final["status"] == "completed", final.get("error"))
+
+    def _run_review(self, request_id, run_id, session_id, persona):
+        stage_store = _OfflineStageStore(self, run_id, session_id, persona)
+        values = {}
+        halt_requested = False
+        try:
+            engine = self._engine_for_persona(persona)
+            engine.store = stage_store
+            with self._model_scope("review", request_id, session_id):
+                result = engine.recover_offline_sessions(max_jobs=1)
+                success = result.get("last_run", {}).get("completed_jobs", 0) == 1
+                if isinstance(self.call_guard, ProductCallGuard):
+                    audit = next((item for item in reversed(engine.persona.offline_session_audit)
+                                  if item.session_id == session_id), None)
+                    success = success and audit is not None and audit.outcome == "completed"
+                    if not success and not stage_store.cancelled:
+                        self.call_guard.note_output_failure()
+                    if not stage_store.cancelled and result.get("last_run", {}).get("error_code") == "offline_store_failed":
+                        self._storage_failed = True
                         self._halt_models()
-                        row["error"] = "会后整理未完成；请查看阶段状态，不会自动重试。"
-            except Exception:
+            values.update(status="cancelled" if stage_store.cancelled else "completed" if success else "failed",
+                          result=result, finished_at=_stamp())
+            if stage_store.cancelled:
+                values["error"] = "本人状态或封存来源已变化，旧整理结果未写回，也不会自动重发。"
+            elif not success:
+                if isinstance(self.call_guard, ProductCallGuard):
+                    reason = self.call_guard.snapshot()["stop_reason"]
+                    values["requires_review"] = reason not in {None, "consecutive_failures"}
+                    values["error"] = "本次会后整理未完成，阶段记录保留且不自动重发；其他对话是否可用以调用状态为准。"
+                else:
+                    values["requires_review"] = True
+                    halt_requested = True
+                    values["error"] = "会后整理未完成；请查看阶段状态，不会自动重试。"
+        except Exception:
+            if stage_store.cancelled:
+                values.update(status="cancelled", finished_at=_stamp(),
+                              error="本人状态或封存来源已变化，旧整理结果未写回，也不会自动重发。")
+            else:
+                halt_requested = True
+                values.update(status="pending", requires_review=True,
+                              error="会后整理或保存结果不明；已停止继续调用。")
+        # Scope/transport locks have been released before owner state is read.
+        with self._user_lock(_USER):
+            self._review_thread = None
+            self._review_usage_snapshot = None
+            if self._run["run_id"] != run_id:
+                return
+            row = next(value for value in self._run["reviews"] if value["request_id"] == request_id)
+            row.update(values, changes=stage_store.changes or [{"session_id": session_id, "kind": "unchanged",
+                "summary": "本次没有提交事实、人物假设或相处说明的修改。"}])
+            event = next((value for value in self._run["auto_review"]["events"]
+                          if value["request_id"] == request_id), None)
+            if event is not None:
+                event.update(status=row["status"], reason="" if row["status"] == "completed" else "review_not_completed")
+            # Experiment-only terminal handlers inspect the installed failed
+            # row before deciding whether its known body failure may settle.
+            if halt_requested:
                 self._halt_models()
-                row["error"] = "会后整理或保存结果不明；已停止继续调用。"
-            self._save_run()
-            return self._result(row["status"] == "completed", row.get("error"))
+            try:
+                self._save_run()
+            except Exception:
+                row.update(status="pending", requires_review=True,
+                           error="会后记录保存未完成，需核查；不会自动重发。")
+                if event is not None:
+                    event.update(status="pending", reason="result_requires_review")
 
     def forget_run(self):
         with self._user_lock(_USER):
+            self.sharing.forget()
             self.care.forget_elder(_USER)
             # Delete durable files first. A failed deletion retains the RAM copy.
             self.store.delete(_USER)
@@ -678,14 +1058,58 @@ class MinimalWebApp(TextWebApp):
 
     def close(self):
         # Preserve failures in RAM until the owner explicitly retries sealing.
+        # Set this before end(): shutdown must never start an automatic model.
+        with self._user_lock(_USER):
+            self._closing = True
         result = None
         if self._sessions:
             result = self.end()
+        with self._user_lock(_USER):
+            self.tick_auto_review()
+            worker = self._review_thread
+        if worker is not None and worker is not threading.current_thread():
+            worker.join()
+        with self._user_lock(_USER):
+            self._sharing_closed_view = self.sharing_state()
+        self.sharing.close()
         self.care.close()
         if self.call_guard and self._owns_call_guard:
             self.call_guard.close()
         if result is not None and not result["ok"]:
             raise RuntimeError("会话尚未安全封存；请检查本地存储，最近成功的检查点保持不变。")
+
+
+class _OfflineStageStore:
+    """Publish only reconciled stage commits; model handlers use a private copy."""
+
+    def __init__(self, app, run_id, session_id, before):
+        self.app, self.run_id, self.session_id = app, run_id, session_id
+        self.before = before.model_copy(deep=True)
+        self.cancelled = False
+        self.changes = []
+
+    def save(self, proposed):
+        with self.app._user_lock(_USER):
+            current = self.app._profile()
+            try:
+                if (self.app._run["run_id"] != self.run_id or current is None
+                        or self.app._closing or self.app._storage_failed):
+                    raise OfflineReviewCancelled("offline_run_removed")
+                merged = merge_offline_stage(self.before, proposed, current, self.session_id)
+            except OfflineReviewCancelled:
+                self.cancelled = True
+                raise
+            changes = _changes(self.app._understanding(current), self.app._understanding(merged), self.session_id)
+            self.app.store.save(merged)
+            self.changes.extend(row for row in changes if row["kind"] != "unchanged")
+            pair = self.app._sessions.get(_USER)
+            if pair:
+                pair[0]._accept_offline_profile(merged)
+            # Queue adopts this object after saving, so its next stage sees
+            # current owner withdrawals and the reconciled live profile.
+            for field in type(proposed).model_fields:
+                setattr(proposed, field, deepcopy(getattr(merged, field)))
+            self.before = merged.model_copy(deep=True)
 
 
 def _changes(before, after, session_id):
@@ -782,6 +1206,11 @@ def make_minimal_handler(app):
                     self._json(app.state())
                 except Exception:
                     self._json({"ok": False, "error": "本地资料读取失败，原文件未覆盖。"}, 500)
+            elif route == "/api/minimal/sharing":
+                try:
+                    self._json({"ok": True, **app.sharing_state()})
+                except Exception:
+                    self._json({"ok": False, "error": "转达记录读取失败，原文件未覆盖。"}, 500)
             elif route in {"/api/minimal/care", "/api/care/state"}:
                 try:
                     if route == "/api/minimal/care":
@@ -808,16 +1237,31 @@ def make_minimal_handler(app):
                 "/api/minimal/text": lambda body: app.submit(body.get("text"), body.get("turn_id"), body.get("session_id"), external_emotion=body.get("external_emotion")),
                 "/api/minimal/seal": lambda body: app.seal(body.get("session_id")),
                 "/api/minimal/reflect": lambda body: app.reflect(body.get("request_id")),
+                "/api/minimal/auto-review": lambda body: app.auto_review_action(
+                    body.get("enabled"), body.get("daily_limit", 1), request_id=body.get("request_id"),
+                    confirmed=body.get("confirmed"), read_only=body.get("replay", False),
+                    actor=body.get("actor", _USER)),
                 "/api/minimal/resume-models": lambda body: app.resume_models(
                     body.get("request_id"), body.get("pause_id"), confirmed=body.get("confirmed"),
                     read_only=body.get("replay", False), actor=body.get("actor", _USER)),
                 "/api/minimal/preference": lambda body: app.preference_action(
                     body.get("action"), body.get("id"), read_only=body.get("replay", False)),
+                "/api/minimal/preference-invitation": lambda body: app.preference_invitation(
+                    body.get("id"), body.get("session_id"), read_only=body.get("replay", False),
+                    actor=body.get("actor", _USER)),
+                "/api/minimal/preference-invitation-ack": lambda body: app.preference_invitation_ack(
+                    body.get("id"), body.get("question_sha256"), body.get("session_id"),
+                    read_only=body.get("replay", False), actor=body.get("actor", _USER)),
+                "/api/minimal/cognitive-readiness": lambda body: app.cognitive_readiness(
+                    body.get("session_id"), read_only=body.get("replay", False), actor=body.get("actor", _USER)),
                 "/api/minimal/preference-review": lambda body: app.preview_preferences(body.get("request_id")),
                 "/api/minimal/cognitive": lambda body: app.cognitive_action(
                     body.get("action"), observation_id=body.get("id"), delete_records=body.get("delete_records"),
                     read_only=body.get("replay", False), actor=body.get("actor", _USER)),
                 "/api/minimal/forget": lambda body: app.forget_run(),
+                "/api/minimal/sharing": lambda body: app.sharing_action(
+                    body.get("action"), body.get("payload"), body.get("session_id"),
+                    read_only=body.get("replay", False), actor=body.get("actor", _USER)),
                 "/api/minimal/care": lambda body: app.care_action(body.get("action"), body.get("payload")),
                 "/api/care/action": lambda body: app.caregiver_action(
                     self._care_token(), body.get("elder_id"), body.get("action"), body.get("payload")),

@@ -1,4 +1,5 @@
 """Product-only failure recovery, exercised without credentials or a network."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import io
 import json
@@ -16,7 +17,7 @@ from tests.test_reserved_calls import client, policy, receipt, call, stub
 
 @pytest.fixture(autouse=True)
 def deny_network(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("unstubbed network"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("unstubbed network"))
 
 
 def guard(tmp_path, cls=ProductCallGuard, *, maximum=40, budget="1"):
@@ -99,7 +100,7 @@ def test_known_no_content_retries_twice_at_most_and_counts_as_one_failed_round(t
     def fail(request, **kwargs):
         sent.append(request.data)
         raise http_failure(c, status)
-    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    stub_model_http(monkeypatch, fail)
     with pytest.raises(MinimalCallStopped):
         call(g, c)
     state = g.snapshot()
@@ -126,7 +127,7 @@ def test_retry_then_success_resets_failure_streak(tmp_path, monkeypatch):
         sent.append(1)
         if len(sent) < 3: raise http_failure(c, 503)
         return Response()
-    monkeypatch.setattr(urllib.request, "urlopen", receive)
+    stub_model_http(monkeypatch, receive)
     assert call(g, c) == "local fixture"
     assert len(sent) == 3 and g.snapshot()["consecutive_failures"] == 0
     assert not g.snapshot()["stopped"]
@@ -139,7 +140,7 @@ def test_unknown_cost_content_or_incomplete_error_is_never_retried_or_resumable(
     g = guard(tmp_path); c = client(); g.attach(c); calls = []
     def fail(request, **unused):
         calls.append(1); raise http_failure(c, 429, **kwargs)
-    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    stub_model_http(monkeypatch, fail)
     with pytest.raises(MinimalCallStopped): call(g, c)
     assert len(calls) == 1 and g.snapshot()["stopped"] and not g.snapshot()["can_resume"]
     before = g.snapshot()["attempts"]
@@ -304,13 +305,13 @@ def test_failed_reflection_is_not_reported_as_success_or_permanent_online_halt(t
     assert app.submit("还有以前的故事", "second", sid)["ok"]
     assert app.submit("今天先说到这里", "third", sid)["ok"]
     app.seal(sid)
-    result = app.reflect("reflection-failed")
+    result = app.reflect("reflection-failed", wait=True)
     assert not result["ok"] and result["state"]["reviews"][0]["status"] == "failed"
     assert not result["state"]["model_usage"]["stopped"]
     assert result["state"]["model_usage"]["consecutive_failures"] == 1
     assert result["state"]["offline"]["pending_count"] == 0
     assert len(calls) == 6
-    assert app.reflect("reflection-failed")["duplicate"] and len(calls) == 6
+    assert app.reflect("reflection-failed", wait=True)["duplicate"] and len(calls) == 6
     app.close()
 
 
@@ -367,7 +368,7 @@ def test_unknown_memory_fee_keeps_queue_stopped_and_never_enters_reflection(tmp_
     calls = responses(monkeypatch, Response(DECISION, {"cost": .01}), Response('{}', {}))
     assert app.submit("先说一句", "first", sid)["ok"]
     app.seal(sid)
-    result = app.reflect("unknown-memory")
+    result = app.reflect("unknown-memory", wait=True)
     assert not result["ok"] and result["state"]["model_usage"]["stopped"]
     assert result["state"]["offline"]["pending_count"] == 1 and not result["state"]["offline"]["audit"]
     assert len(calls) == 2 and result["state"]["requires_review"]
@@ -391,7 +392,7 @@ def test_reflection_transport_retries_and_one_business_correction_are_separate(t
         value["choices"][0]["message"]["content"] = json.dumps({
             "protocol_version": "2.0", "reviews": "bad" if len(sent) == 3 else [], "changes": []})
         return Response(value)
-    monkeypatch.setattr(urllib.request, "urlopen", receive)
+    stub_model_http(monkeypatch, receive)
     messages = [{"role": "system", "content": reflection_json.reflection_body_system_prompt()},
                 {"role": "user", "content": "unchanged local source"}]
     with g.scope("review", "review", "session"):
@@ -419,8 +420,8 @@ def test_settled_no_content_memory_failure_seals_and_next_session_can_review(tmp
     def fail(request, **kwargs):
         physical.append(request.data)
         raise http_failure(app.clients.memory, 503)
-    monkeypatch.setattr(urllib.request, "urlopen", fail)
-    first = app.reflect("memory-unavailable")
+    stub_model_http(monkeypatch, fail)
+    first = app.reflect("memory-unavailable", wait=True)
     assert not first["ok"] and len(physical) == 3
     assert first["state"]["offline"]["pending_count"] == 0
     assert first["state"]["offline"]["audit"][-1]["outcome"] == "memory_failed"
@@ -434,7 +435,7 @@ def test_settled_no_content_memory_failure_seals_and_next_session_can_review(tmp
         Response('{"protocol_version":"2.0","reviews":[],"changes":[]}', {"cost": .001}))
     for number in range(3): assert app.submit("再聊一点普通的事", f"next{number}", sid)["ok"]
     app.seal(sid)
-    result = app.reflect("next-review")
+    result = app.reflect("next-review", wait=True)
     assert result["ok"] and result["state"]["offline"]["pending_count"] == 0
     assert app.call_guard.snapshot()["attempts"][:len(old)] == old
     assert len(calls) == 5 and result["state"]["model_usage"]["consecutive_failures"] == 0

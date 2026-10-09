@@ -1,4 +1,5 @@
 """Explicit synthetic transport; no holdout text, network, or credentials."""
+from tests._model_http_stub import stub_model_http
 from contextlib import closing
 from copy import deepcopy
 import json
@@ -86,7 +87,7 @@ def transport(monkeypatch, mutate=None):
         return Response(response)
     opened.software_fixture_only=True
     monkeypatch.setattr(minimal_calls,"open_observed",opened)
-    monkeypatch.setattr(minimal_calls.urllib.request,"urlopen",opened)
+    stub_model_http(monkeypatch, opened)
     return requests
 
 

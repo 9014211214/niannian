@@ -1,4 +1,5 @@
 """Local care contracts: no HTTP, actual recipients, or model calls."""
+from tests._model_http_stub import stub_model_http
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -70,17 +71,27 @@ def setup_rule(service, *, token=None, source="simulation", **extra):
     return rule, contact, consent
 
 
-def advance(service, clock, minutes):
+def advance_visible_page(service, clock, minutes):
+    """Software seam: a fictional elder page reports each rendered generation.
+
+    This callback is deliberately separate from tick; it is no real browser,
+    person or notification evidence. Unseen semantics are covered separately.
+    """
     clock.now = START + timedelta(minutes=minutes)
-    return service.tick()
+    result = service.tick()
+    for row in service.elder_view(ELDER)["occurrences"]:
+        if row["status"] == "pending" and row["delivery_status"] == "awaiting_display":
+            command(service, "occurrence.displayed", "display-" + row["id"] + "-" + str(row["generation"]),
+                    occurrence_id=row["id"], generation=row["generation"])
+    return result
 
 
 def queue_without_dispatch(service, clock):
     dispatch = service.dispatch_pending
     service.dispatch_pending = lambda **kwargs: {"ok": True, "processed": 0}
     try:
-        advance(service, clock, 30)
-        advance(service, clock, 60)
+        advance_visible_page(service, clock, 30)
+        advance_visible_page(service, clock, 60)
     finally:
         service.dispatch_pending = dispatch
 
@@ -92,7 +103,7 @@ def test_default_ignores_notification_environment(tmp_path, monkeypatch):
     import urllib.request
     assert not hasattr(old_care, "create_notification_adapter")
     assert not hasattr(old_care, "WebhookNotificationAdapter")
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: pytest.fail("external notification forbidden"))
+    stub_model_http(monkeypatch, lambda *a, **kw: pytest.fail("external notification forbidden"))
     service = MinimalCareService(tmp_path / "care.sqlite")
     assert isinstance(service.notifier, LocalInboxNotificationAdapter)
     view = service.elder_view(ELDER)
@@ -164,19 +175,19 @@ def test_command_ids_survive_restart_and_reject_reuse(care, tmp_path):
     restored.close()
 
 
-def test_once_is_not_repeated_and_late_offer_gets_real_window(care):
+def test_once_is_not_repeated_and_late_page_display_starts_window(care):
     service, _token, clock = care
     reminder(service)
-    advance(service, clock, 10)
+    advance_visible_page(service, clock, 10)
     assert not service.elder_view(ELDER)["occurrences"]
-    advance(service, clock, 90)
+    advance_visible_page(service, clock, 90)
     occurrence = service.elder_view(ELDER)["occurrences"][0]
     assert occurrence["due_at"] == "2026-09-20T07:30:00+00:00"
     assert occurrence["offered_at"] == "2026-09-20T08:30:00+00:00"
     assert occurrence["deadline_at"] == "2026-09-20T09:00:00+00:00"
     assert occurrence["status"] == "pending"
     command(service, "occurrence.ack", "ack", occurrence_id=occurrence["id"])
-    advance(service, clock, 24 * 60 + 90)
+    advance_visible_page(service, clock, 24 * 60 + 90)
     view = service.elder_view(ELDER)
     assert len(view["occurrences"]) == 1
     assert view["reminders"][0]["status"] == "completed"
@@ -187,12 +198,12 @@ def test_once_is_not_repeated_and_late_offer_gets_real_window(care):
 def test_response_prevents_unconfirmed_notification_and_terminal_changes(care, action):
     service, _token, clock = care
     setup_rule(service)
-    advance(service, clock, 30)
+    advance_visible_page(service, clock, 30)
     occurrence = service.elder_view(ELDER)["occurrences"][0]
     command(service, action, "response", occurrence_id=occurrence["id"])
     with pytest.raises(ValueError, match="状态转换"):
         command(service, "occurrence.snooze", "invalid", occurrence_id=occurrence["id"], minutes=10)
-    advance(service, clock, 90)
+    advance_visible_page(service, clock, 90)
     assert not service.elder_view(ELDER)["deliveries"]
 
 
@@ -224,9 +235,9 @@ def test_snooze_has_distinct_occurrence_generation_not_network_retry(care):
     occurrence = view["occurrences"][0]
     old_id = view["deliveries"][0]["id"]
     command(service, "occurrence.snooze", "later", occurrence_id=occurrence["id"], minutes=10)
-    advance(service, clock, 70)
+    advance_visible_page(service, clock, 70)
     assert service.elder_view(ELDER)["occurrences"][0]["status"] == "pending"
-    advance(service, clock, 100)
+    advance_visible_page(service, clock, 100)
     view = service.elder_view(ELDER)
     assert [row["status"] for row in view["deliveries"]] == ["cancelled", "delivered_local"]
     assert view["deliveries"][1]["id"] != old_id
@@ -235,16 +246,16 @@ def test_snooze_has_distinct_occurrence_generation_not_network_retry(care):
 def test_daily_31_day_outage_offers_latest_only_and_preserves_skips(care):
     service, _token, clock = care
     setup_rule(service, schedule="daily")
-    advance(service, clock, 31 * 24 * 60 + 30)
+    advance_visible_page(service, clock, 31 * 24 * 60 + 30)
     view = service.elder_view(ELDER)
     assert len(view["occurrences"]) == 1
     assert view["occurrences"][0]["due_at"] == "2026-10-21T07:30:00+00:00"
     catchup = view["reminders"][0]["catchup"]
     assert catchup["skipped_count"] == 31 and catchup["status"] == "not_offered"
     assert catchup["first_skipped_due_at"] == "2026-09-20T07:30:00+00:00"
-    advance(service, clock, 31 * 24 * 60 + 60)
+    advance_visible_page(service, clock, 31 * 24 * 60 + 60)
     assert len(service.elder_view(ELDER)["deliveries"]) == 1
-    advance(service, clock, 32 * 24 * 60 + 30)
+    advance_visible_page(service, clock, 32 * 24 * 60 + 30)
     assert len(service.elder_view(ELDER)["occurrences"]) == 2
 
 
@@ -252,11 +263,11 @@ def test_new_daily_instance_does_not_dispatch_stale_queued_day(care):
     service, _token, clock = care
     setup_rule(service, schedule="daily")
     queue_without_dispatch(service, clock)
-    advance(service, clock, 31 * 24 * 60 + 30)
+    advance_visible_page(service, clock, 31 * 24 * 60 + 30)
     view = service.elder_view(ELDER)
     assert [row["status"] for row in view["occurrences"]] == ["superseded", "pending"]
     assert view["deliveries"][0]["status"] == "cancelled"
-    advance(service, clock, 31 * 24 * 60 + 60)
+    advance_visible_page(service, clock, 31 * 24 * 60 + 60)
     view = service.elder_view(ELDER)
     assert [row["status"] for row in view["deliveries"]] == ["cancelled", "delivered_local"]
 
@@ -264,8 +275,8 @@ def test_new_daily_instance_does_not_dispatch_stale_queued_day(care):
 def test_unconfirmed_is_not_medical_failure_and_manual_care_is_separate(care):
     service, token, clock = care
     setup_rule(service, label="私人内容绝不外发")
-    advance(service, clock, 30)
-    advance(service, clock, 60)
+    advance_visible_page(service, clock, 30)
+    advance_visible_page(service, clock, 60)
     view = service.view(token)
     assert view["occurrences"][0]["status"] == "unconfirmed"
     delivery, task = view["deliveries"][0], view["tasks"][0]
@@ -284,6 +295,75 @@ def test_unconfirmed_is_not_medical_failure_and_manual_care_is_separate(care):
     assert view["tasks"][0]["status"] == "closed"
     with pytest.raises(PermissionError):
         command(service, "receipt.record", "elder-hack", delivery_id=delivery["id"], status="delivered")
+
+
+@pytest.mark.parametrize("action", ["occurrence.ack", "occurrence.decline", "occurrence.snooze"])
+@pytest.mark.parametrize("status", ["pending", "unconfirmed", "snoozed"])
+def test_caregiver_response_is_denied_without_changing_elder_or_queued_notification(care, action, status):
+    service, token, clock = care
+    setup_rule(service)
+    if status == "unconfirmed":
+        queue_without_dispatch(service, clock)
+    else:
+        advance_visible_page(service, clock, 30)
+        if status == "snoozed":
+            occurrence = service.elder_view(ELDER)["occurrences"][0]
+            command(service, "occurrence.snooze", "elder-snooze", occurrence_id=occurrence["id"], minutes=10)
+    before = service.elder_view(ELDER)
+    occurrence = before["occurrences"][0]
+    commands_before = service._db.execute("SELECT COUNT(*) FROM commands").fetchone()[0]
+    with pytest.raises(PermissionError, match="只能由本人"):
+        service.mutate(token, ELDER, action, {"request_id": "caregiver-response",
+            "occurrence_id": occurrence["id"], "minutes": 5,
+            "actor": "elder:" + ELDER, "role": "elder", "caregiver": False})
+    assert service.elder_view(ELDER) == before
+    assert service._db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == commands_before
+    assert occurrence["status"] == status
+
+
+@pytest.mark.parametrize("action", ["occurrence.ack", "occurrence.decline", "occurrence.snooze"])
+def test_legacy_caregiver_response_result_cannot_bypass_current_permission(care, action):
+    service, token, clock = care
+    reminder(service)
+    advance_visible_page(service, clock, 30)
+    before = service.elder_view(ELDER)
+    payload = {"request_id": "old-caregiver-response", "occurrence_id": before["occurrences"][0]["id"], "minutes": 5}
+    encoded = json.dumps([action, payload], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    service._db.execute("INSERT INTO commands(actor,elder_id,request_id,digest,result) VALUES(?,?,?,?,?)",
+        ("caregiver:carer", ELDER, payload["request_id"], hashlib.sha256(encoded.encode()).hexdigest(),
+         json.dumps({"ok": True, "action": action, "record": {"status": "historical-only"}})))
+    history_before = [tuple(row) for row in service._db.execute("SELECT * FROM commands")]
+    with pytest.raises(PermissionError, match="只能由本人"):
+        service.mutate(token, ELDER, action, payload)
+    assert service.elder_view(ELDER) == before
+    assert [tuple(row) for row in service._db.execute("SELECT * FROM commands")] == history_before
+
+
+def test_caregiver_keeps_reminder_configuration_authority(care):
+    service, token, _clock = care
+    created = service.mutate(token, ELDER, "reminder.create", {"request_id": "caregiver-reminder",
+        "label": "拿纸和本子", "schedule": "daily", "date": "2026-09-20", "time": "15:30",
+        "timezone": "Asia/Shanghai"})["record"]
+    assert created["created_by"] == "caregiver:carer"
+    cancelled = service.mutate(token, ELDER, "reminder.cancel", {"request_id": "caregiver-cancel",
+        "reminder_id": created["id"]})["record"]
+    assert cancelled["status"] == "cancelled"
+    assert not service.elder_view(ELDER)["occurrences"]
+
+
+def test_caregiver_follow_up_cannot_change_elder_response_or_notification(care):
+    service, token, clock = care
+    setup_rule(service)
+    queue_without_dispatch(service, clock)
+    before = service.elder_view(ELDER)
+    task = before["tasks"][0]
+    for action, request_id in [("task.follow_up", "caregiver-follow"), ("task.close", "caregiver-close")]:
+        service.mutate(token, ELDER, action, {"request_id": request_id, "task_id": task["id"], "note": "本地模拟跟进"})
+    after = service.elder_view(ELDER)
+    assert after["tasks"][0]["status"] == "closed"
+    assert after["occurrences"] == before["occurrences"]
+    assert after["reminders"] == before["reminders"]
+    assert after["deliveries"] == before["deliveries"]
 
 
 @pytest.mark.parametrize("extra", [
@@ -334,8 +414,8 @@ def test_external_requires_explicit_setting_and_never_accepts_simulation(tmp_pat
         MinimalCareService(tmp_path / "bad.sqlite", notifier=Gateway())
     service, _token, clock, gateway = make_external(tmp_path)
     setup_rule(service)
-    advance(service, clock, 30)
-    advance(service, clock, 60)
+    advance_visible_page(service, clock, 30)
+    advance_visible_page(service, clock, 60)
     assert not gateway.calls
     assert service.elder_view(ELDER)["tasks"] and not service.elder_view(ELDER)["deliveries"]
     service.close()
@@ -344,8 +424,8 @@ def test_external_requires_explicit_setting_and_never_accepts_simulation(tmp_pat
 def test_gateway_acceptance_and_family_ack_never_mean_human_handled(tmp_path):
     service, token, clock, gateway = make_external(tmp_path)
     setup_rule(service, token=token, source="real")
-    advance(service, clock, 30)
-    advance(service, clock, 60)
+    advance_visible_page(service, clock, 30)
+    advance_visible_page(service, clock, 60)
     service.tick()
     view = service.view(token)
     delivery = view["deliveries"][0]
@@ -361,8 +441,8 @@ def test_gateway_acceptance_and_family_ack_never_mean_human_handled(tmp_path):
 def test_unknown_or_legacy_failure_does_not_retry(tmp_path, outcome):
     service, token, clock, gateway = make_external(tmp_path, outcome)
     setup_rule(service, token=token, source="real")
-    advance(service, clock, 30)
-    advance(service, clock, 60)
+    advance_visible_page(service, clock, 30)
+    advance_visible_page(service, clock, 60)
     service.tick()
     view = service.view(token)
     assert len(gateway.calls) == 1
@@ -381,9 +461,9 @@ def test_crash_between_sending_and_receipt_recovers_unknown(tmp_path):
         pass
     service, token, clock, gateway = make_external(tmp_path, Crash())
     setup_rule(service, token=token, source="real")
-    advance(service, clock, 30)
+    advance_visible_page(service, clock, 30)
     with pytest.raises(Crash):
-        advance(service, clock, 60)
+        advance_visible_page(service, clock, 60)
     assert service.view(token)["deliveries"][0]["status"] == "sending"
     service.close()
     restored = MinimalCareService(tmp_path / "external.sqlite", notifier=gateway, allow_external=True, clock=clock)
@@ -397,7 +477,7 @@ def test_crash_between_sending_and_receipt_recovers_unknown(tmp_path):
 def test_receipt_commit_failure_keeps_durable_sending_and_never_resends(tmp_path, monkeypatch):
     service, token, clock, gateway = make_external(tmp_path)
     setup_rule(service, token=token, source="real")
-    advance(service, clock, 30)
+    advance_visible_page(service, clock, 30)
     original = service._put
     def fail(kind, row):
         if kind == "deliveries" and row["status"] == "accepted":
@@ -405,7 +485,7 @@ def test_receipt_commit_failure_keeps_durable_sending_and_never_resends(tmp_path
         return original(kind, row)
     monkeypatch.setattr(service, "_put", fail)
     with pytest.raises(sqlite3.OperationalError):
-        advance(service, clock, 60)
+        advance_visible_page(service, clock, 60)
     assert service.view(token)["deliveries"][0]["status"] == "sending"
     service.tick()
     assert len(gateway.calls) == 1
@@ -415,7 +495,7 @@ def test_receipt_commit_failure_keeps_durable_sending_and_never_resends(tmp_path
 def test_concurrent_ticks_do_not_duplicate_outbox_send(tmp_path):
     service, token, clock, gateway = make_external(tmp_path)
     setup_rule(service, token=token, source="real")
-    advance(service, clock, 30)
+    advance_visible_page(service, clock, 30)
     clock.now = START + timedelta(minutes=60)
     with ThreadPoolExecutor(max_workers=4) as pool:
         list(pool.map(lambda _: service.tick(), range(4)))
@@ -474,8 +554,8 @@ def test_scope_validation_is_atomic_on_foreign_record(care):
 def test_local_forget_preserves_login_and_assignments(care):
     service, token, clock = care
     setup_rule(service)
-    advance(service, clock, 30)
-    advance(service, clock, 60)
+    advance_visible_page(service, clock, 30)
+    advance_visible_page(service, clock, 60)
     service.forget_elder(ELDER)
     view = service.view(token)
     assert view["elders"] == [{"id": ELDER}]

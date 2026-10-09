@@ -1,5 +1,6 @@
 """Offline freeze checks use small authored trees, never private project data."""
 from __future__ import annotations
+from tests._model_http_stub import stub_model_http
 
 from copy import deepcopy
 import json
@@ -186,7 +187,7 @@ def test_actual_e1_reconstruction_is_offline_deterministic_and_content_free(monk
     def forbidden(*args, **kwargs):
         raise AssertionError("network call forbidden")
 
-    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    stub_model_http(monkeypatch, forbidden)
     plan = _e1_plan()
     original = deepcopy(plan)
     first = freeze.e1_request_records(plan)

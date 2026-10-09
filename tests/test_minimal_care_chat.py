@@ -1,4 +1,5 @@
 """Actual Engine with local recording clients; no model-quality claims."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import json
 import urllib.request
@@ -6,7 +7,7 @@ import urllib.request
 import pytest
 
 from aria.voice.minimal import MinimalWebApp
-from tests.test_minimal_care import ELDER, care, command, setup_rule, advance  # noqa: F401
+from tests.test_minimal_care import ELDER, care, command, setup_rule, advance_visible_page  # noqa: F401
 from tests.test_minimal_web import live_fixture
 
 
@@ -14,7 +15,7 @@ from tests.test_minimal_web import live_fixture
 def no_network(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("external request forbidden")
-    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    stub_model_http(monkeypatch, forbidden)
 
 
 def send(app, text, turn_id="first"):
@@ -72,8 +73,8 @@ def test_next_turn_reads_current_status_but_duplicate_and_replay_keep_old_basis(
 def test_local_delivery_and_family_roleplay_stay_local_in_prompt(tmp_path, care):
     service, token, clock = care
     setup_rule(service)
-    advance(service, clock, 30)
-    advance(service, clock, 60)
+    advance_visible_page(service, clock, 30)
+    advance_visible_page(service, clock, 60)
     delivery = service.elder_view(ELDER)["deliveries"][0]
     service.mutate(token, ELDER, "receipt.record", {
         "request_id": "roleplay", "delivery_id": delivery["id"], "status": "family_ack",
@@ -105,7 +106,7 @@ def test_unrelated_chat_drops_snapshot_and_offline_does_not_receive_raw_care_dat
     assert "minimal_care_records" not in str(clients.online.calls[-1])
     assert "护理私有标签ZXQ" not in str(clients.online.calls[-1])
     app.seal(second["session_id"])
-    assert app.reflect("explicit-review")["ok"]
+    assert app.reflect("explicit-review", wait=True)["ok"]
     assert "护理私有标签ZXQ" not in str(clients.memory.calls + clients.reflection.calls)
     assert not app.state()["profile"]["hypotheses"]
 

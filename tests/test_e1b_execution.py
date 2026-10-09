@@ -1,4 +1,5 @@
 """Formal entry tests: injected local HTTP only, never model effect evidence."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import io
@@ -14,7 +15,7 @@ from _reservation_fixtures import fixture_reservation_policy
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("unexpected network"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("unexpected network"))
 
 
 @pytest.fixture
@@ -205,7 +206,7 @@ def fake_http(monkeypatch, *, failure=None):
             usage.pop("cost")
         return Response(json.dumps({"model": payload["model"], "provider": payload["provider"]["only"][0].title(), "usage": usage,
             "choices": [{"finish_reason": "stop", "message": {"content": content}}]}).encode())
-    monkeypatch.setattr(urllib.request, "urlopen", receive)
+    stub_model_http(monkeypatch, receive)
     return calls, decision
 
 

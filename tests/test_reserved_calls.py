@@ -1,4 +1,5 @@
 """Reservations are verified with local transport, never a live credential."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 from decimal import Decimal
 import json
@@ -47,7 +48,7 @@ def receipt(c, **changes):
 def deny_network(monkeypatch):
     def denied(*args, **kwargs):
         raise AssertionError("unstubbed network")
-    monkeypatch.setattr(urllib.request, "urlopen", denied)
+    stub_model_http(monkeypatch, denied)
 
 
 def stub(monkeypatch, data, on_open=None):
@@ -67,7 +68,7 @@ def stub(monkeypatch, data, on_open=None):
         if on_open:
             on_open(request)
         return Response()
-    monkeypatch.setattr(urllib.request, "urlopen", opened)
+    stub_model_http(monkeypatch, opened)
     return calls
 
 

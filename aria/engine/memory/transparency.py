@@ -237,12 +237,12 @@ def render_profile(persona: PersonaProfile, ctx: EngineContext | None = None) ->
 
     lines.append(f"【记得你的事】共 {len(p.episodic_memory)} 条")
     for e in p.episodic_memory:
-        flag = "可提及" if e.referenceable else "只内化"
+        flag = "可提及" if e.can_reference() else "只内化"
         lines.append(f"  - [{flag}] {e.summary}")
     if p.relationship_context:
         lines.append("【你告诉我的关系】默认不代表允许分享给第三方")
         for relationship in p.relationship_context:
-            flag = "可在对话中提及" if relationship.referenceable else "只内化"
+            flag = "可在对话中提及" if relationship.can_reference() else "只内化"
             sharing = "允许分享" if relationship.consent_to_share else "不可外发"
             lines.append(
                 f"  - [{flag}/{sharing}] {relationship.name}"
@@ -358,10 +358,14 @@ def render_profile(persona: PersonaProfile, ctx: EngineContext | None = None) ->
         for job in p.offline_sessions:
             lines.append(f"  - {job.state} / 已尝试 {job.attempts} 次 / 到期 {job.expires_at}")
     if p.risk_events:
-        lines.append(f"【安全记录】共 {len(p.risk_events)} 条(我担心过你的时刻,同样对你不保留)")
+        lines.append(f"【安全记录】共 {len(p.risk_events)} 条（历史或模型分流记录，不证明本人危险）")
         for ev in p.risk_events:
             note = f":{ev.note}" if ev.note else ""
             lines.append(f"  - {ev.at} [tier{ev.tier} {ev.kind}]{note}")
+    if p.safety_screenings:
+        lines.append(f"【安全兜底记录】共 {len(p.safety_screenings)} 条（主体未核实，不用于人物理解或护理授权）")
+        for ev in p.safety_screenings:
+            lines.append(f"  - {ev.at} [tier{ev.tier} {ev.kind}] 会话{ev.session_id} / 轮次{ev.turn_index}")
     if p.longitudinal_baseline.signals:
         lines.append("【个人时间基线】只保存聚合统计，不保存原始音视频")
         for signal, stat in sorted(p.longitudinal_baseline.signals.items()):

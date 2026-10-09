@@ -399,6 +399,7 @@ def test_engine_diagnoses_on_session_close_and_persists(tmp_path):
     reloaded = store.load("u1")
     assert reloaded is not None and reloaded.attachment_style is None
     assert reloaded.person_hypotheses
+    first_basis = reloaded.delivery_state.hypothesis_basis_fingerprint
 
     engine2 = Engine(
         get_scene("companion_elder"), persona=reloaded, store=store,
@@ -418,7 +419,13 @@ def test_engine_diagnoses_on_session_close_and_persists(tmp_path):
         and item.status == "working"
         for item in reloaded2.person_hypotheses
     )
-    assert reloaded2.delivery_state.candidate == "low_pressure"
+    # F06: a newly qualified basis invalidates the old neutral cache.
+    from aria.engine.policy.prompt import _delivery_hypothesis_fingerprint
+    assert reloaded2.delivery_state.committed == "low_pressure"
+    assert reloaded2.delivery_state.candidate is None
+    assert reloaded2.delivery_state.streak == 0
+    assert reloaded2.delivery_state.hypothesis_basis_fingerprint == _delivery_hypothesis_fingerprint(reloaded2)
+    assert reloaded2.delivery_state.hypothesis_basis_fingerprint != first_basis
 
     engine3 = Engine(
         get_scene("companion_elder"), persona=reloaded2, store=store,

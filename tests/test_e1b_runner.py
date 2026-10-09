@@ -1,4 +1,5 @@
 """Product-path E1b integration using named software fixtures, never models."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import json
 import re
@@ -24,7 +25,7 @@ from tests.preference_fixtures import communication_review
 def no_network(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("E1b software tests must never use network")
-    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    stub_model_http(monkeypatch, forbidden)
 
 
 def setup_runner(tmp_path, *, factory=None):

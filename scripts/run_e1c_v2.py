@@ -92,7 +92,7 @@ def run(args):
         return scoring.export_bundle(args.campaign, args.bundle,
             authorization_sha256=args.authorization_sha256, blind_seed=args.blind_seed)
     value = scoring.assess(args.bundle, args.bundle_sha256, write=True)
-    return {name: value.get(name) for name in ("status", "main_gate", "formation_gate", "overall_gate", "effect_claim_eligible")}
+    return {name: value.get(name) for name in ("status", "main_gate", "formation_gate", "protection_gate", "overall_gate", "effect_claim_eligible")}
 
 
 def main(argv=None):

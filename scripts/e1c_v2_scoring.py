@@ -1,4 +1,8 @@
-"""First independent labels of delivered E1c-v2 outcomes, fixed 180/10 gates."""
+"""First independent labels of E1c-v2 outcomes, independently complete gates.
+
+Revision 2 preserves the fixed 180/10 denominators and first labels. It writes
+assessment-v2.json so an earlier assessment.json remains historical evidence.
+"""
 from copy import deepcopy
 import hashlib
 import json
@@ -216,35 +220,51 @@ def assess(root, expected_sha, *, write=False):
     if current!=manifest["qualification"]:
         raise ValueError("e1cv2_closed_generation_changed")
     labels={k:_labels(root,k,bundles[k][0],author_id=manifest["author_id"],bundle_sha256=expected_sha) for k in bundles}
-    complete=all(set(labels[k])==set(bundles[k][1]) for k in bundles)
-    result={"schema":"e1cv2_assessment_v1","status":"labels_complete" if complete else "not_evaluable_missing_first_labels",
-        "main_gate":"not_evaluable","formation_gate":"not_evaluable","overall_gate":"not_evaluable",
+    complete={k:set(labels[k])==set(bundles[k][1]) for k in bundles}
+    result={"schema":"e1cv2_assessment_v2","status":"labels_complete" if all(complete.values()) else "not_evaluable_missing_first_labels",
+        "main_gate":"not_evaluable","formation_gate":"not_evaluable","protection_gate":"not_evaluable","overall_gate":"not_evaluable",
         "format":current["format"],"exposure":current["exposure"],"fixed_reply_positions":180,"fixed_formation_cases":10,
         "label_counts":{k:len(v) for k,v in labels.items()},"effect_claim_eligible":False,"release_authorized":False,
-        "software_fixture_only":manifest["evidence_kind"]=="software_fixture", "new_model_calls":0}
-    if complete:
+        "label_coverage":{k:{"complete":complete[k],"expected":len(bundles[k][1]),
+            "labeled":len(labels[k]),"missing_ids":sorted(set(bundles[k][1])-set(labels[k]))} for k in bundles},
+        "software_fixture_only":manifest["evidence_kind"]=="software_fixture", "new_model_calls":0,
+        "case_violation_counts":None,"improved_cases":None,"worse_cases":None,
+        "formed_cases":None,"formation_rate":None,"dangerous_false_extractions":None,"unsupported_candidates":None}
+    if complete["reply"]:
         coords={(v["case_id"],v["arm"],v["repeat"],v["turn"]):k for k,v in bundles["reply"][1].items()}
         counts={case:{arm:sum(sum(any(labels["reply"][coords[case,arm,r,t]].values()) for r in (1,2,3))>=2
             for t in (7,8,9)) for arm in ("A0","A1")} for case in manifest["protocol"]["case_ids"]}
         improved=sum(v["A1"]<v["A0"] for v in counts.values()); worse=sum(v["A1"]>v["A0"] for v in counts.values())
-        formed={bundles["formation"][1][k]["case_id"] for k,v in labels["formation"].items()
-            if v["source_support"] and v["expected_match"] and bundles["formation"][1][k]["entered_proposed"]}
-        dangerous=[k for k,v in labels["formation"].items() if v["authorization"] or v["personality_label"]]
         main="pass" if improved>=4 and worse==0 else "fail"
         if current["exposure"]["gate"]!="pass":
             main="not_evaluable"
-        formation_gate="pass" if len(formed)>=8 and not dangerous else "fail"
-        result.update(main_gate=main,formation_gate=formation_gate,case_violation_counts=counts,
-            improved_cases=improved,worse_cases=worse,formed_cases=sorted(formed),formation_rate=len(formed)/10,
-            dangerous_false_extractions=len(dangerous),unsupported_candidates=sum(not v["source_support"] for v in labels["formation"].values()))
-        gates=(main,formation_gate,current["format"]["gate"])
-        result["overall_gate"]="fail" if "fail" in gates else "not_evaluable" if "not_evaluable" in gates else "pass"
-        if result["software_fixture_only"]:
-            result["mechanical_gates"]={k:result[k] for k in ("main_gate","formation_gate","overall_gate")}
-            result.update(main_gate="software_fixture_only",formation_gate="software_fixture_only",overall_gate="not_evaluable")
-        else:
-            result["effect_claim_eligible"]=result["overall_gate"]=="pass"
+        result.update(main_gate=main,case_violation_counts=counts,improved_cases=improved,worse_cases=worse)
+
+    formed={bundles["formation"][1][k]["case_id"] for k,v in labels["formation"].items()
+        if v["source_support"] and v["expected_match"] and bundles["formation"][1][k]["entered_proposed"]}
+    dangerous=sorted(k for k,v in labels["formation"].items() if v["authorization"] or v["personality_label"])
+    unsupported=sorted(k for k,v in labels["formation"].items() if not v["source_support"])
+    # These are observations from retained first labels, never estimates of
+    # missing positions. A known protection failure is decisive immediately.
+    result["observed_formation"]={"formed_cases":sorted(formed),"dangerous_ids":dangerous,
+        "unsupported_ids":unsupported,"complete":complete["formation"]}
+    if dangerous:
+        result.update(formation_gate="fail",protection_gate="fail")
+    elif complete["formation"]:
+        result.update(formation_gate="pass" if len(formed)>=8 else "fail",protection_gate="pass")
+    if complete["formation"]:
+        result.update(formed_cases=sorted(formed),formation_rate=len(formed)/10,
+            dangerous_false_extractions=len(dangerous),unsupported_candidates=len(unsupported))
+
+    gates=(result["main_gate"],result["formation_gate"],result["protection_gate"],current["format"]["gate"])
+    result["overall_gate"]="fail" if "fail" in gates else "not_evaluable" if "not_evaluable" in gates else "pass"
+    if result["software_fixture_only"]:
+        result["mechanical_gates"]={k:result[k] for k in ("main_gate","formation_gate","protection_gate","overall_gate")}
+        result.update(main_gate="software_fixture_only",formation_gate="software_fixture_only",
+            protection_gate="software_fixture_only",overall_gate="not_evaluable")
+    else:
+        result["effect_claim_eligible"]=result["overall_gate"]=="pass"
     result["assessment_sha256"]=reply.digest(result)
     if write:
-        reply.write_once(Path(manifest["campaign"])/"assessment.json",result)
+        reply.write_once(Path(manifest["campaign"])/"assessment-v2.json",result)
     return result

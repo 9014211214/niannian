@@ -5,11 +5,13 @@ from datetime import datetime
 
 from aria.engine.context import EngineContext
 from aria.engine.memory.demo_personas import load_demo_persona
+from aria.engine.model.persona import EpisodicMemoryEntry
 from aria.engine.orchestrator import Engine
 from aria.interfaces.knowledge import WorldKnowledgeItem
 from aria.scenes.companion_elder.knowledge import ElderKnowledge
 from aria.scenes.registry import get_scene
 from aria.tools.registry import ToolRegistry
+from tests.memory_source_fixtures import episode_source
 
 
 def _elder_engine() -> Engine:
@@ -31,7 +33,12 @@ def test_loop_populates_working_memory_and_recall():
     """主循环:领域知识 + 个人记忆召回都写进 working_memory。"""
     engine = _elder_engine()
     ctx = EngineContext(user_id="laochen_demo", scene_id="companion_elder")
-    # 「那只猫」应召回 ep_c_001(referenceable),且不泄露私密 episode。
+    # 召回有完整本人来源的新事实；旧demo标记不能代替出处。
+    source = "今天橘猫过来找我，我喂了一点猫粮。"
+    engine.persona.episodic_memory.append(EpisodicMemoryEntry(
+        id="source-cat", summary=source, keywords=["猫"], referenceable=True,
+        **episode_source(source),
+    ))
     engine.process_turn(ctx, "今天那只猫没来。",
                         {"label": "sad", "score": 0.5}, {"label": "neutral", "score": 0.8})
     recalled = ctx.working_memory["recalled_episodes"]

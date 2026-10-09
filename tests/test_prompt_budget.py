@@ -6,7 +6,10 @@ from aria.engine.model.persona import (
     PersonHypothesis,
     PersonaProfile,
     RelationshipContextEntry,
+    RelationshipEvidence,
+    RelationshipFactSource,
 )
+from aria.engine.memory.referenceability import SOURCE_CONTEXT_VERSION, source_context_sha256
 from aria.engine.policy.prompt import build_messages
 from aria.scenes.registry import get_scene
 
@@ -34,6 +37,16 @@ def test_online_prompt_has_bounded_history_person_state_and_relationships():
                 facts=[f"关系事实-{index}"],
                 referenceable=True,
                 first_observed_at="2026-01-01T10:00:00+08:00",
+                evidence=[RelationshipEvidence(
+                    at="2026-01-01T10:00:00+08:00", session_id="owner-session",
+                    summary=f"关系事实-{index}", turn_indices=[index],
+                    fact_sources=[RelationshipFactSource(
+                        quote=f"关系事实-{index}", turn_index=index,
+                        source_context=f"朋友关系-{index}，关系事实-{index}。",
+                        source_context_sha256=source_context_sha256(f"朋友关系-{index}，关系事实-{index}。"),
+                        source_context_version=SOURCE_CONTEXT_VERSION,
+                    )],
+                )],
             )
             for index in range(10)
         ],

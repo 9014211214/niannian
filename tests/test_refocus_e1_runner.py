@@ -1,5 +1,6 @@
 """E1 uses real builders/parser/controller and injected in-memory responses."""
 from __future__ import annotations
+from tests._model_http_stub import stub_model_http
 
 from collections import Counter
 from dataclasses import replace
@@ -26,7 +27,7 @@ from aria.engine.policy.reply_contract import quality_violations, reply_quality_
 def forbid_network(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("test must not call a network service")
-    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    stub_model_http(monkeypatch, forbidden)
 
 
 class FakeTransport:

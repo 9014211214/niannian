@@ -330,11 +330,12 @@ class MemoryExperimentApp(FormatExperimentApp):
         return {"ok": True, "memory_product_status": "failed", "memory_completed": False,
                 "memory_candidates": None, "reflection_status": status, "memory_terminal": deepcopy(proof)}
 
-    def reflect(self, request_id):
+    def reflect(self, request_id, *, wait=True):
+        require(wait is True, "memory_experiment_requires_synchronous_review")
         self._memory_active = True
         before = self._profile()
         try:
-            result = super().reflect(request_id)
+            result = super().reflect(request_id, wait=True)
             if result.get("ok") is False:
                 selected = self._memory_candidate()
                 if selected is not None:

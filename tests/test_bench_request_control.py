@@ -1,3 +1,4 @@
+from tests._model_http_stub import stub_model_http
 from datetime import datetime, timezone
 from email.message import Message
 from email.utils import format_datetime
@@ -246,7 +247,7 @@ def test_unattached_product_client_uses_original_transport(monkeypatch):
         starts.append(True)
         return Response(envelope())
 
-    monkeypatch.setattr("urllib.request.urlopen", opener)
+    stub_model_http(monkeypatch, opener)
     llm = client()
     assert not hasattr(llm, "benchmark_request_control")
     assert llm.max_completion_tokens == 420

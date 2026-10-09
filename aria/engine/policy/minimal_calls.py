@@ -1,6 +1,8 @@
 """A small, durable allowance shared by the three minimal-demo model roles.
 
-Only bounded transport metadata is retained. This is a stop-before-next-call
+Every default physical request rejects HTTP redirection, including when local
+connection tracing is disabled. Only bounded transport metadata is retained.
+This is a stop-before-next-call
 guard, not a provider invoice cap, an authorization issuer, or a retry queue.
 """
 from __future__ import annotations
@@ -28,7 +30,8 @@ from .response_observability import (
 from .request_pacing import monotonic_value, pacing_interval, wait_until
 from .transport_failure import transport_failure
 from .observed_transport import (TransportTrace, VERSION as TRANSPORT_TRACE_VERSION,
-    DIAGNOSTIC_VERSION as TRANSPORT_DIAGNOSTIC_VERSION, PreparationRecovery, open_observed)
+    DIAGNOSTIC_VERSION as TRANSPORT_DIAGNOSTIC_VERSION, PreparationRecovery, open_observed,
+    open_unredirected)
 from .bounded_recovery import (
     BoundedRecovery, CONTINUATION_SCHEMA, MAIN_CONTINUATION_SCHEMA,
     validate_recovery_policy, validate_recovery_records,
@@ -685,7 +688,7 @@ class MinimalCallGuard:
                 if self.recovery_policy is not None:
                     row["http_dispatch_started"] = True
                 response = (open_observed(request, timeout=client.timeout, trace=trace) if trace is not None
-                            else urllib.request.urlopen(request, timeout=client.timeout))
+                            else open_unredirected(request, timeout=client.timeout))
                 phase, response_returned = "response_context", True
                 with response as response:
                     status = getattr(response, "status", None)

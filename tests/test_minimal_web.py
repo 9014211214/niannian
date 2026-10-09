@@ -1,5 +1,6 @@
 """Local Engine/HTTP checks; recording clients are software fixtures, not models."""
 from __future__ import annotations
+from tests._model_http_stub import stub_model_http
 
 from copy import deepcopy
 import http.client
@@ -48,7 +49,7 @@ def forbid_external(*args, **kwargs):
 
 @pytest.fixture(autouse=True)
 def no_model_network(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", forbid_external)
+    stub_model_http(monkeypatch, forbid_external)
 
 
 class RecordingClient:
@@ -109,7 +110,7 @@ def test_default_preview_ignores_all_service_keys_and_factories(tmp_path, monkey
     app = MinimalWebApp(tmp_path)
     session_id = start_and_submit(app)
     assert app.seal(session_id)["ok"]
-    assert not app.reflect("disabled-review")["ok"]
+    assert not app.reflect("disabled-review", wait=True)["ok"]
     state = app.state()
     assert state["mode"] == "local_preview" and not state["model_calls_enabled"]
     assert not any(state["services"].values())
@@ -139,7 +140,7 @@ def test_three_sessions_use_actual_engine_only_disclosed_turns_and_explicit_refl
             assert all(future not in prompt for future in all_words[consumed:])
         assert app.seal(session_id)["ok"]
         assert len(clients.memory.calls) == len(clients.reflection.calls) == number
-        result = app.reflect(f"review-{number}")
+        result = app.reflect(f"review-{number}", wait=True)
         assert result["ok"], result
         assert len(clients.memory.calls) == len(clients.reflection.calls) == number + 1
         for client in (clients.memory, clients.reflection):
@@ -163,7 +164,7 @@ def test_state_and_restarted_replay_do_not_mutate_or_call_clients(tmp_path):
     app, clients = live_fixture(tmp_path)
     session_id = start_and_submit(app)
     app.seal(session_id)
-    app.reflect("review")
+    app.reflect("review", wait=True)
     before = snapshot_files(tmp_path)
     counts = [len(client.calls) for client in (clients.online, clients.memory, clients.reflection)]
     first = app.state()
@@ -187,7 +188,7 @@ def test_real_updater_candidate_correction_and_nonadoption_are_visible_without_p
     item = review(current)
     clients.reflection.payload = {"protocol_version": "2.0", "reviews": [item], "changes": [change(item)]}
     app.seal(first_id)
-    first = app.reflect("form-candidate")
+    first = app.reflect("form-candidate", wait=True)
     assert first["ok"]
     before = first["state"]["profile"]["hypotheses"][0]
     assert before["status"] == "candidate"
@@ -213,7 +214,7 @@ def test_real_updater_candidate_correction_and_nonadoption_are_visible_without_p
     clients.reflection.payload = {"protocol_version": "2.0", "reviews": [item],
                                   "changes": [change(item, hypothesis)]}
     app.seal(second_id)
-    corrected = app.reflect("review-correction")
+    corrected = app.reflect("review-correction", wait=True)
     assert corrected["ok"]
     profile = corrected["state"]["profile"]
     after = profile["hypotheses"][0]
@@ -448,14 +449,14 @@ def test_failed_reflection_is_not_retried_by_another_button_id_or_close(tmp_path
     session_id = start_and_submit(app)
     app.seal(session_id)
     clients.reflection.failure = RuntimeError("fixture reflection failure")
-    result = app.reflect("failed-review")
+    result = app.reflect("failed-review", wait=True)
     assert not result["ok"]
     assert result["state"]["reviews"][0]["status"] == "failed"
-    assert app.reflect("failed-review")["duplicate"]
-    assert not app.reflect("new-review-id")["ok"]
+    assert app.reflect("failed-review", wait=True)["duplicate"]
+    assert not app.reflect("new-review-id", wait=True)["ok"]
     app.close()
     restarted = MinimalWebApp(tmp_path, clients=clients)
-    assert not restarted.reflect("after-restart")["ok"]
+    assert not restarted.reflect("after-restart", wait=True)["ok"]
     assert len(clients.memory.calls) == len(clients.reflection.calls) == 1
 
 
@@ -463,10 +464,10 @@ def test_successful_review_duplicate_is_read_only(tmp_path):
     app, clients = live_fixture(tmp_path)
     session_id = start_and_submit(app)
     app.seal(session_id)
-    assert app.reflect("once")["ok"]
+    assert app.reflect("once", wait=True)["ok"]
     before = snapshot_files(tmp_path)
-    assert app.reflect("once")["duplicate"]
-    assert not app.reflect("nothing-left")["ok"]
+    assert app.reflect("once", wait=True)["duplicate"]
+    assert not app.reflect("nothing-left", wait=True)["ok"]
     assert len(clients.memory.calls) == len(clients.reflection.calls) == 1
     assert snapshot_files(tmp_path) == before
 

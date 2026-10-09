@@ -1,4 +1,5 @@
 """Actual Engine delivery checks with fixed local replies, never model scoring."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 from datetime import timedelta
 import urllib.request
@@ -7,7 +8,7 @@ import pytest
 
 import aria.voice.minimal as minimal
 from tests.test_minimal_care import (
-    ELDER, START, advance, care, command, reminder, setup_rule,  # noqa: F401
+    ELDER, START, advance_visible_page, care, command, reminder, setup_rule,  # noqa: F401
 )
 from tests.test_minimal_web import live_fixture
 
@@ -16,7 +17,7 @@ from tests.test_minimal_web import live_fixture
 def no_network(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("network forbidden in local delivery checks")
-    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    stub_model_http(monkeypatch, forbidden)
 
 
 def respond(tmp_path, service, candidate):
@@ -143,8 +144,8 @@ def test_unavailable_untrusted_or_unrelated_snapshot_is_not_a_receipt(tmp_path, 
 def test_local_or_unknown_notification_cannot_prove_real_recipient_receipt(tmp_path, care, status):
     service, token, clock = care
     setup_rule(service)
-    advance(service, clock, 30)
-    advance(service, clock, 60)
+    advance_visible_page(service, clock, 30)
+    advance_visible_page(service, clock, 60)
     delivery = service.elder_view(ELDER)["deliveries"][0]
     if status == "family_ack":
         service.mutate(token, ELDER, "receipt.record", {

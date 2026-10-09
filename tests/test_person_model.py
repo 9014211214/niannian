@@ -17,8 +17,9 @@ def test_load_elder_demo_persona():
     # 老伴 / 未接电话属于私密,Aria 不能主动引用。
     refs = {e.id for e in p.referenceable_episodes()}
     assert "ep_c_004" not in refs and "ep_c_003" not in refs
-    # 那只猫是安全开口钩子,可引用。
-    assert "ep_c_001" in refs
+    # 旧合成材料只有可引用标记，完整本人来源不足时保持可读、不可主动引用。
+    assert "ep_c_001" not in refs
+    assert any(e.id == "ep_c_001" for e in p.internal_episodes())
     assert p.profile_origin == "synthetic_demo"
     assert p.understanding_stage() == "emerging"
     assert p.relationship_context

@@ -1,4 +1,5 @@
 """Bounded recovery uses fake transport/time and preserves every attempt."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 from decimal import Decimal
 import io
@@ -28,7 +29,7 @@ def no_network(monkeypatch):
     blocked = lambda *a, **k: pytest.fail("real network forbidden")
     monkeypatch.setattr(socket, "create_connection", blocked)
     monkeypatch.setattr(socket.socket, "connect", blocked)
-    monkeypatch.setattr(urllib.request, "urlopen", blocked)
+    stub_model_http(monkeypatch, blocked)
 
 
 def guarded(path, *, budget="1", recovery=True, clock=None):

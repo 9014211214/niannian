@@ -1,0 +1,571 @@
+{
+  "schema": "aria_original_run_recovery_binding_v2",
+  "repository": "9014211214/niannian",
+  "source_commit": "461dc4abfde329b73c26b036cd2f8a2c2dd6bd73",
+  "source_run_id": 37651687095,
+  "source_run_attempt": 1,
+  "source_evidence_sha256": "809b062e27ceeb8272a5a2846839ac24f9a67105aef8e1207578084731f734e6",
+  "frozen_summary_tool_sha256": "850d1ee5822c5d8b27f44976fe991df9ff2d746c0ca97369efde3726ceba9e8e",
+  "source_archive_sha256": "44a14ad3934f336849e8d5f165a5657e054f57f20ec6bfa7920266ef945ed9cc",
+  "original_universe": {
+    "unique_nodes_per_platform": 5749,
+    "passed_per_platform": 5213,
+    "skipped_per_platform": 536,
+    "separate_installations": 8
+  },
+  "original_remote_run_conclusion": "failure",
+  "matrix_tests_rerun": false,
+  "artifacts": [
+    {
+      "id": 11502189299,
+      "name": "software-windows-latest-python-3.10-B-37651687095-1",
+      "zip_sha256": "1c12b63b719212d93c412e9f77cb0838005697e11277ab9d09b1e468f49cf03c",
+      "bytes": 444563,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "f57e2eabeff29ab40f717edec8a9a43b8be5181b5e470b04a3ce635a8c1140e9",
+          "bytes": 149899
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "9f721a5f4875f3e5e177fa19515f2329b01f6df0525f4977d3759d8d617d3faf",
+          "bytes": 2134
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "03c0cad94913197ed5fba8ea8883f1fcffa225aac21633570bd2bbbcdddaac31",
+          "bytes": 1156206
+        },
+        {
+          "path": "collection.json",
+          "sha256": "f157bfcdde1f29ee68d0ee7f1aac9b65e06608223098036ddd54d005f999252f",
+          "bytes": 1567425
+        },
+        {
+          "path": "execution.json",
+          "sha256": "cfc44dea9ac26c1a9049a3ce12bc236ba1258ed5b510e78090cfe623228af71c",
+          "bytes": 836417
+        },
+        {
+          "path": "install/result.json",
+          "sha256": "8b02f16262d3f7352d12c5502d4ec376116edcd8e4810ca142d1595c28bd656d",
+          "bytes": 3241
+        }
+      ]
+    },
+    {
+      "id": 11500907070,
+      "name": "software-windows-latest-python-3.12-B-37651687095-1",
+      "zip_sha256": "c6835eee34b1bfdd509efb2dee2462757e540ca01129c273c76b9762bfbec853",
+      "bytes": 443901,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "ef370b7040717fccf877b5c8052d9f80dfd4be16ab1c3179714e961c7dcc1aa2",
+          "bytes": 149899
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "b97f5009cf73660b05cc4631f0043abd992ff57f5cf2a4fa1f2f98e4834ed4f9",
+          "bytes": 2116
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "d6bd76210447799051ae7bbdadfd4f7f589c4dab14f3993752b75f69c6839ac6",
+          "bytes": 1156191
+        },
+        {
+          "path": "collection.json",
+          "sha256": "f157bfcdde1f29ee68d0ee7f1aac9b65e06608223098036ddd54d005f999252f",
+          "bytes": 1567425
+        },
+        {
+          "path": "execution.json",
+          "sha256": "cfc44dea9ac26c1a9049a3ce12bc236ba1258ed5b510e78090cfe623228af71c",
+          "bytes": 836417
+        },
+        {
+          "path": "install/result.json",
+          "sha256": "66892e58608ea7c55621c20152ad54abaa329ab62b54c3c690befa064b854604",
+          "bytes": 3067
+        }
+      ]
+    },
+    {
+      "id": 11499461082,
+      "name": "software-ubuntu-latest-python-3.10-B-37651687095-1",
+      "zip_sha256": "aea94a6cf8bcbae65d91502644c6c1ad8168229f3bd485419d65c33f6bf1f618",
+      "bytes": 404557,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "560763694dacc0152adf4d2a6cc4cf96fdb57858053f8c114792c75eb3543645",
+          "bytes": 683
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "9e969fadf0564612ee2cfa8bbc6e89790f991b4019699abd74e451c18a271f65",
+          "bytes": 2141
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "07a62ba85b8b4ebb5e63dec7e14f4f4763b0a32ab378f808ba5c1718e12b394f",
+          "bytes": 1163138
+        },
+        {
+          "path": "collection.json",
+          "sha256": "3746c3864c1a7220269aa58fb6469c03752f29c61cb441cdefda7c78a94bdfef",
+          "bytes": 1555989
+        },
+        {
+          "path": "execution.json",
+          "sha256": "7abbd993ae9356a5f11a4d98afbd078627031322f18d349806f9853712a5f2e0",
+          "bytes": 830736
+        },
+        {
+          "path": "install/result.json",
+          "sha256": "7fc06d3de242f9228c75dbbdc45cb12974b801e03a3763e576e26069d6f08a48",
+          "bytes": 3109
+        }
+      ]
+    },
+    {
+      "id": 11498646338,
+      "name": "software-windows-latest-python-3.12-A1-37651687095-1",
+      "zip_sha256": "15be64032c52d1c8b796beb6541efec3a6dddc8699892c01e774af65e86519db",
+      "bytes": 139227,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "5902dc85ab36d4791379e3296a6b56d0a128ed7db7730105a9273f709fee2226",
+          "bytes": 149900
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "b97f5009cf73660b05cc4631f0043abd992ff57f5cf2a4fa1f2f98e4834ed4f9",
+          "bytes": 2116
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "533421ed3fa9e51f7978f5fd327ee136e01a109a2570086a4b68ac096cf69b64",
+          "bytes": 4135
+        },
+        {
+          "path": "collection.json",
+          "sha256": "9b7c4da9fda9e81f4b4ed2e25d1615fb667b31629aae3ca25e8b28fecf418b5f",
+          "bytes": 791451
+        },
+        {
+          "path": "execution.json",
+          "sha256": "752d7396f3672fc79db742ed76285282513fe531a859c7582dff960aa3330411",
+          "bytes": 3437
+        }
+      ]
+    },
+    {
+      "id": 11498206143,
+      "name": "software-ubuntu-latest-python-3.10-A1-37651687095-1",
+      "zip_sha256": "29b62061474323a6b78b1371bffff9e1916087702a4d711b1cc08d25c81e5131",
+      "bytes": 101877,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "e1238d62ae996ae749da56fd94fdef56af362bc83eaf24a590955626173eb753",
+          "bytes": 684
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "9e969fadf0564612ee2cfa8bbc6e89790f991b4019699abd74e451c18a271f65",
+          "bytes": 2141
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "84b1e4bf3502ff1338cc43c44cb2240fb10615807604113f9ae498d1daf5a055",
+          "bytes": 4132
+        },
+        {
+          "path": "collection.json",
+          "sha256": "c4366b946361de00e95992466f310bf4853ce95e5b97392bbaa2a86012e5959a",
+          "bytes": 785662
+        },
+        {
+          "path": "execution.json",
+          "sha256": "68368674627919a3f39a905b33d76735d17d26ce3e8e8a60693dea60bafebc93",
+          "bytes": 3403
+        }
+      ]
+    },
+    {
+      "id": 11497779910,
+      "name": "software-windows-latest-python-3.10-A1-37651687095-1",
+      "zip_sha256": "9dfdbc59831be0a2d4bcfe3c40f83ef14aa3f6ba6e4bdb78225003e2a3973cfb",
+      "bytes": 139243,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "11bd1fabd3bb112c2f1c39716099fac742e8a3c2907c76b80ae6e6fa6ccbe942",
+          "bytes": 149900
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "9f721a5f4875f3e5e177fa19515f2329b01f6df0525f4977d3759d8d617d3faf",
+          "bytes": 2134
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "068c74bde9a538bb026bd8bb13649620bd2c32ea2356c968b639d0ce12a57ef9",
+          "bytes": 4137
+        },
+        {
+          "path": "collection.json",
+          "sha256": "9b7c4da9fda9e81f4b4ed2e25d1615fb667b31629aae3ca25e8b28fecf418b5f",
+          "bytes": 791451
+        },
+        {
+          "path": "execution.json",
+          "sha256": "752d7396f3672fc79db742ed76285282513fe531a859c7582dff960aa3330411",
+          "bytes": 3437
+        }
+      ]
+    },
+    {
+      "id": 11497755477,
+      "name": "software-ubuntu-latest-python-3.10-A3-37651687095-1",
+      "zip_sha256": "6fa1ad85943220bc5b4b9b5076f2cda7affcc83101d34dace272fd6d2965e8e9",
+      "bytes": 102326,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "d50f0150d47efd1d53367860833af62c243fc5c35b91dc30b79db79d2f7b6107",
+          "bytes": 684
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "9e969fadf0564612ee2cfa8bbc6e89790f991b4019699abd74e451c18a271f65",
+          "bytes": 2141
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "a10633279fa6b979f1eb5c681e411946020d458275daeab24ba94fd60a63e728",
+          "bytes": 5246
+        },
+        {
+          "path": "collection.json",
+          "sha256": "871d8911c5c72f0b8e9030c7a8201d9240b4ca12780925ec6c31ee4e932fa44b",
+          "bytes": 786578
+        },
+        {
+          "path": "execution.json",
+          "sha256": "218fe4319c3ba3aec6d0dcfcb04fcc585319a710aff4bb4ee0d4d29120698472",
+          "bytes": 4379
+        }
+      ]
+    },
+    {
+      "id": 11497716722,
+      "name": "software-windows-latest-python-3.10-A3-37651687095-1",
+      "zip_sha256": "09800c14532aeac8434e136f3395409cae15894e256bd954d19a157d2dd21e13",
+      "bytes": 139710,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "9f039671b19f57f43fe3e8ba450f329aee9bd3b5b78e1d769a7af6dd1c9aaf2c",
+          "bytes": 149900
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "9f721a5f4875f3e5e177fa19515f2329b01f6df0525f4977d3759d8d617d3faf",
+          "bytes": 2134
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "15de7605efefbac1ec0c91e5454023431848fb56af755911a87cff7e31332f98",
+          "bytes": 5248
+        },
+        {
+          "path": "collection.json",
+          "sha256": "0a2bec5643cb06eb06dc9a1d2fb206fba801c3b04a0e7576dc120198b682713a",
+          "bytes": 792373
+        },
+        {
+          "path": "execution.json",
+          "sha256": "d5ac732e826f24991499b26e617bbb005b251145d7976368fff5af8f83df20e1",
+          "bytes": 4419
+        }
+      ]
+    },
+    {
+      "id": 11497459000,
+      "name": "software-ubuntu-latest-python-3.12-B-37651687095-1",
+      "zip_sha256": "f049f080204f9a5acf45cba79604f02f8c08bfff17ff813ac5ebe1e773813a6f",
+      "bytes": 403520,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "22380b555d320afab6bef5d5e1cb0f49ce7e2ac2743c593648758c41d5d7a071",
+          "bytes": 683
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "6b3c1f5386b6b37400423fdd69510071b977498a6219d73b93fb2aa9e0482bdb",
+          "bytes": 1868
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "81cc6b9e2c23a239f7141177185d1f43ac09a7cb65cb83c896549a86f19342fa",
+          "bytes": 1163137
+        },
+        {
+          "path": "collection.json",
+          "sha256": "3746c3864c1a7220269aa58fb6469c03752f29c61cb441cdefda7c78a94bdfef",
+          "bytes": 1555989
+        },
+        {
+          "path": "execution.json",
+          "sha256": "7abbd993ae9356a5f11a4d98afbd078627031322f18d349806f9853712a5f2e0",
+          "bytes": 830736
+        },
+        {
+          "path": "install/result.json",
+          "sha256": "1f44818113a35d5e386a33d6c88e43a009972b607cb1bf183e359aa7225719e5",
+          "bytes": 2943
+        }
+      ]
+    },
+    {
+      "id": 11497156713,
+      "name": "software-windows-latest-python-3.12-A2-37651687095-1",
+      "zip_sha256": "f82d120c0de2413bee412dfe0874e33a852e618f3ad0701991f78003741bb3d6",
+      "bytes": 138804,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "bb011e1cdc6557b72514a2acbc75dc5e35e4d18cef1fad9f66afae6534715ed4",
+          "bytes": 149900
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "b97f5009cf73660b05cc4631f0043abd992ff57f5cf2a4fa1f2f98e4834ed4f9",
+          "bytes": 2116
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "37d99d7d68225e661fd6c7ad159a06c847494f2f56b7953afe45e7f174948028",
+          "bytes": 2884
+        },
+        {
+          "path": "collection.json",
+          "sha256": "2e38e02d86bb18598797b642f079f23274d4b5acf9095e0d4ef3e8ab331df6ca",
+          "bytes": 790459
+        },
+        {
+          "path": "execution.json",
+          "sha256": "2f3e5e0498ead29572dc3d440ad83e233e2b8e5ae9d3c13d73b9c317a2ae776a",
+          "bytes": 2365
+        }
+      ]
+    },
+    {
+      "id": 11497014668,
+      "name": "software-ubuntu-latest-python-3.12-A1-37651687095-1",
+      "zip_sha256": "be9cf177bbd64aba895f1089723903d66ec5eeb950159f62ae5bdb05a4fbb632",
+      "bytes": 101802,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "772bf19dbec76356d8f7e2a1b59d4b4aad2fcf09cac6f2e5e4e2ef6ba3af89ab",
+          "bytes": 684
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "6b3c1f5386b6b37400423fdd69510071b977498a6219d73b93fb2aa9e0482bdb",
+          "bytes": 1868
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "9402e1fb43471b110892a6f28bd91af18f52ded4ac665e12793275dcaa2fb010",
+          "bytes": 4134
+        },
+        {
+          "path": "collection.json",
+          "sha256": "c4366b946361de00e95992466f310bf4853ce95e5b97392bbaa2a86012e5959a",
+          "bytes": 785662
+        },
+        {
+          "path": "execution.json",
+          "sha256": "68368674627919a3f39a905b33d76735d17d26ce3e8e8a60693dea60bafebc93",
+          "bytes": 3403
+        }
+      ]
+    },
+    {
+      "id": 11496913083,
+      "name": "software-windows-latest-python-3.12-A3-37651687095-1",
+      "zip_sha256": "aed207f41077d0cf2ced1aabfd8ecbf0f5f55935d88ae645e2c2c5c83c9e1140",
+      "bytes": 139688,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "b72f070b43ad42494ccde5df72dd6b071c948bfbce71d853699892a668003ed9",
+          "bytes": 149900
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "b97f5009cf73660b05cc4631f0043abd992ff57f5cf2a4fa1f2f98e4834ed4f9",
+          "bytes": 2116
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "c08775b4c2392a29f39b3ab9517bab3c2bca1b2edbd2a954a182c8186ac4a1da",
+          "bytes": 5246
+        },
+        {
+          "path": "collection.json",
+          "sha256": "0a2bec5643cb06eb06dc9a1d2fb206fba801c3b04a0e7576dc120198b682713a",
+          "bytes": 792373
+        },
+        {
+          "path": "execution.json",
+          "sha256": "d5ac732e826f24991499b26e617bbb005b251145d7976368fff5af8f83df20e1",
+          "bytes": 4419
+        }
+      ]
+    },
+    {
+      "id": 11496866448,
+      "name": "software-ubuntu-latest-python-3.12-A3-37651687095-1",
+      "zip_sha256": "cb98472d5b42e60a5d06ef6f9eada5ba0fd8f10a16508c7d3f8896b3c67d8708",
+      "bytes": 102261,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "59af68ef32d4087d372911fba4155ddceb779648c62dd29672c27bb5f35e3174",
+          "bytes": 684
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "6b3c1f5386b6b37400423fdd69510071b977498a6219d73b93fb2aa9e0482bdb",
+          "bytes": 1868
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "47476bad4c7ab2f8c4b4fb27208c213be1fd428ba531251e7fe7eb5d7524a972",
+          "bytes": 5246
+        },
+        {
+          "path": "collection.json",
+          "sha256": "871d8911c5c72f0b8e9030c7a8201d9240b4ca12780925ec6c31ee4e932fa44b",
+          "bytes": 786578
+        },
+        {
+          "path": "execution.json",
+          "sha256": "218fe4319c3ba3aec6d0dcfcb04fcc585319a710aff4bb4ee0d4d29120698472",
+          "bytes": 4379
+        }
+      ]
+    },
+    {
+      "id": 11496858450,
+      "name": "software-windows-latest-python-3.10-A2-37651687095-1",
+      "zip_sha256": "0a59cdf1b69b1c55eaf7cfe11424c01f24b635e7f193be7380fb95d98113b1e8",
+      "bytes": 138823,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "20811477e05fdb36d8b4a579b34cd417ec4a1944e9f6e3a9cb57fc0c0a6f9589",
+          "bytes": 149900
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "9f721a5f4875f3e5e177fa19515f2329b01f6df0525f4977d3759d8d617d3faf",
+          "bytes": 2134
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "e382b743064cb949b5c20afb4a910786c616cdee159b74e4f1ffca6df699f5b0",
+          "bytes": 2885
+        },
+        {
+          "path": "collection.json",
+          "sha256": "2e38e02d86bb18598797b642f079f23274d4b5acf9095e0d4ef3e8ab331df6ca",
+          "bytes": 790459
+        },
+        {
+          "path": "execution.json",
+          "sha256": "2f3e5e0498ead29572dc3d440ad83e233e2b8e5ae9d3c13d73b9c317a2ae776a",
+          "bytes": 2365
+        }
+      ]
+    },
+    {
+      "id": 11496644406,
+      "name": "software-ubuntu-latest-python-3.10-A2-37651687095-1",
+      "zip_sha256": "88af5882383b51c8fbfdd0ae97507d92a1ebd156875788818d4713dc4174cbe6",
+      "bytes": 101452,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "9d0f594734752f905462cc706bbf37836b97585726e508dea60d0fa3ce07cfd1",
+          "bytes": 684
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "9e969fadf0564612ee2cfa8bbc6e89790f991b4019699abd74e451c18a271f65",
+          "bytes": 2141
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "1b243c0642f82f8ca52234151b81ab4fcd2e7d5e7c2029c11508b4dc2fe3a974",
+          "bytes": 2884
+        },
+        {
+          "path": "collection.json",
+          "sha256": "9db9bf024d8685d12dc55adc8fce8e5abc9876cb8d702235b23761e36d477380",
+          "bytes": 784678
+        },
+        {
+          "path": "execution.json",
+          "sha256": "d0b3b287c0ba7c441bc89e86cf51c8c7f0b452b554b95631f476f716797fa90c",
+          "bytes": 2339
+        }
+      ]
+    },
+    {
+      "id": 11496269924,
+      "name": "software-ubuntu-latest-python-3.12-A2-37651687095-1",
+      "zip_sha256": "066a5788e7eeb5f77d7b6acf7b3591691fb9f4de9ba47906b4cb3abe3ed3f393",
+      "bytes": 101393,
+      "files": [
+        {
+          "path": "context.json",
+          "sha256": "8819c99cfa75a33f302440e8ad3776adcd45a2eabb700d9d714a10943d2ddfab",
+          "bytes": 684
+        },
+        {
+          "path": "dependencies.json",
+          "sha256": "6b3c1f5386b6b37400423fdd69510071b977498a6219d73b93fb2aa9e0482bdb",
+          "bytes": 1868
+        },
+        {
+          "path": "pytest.xml",
+          "sha256": "cca612b875e7c0781025855faf45a9612a586ffcbaba6b9c2516636614e1937a",
+          "bytes": 2884
+        },
+        {
+          "path": "collection.json",
+          "sha256": "9db9bf024d8685d12dc55adc8fce8e5abc9876cb8d702235b23761e36d477380",
+          "bytes": 784678
+        },
+        {
+          "path": "execution.json",
+          "sha256": "d0b3b287c0ba7c441bc89e86cf51c8c7f0b452b554b95631f476f716797fa90c",
+          "bytes": 2339
+        }
+      ]
+    }
+  ],
+  "meaning": "A later recovery validates old commit/run/attempt-1 evidence, never qualifies current source or changes original failure.",
+  "repository_id": 1404555679,
+  "v1_manifest_sha256": "c6bb01d5ed04eab1e1978da4ef4c21c59927c18a481d0d23bd889b5b9d6323a5"
+}

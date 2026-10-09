@@ -1,4 +1,5 @@
 """Fictional E1b first-answer evidence; no network, retries or semantic scoring."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import hashlib
 import json
@@ -31,7 +32,7 @@ def read(path):
 def no_network(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("reflection capture tests must never access the network")
-    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    stub_model_http(monkeypatch, forbidden)
 
 
 @pytest.fixture

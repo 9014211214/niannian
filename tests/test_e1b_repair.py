@@ -1,4 +1,5 @@
 """Repair authorization/accounting tests. All evidence is local and synthetic."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 from decimal import Decimal
 import hashlib
@@ -16,7 +17,7 @@ from scripts import run_e1b_repair as repair
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("unexpected network"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("unexpected network"))
 
 
 def tree(root):
@@ -198,7 +199,7 @@ def test_parent_rechecked_before_each_actual_send_and_no_restart(prepared, monke
         response = network(request, **kwargs)
         (root / repair.ARCHIVE / "aria/source1.py").write_text("changed after first call", encoding="utf-8")
         return response
-    monkeypatch.setattr(urllib.request, "urlopen", mutate_after_first)
+    stub_model_http(monkeypatch, mutate_after_first)
     result = entry.execute(root, root, registration, **args)
     assert result["status"] == "not_evaluable" and len(calls) == 1
     receipt = entry.read_json(entry.campaign(root) / "prescreen/execution-receipt.json")
@@ -259,7 +260,7 @@ def test_wire_body_saved_exactly_before_send_without_headers(prepared, monkeypat
         assert b"synthetic-secret-must-not-be-saved" not in path.read_bytes()
         assert b"Authorization" not in path.read_bytes()
         return network(request, **kwargs)
-    monkeypatch.setattr(urllib.request, "urlopen", inspect_send)
+    stub_model_http(monkeypatch, inspect_send)
     result = entry.execute(root, root, registration, **args)
     assert result["status"] == "not_evaluable" and len(calls) == len(observed) == 1
     state = entry.read_json(entry.campaign(root) / "prescreen/execution-receipt.json")["accounting"]

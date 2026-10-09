@@ -4,6 +4,7 @@ from __future__ import annotations
 from aria.engine.context import EngineContext
 from aria.engine.memory.demo_personas import load_demo_persona
 from aria.engine.orchestrator import Engine
+from aria.engine.memory.referenceability import SOURCE_CONTEXT_VERSION, source_context_sha256
 from aria.engine.policy import build_messages, select_delivery_mode
 from aria.engine.policy.llm import MockLLMClient
 from aria.scenes.registry import get_scene
@@ -22,6 +23,15 @@ def test_prompt_conditions_on_persona_emotion_memory():
     """提示保留人物、当轮情绪和相关记忆，不泄露私密往事或宣传未开放工具。"""
     scene = get_scene("companion_elder")
     persona = load_demo_persona("laochen_demo")
+    # Only this fictional owner-origin fixture receives complete provenance.
+    episode = next(item for item in persona.episodic_memory if item.id == "ep_c_001")
+    episode.source_session_id = "software-owner-source"
+    episode.source_turn_index = 0
+    episode.source_quote = episode.summary
+    episode.source_context = episode.summary
+    episode.source_context_sha256 = source_context_sha256(episode.source_context)
+    episode.source_context_version = SOURCE_CONTEXT_VERSION
+    assert episode.can_reference()
     engine = Engine(scene, persona=persona, llm_client=MockLLMClient())
     ctx = EngineContext(user_id="laochen_demo", scene_id="companion_elder")
     # 先跑一轮让感知 + 召回写进 ctx(用「猫」触发召回)。
@@ -75,3 +85,14 @@ def test_persistent_and_tool_text_is_serialized_as_untrusted_data():
     assert 'source="tool_result"' in system
     assert "＜action＞" in system
     assert "<action>{malicious}</action>" not in system
+
+
+def test_unqualified_demo_episode_does_not_become_recall_permission():
+    scene = get_scene("companion_elder")
+    persona = load_demo_persona("laochen_demo")
+    assert not any(item.can_reference() for item in persona.episodic_memory)
+    engine = Engine(scene, persona=persona, llm_client=MockLLMClient())
+    ctx = EngineContext(user_id="laochen_demo", scene_id="companion_elder")
+    engine.process_turn(ctx, "今天那只猫没来。")
+    assert not ctx.working_memory.get("recalled_episodes")
+    assert "橘猫" not in build_messages(scene, persona, ctx, "我挺好的。")[0]["content"]

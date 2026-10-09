@@ -186,12 +186,19 @@ def test_enqueue_preserves_only_explicit_completed_memory_privacy_receipt(tmp_pa
     assert queue.persona.offline_sessions[0].memory_privacy_review_completed is expected
 
 
-def test_explicit_withdrawal_clears_raw_channels_before_model_or_safety_result(tmp_path):
+def test_current_semantic_withdrawal_clears_raw_channels_before_safety_handling(tmp_path):
     persona = enabled()
     ctx = conversation(persona)
     queue = OfflineSessionQueue(persona, PersonaStore(tmp_path), now=lambda: T0 + timedelta(days=1, hours=2))
     queue.enqueue(ctx)
     assert queue.persona.offline_sessions[0].cognitive_turns
+    import hashlib
+    text = "不要再提醒我的记性。"
+    ctx.working_memory["online_turn_decision"] = {
+        "version": "online_turn_decision_v3", "status": "parsed", "turn_index": len(ctx.turns),
+        "owner_message_sha256": hashlib.sha256(text.encode()).hexdigest(),
+        "cognitive_control": {"version": "cognitive_permission_v1", "action": "disable_observation", "evidence_quote": text},
+    }
     assert apply_cognitive_withdrawal(ctx, queue.persona, "不要再提醒我的记性。", now=T0 + timedelta(days=1, hours=3))
     assert not queue.persona.cognitive_health_consent.has_text_monitoring_consent()
     assert not queue.persona.offline_sessions[0].cognitive_turns

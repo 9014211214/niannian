@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 import re
 from typing import Iterable, Optional
 
@@ -21,6 +22,7 @@ from ...engine.model.persona import (
     PersonaProfile,
 )
 from ...engine.policy.prompt import select_delivery_mode
+from ...engine.memory.hypothesis_context import online_influencing_hypotheses
 from ...interfaces.reasoning import (
     DeliveredIntervention,
     InterventionCandidate,
@@ -371,6 +373,7 @@ class ElderStateReasoner:
         planned_mode = plan.mode if plan is not None else "none"
         planned_question = plan.question.strip() if plan is not None else ""
         online_trace = ctx.working_memory.get("online_turn_decision") or {}
+        semantic_v3 = ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v3"
         delivery_guard = online_trace.get("delivery_guard") or {}
         task_communication = delivery_guard.get("task_communication") or {}
         task_question_executed = bool(
@@ -382,7 +385,7 @@ class ElderStateReasoner:
         # claim that the rejected psychological question was asked after all.
         executed_question = (
             ""
-            if planned_mode == "wait" and task_question_executed
+            if planned_mode == "wait" and task_question_executed and not semantic_v3
             else _first_question(response)
         )
         if executed_question:
@@ -472,7 +475,20 @@ class ElderStateReasoner:
             reason = "delivery_guard_replaced_response"
         elif "requested_draft_not_delivered" in guard.get("task_delivery_diagnostics", []):
             reason = "requested_draft_not_delivered"
+        elif ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v3" and (
+            online_trace.get("version") != "online_turn_decision_v3"
+            or online_trace.get("status") != "parsed"
+            or online_trace.get("turn_index") != len(ctx.turns)
+            or online_trace.get("requested_intervention_id") != selected.id
+            or online_trace.get("selected_intervention_id") != selected.id
+            or selected.selected_turn != len(ctx.turns)
+            or selected.id not in {item.id for item in ctx.reasoning.candidates}
+            or online_trace.get("parsed_response_sha256") != hashlib.sha256(response.encode("utf-8")).hexdigest()
+        ):
+            reason = "unbound_final_strategy_delivery"
         elif (
+            ctx.working_memory.get("_online_decision_version") != "online_turn_decision_v3"
+            and
             ctx.reasoning.observation_plan is not None
             and ctx.reasoning.observation_plan.mode == "ask"
             and (execution is None or not execution.matched_plan)
@@ -671,9 +687,8 @@ class ElderStateReasoner:
         active_cbt_claims = (
             [
                 item.claim
-                for item in persona.person_hypotheses
-                if item.status in {"working", "stable"}
-                and item.framework == "cbt"
+                for item in online_influencing_hypotheses(persona)
+                if item.framework == "cbt"
             ]
             if persona is not None else []
         )
@@ -1383,7 +1398,7 @@ def _relevant_response_hypotheses(
         for hypothesis_id in candidate.hypothesis_ids
     }
     out = []
-    for item in persona.person_hypotheses:
+    for item in online_influencing_hypotheses(persona):
         if (
             item.framework != "response"
             or item.status not in {"working", "stable"}

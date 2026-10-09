@@ -1,4 +1,5 @@
 """Finite HTTP error metadata only; no real network or billing inference."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 from datetime import datetime, timezone
 from email.message import Message
@@ -23,7 +24,7 @@ EPOCH = int(datetime(2026, 10, 3, 12, 30, tzinfo=timezone.utc).timestamp())
 @pytest.fixture(autouse=True)
 def forbid_network(monkeypatch):
     monkeypatch.setattr("socket.socket.connect", lambda *_a, **_k: pytest.fail("network forbidden"))
-    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: pytest.fail("network forbidden"))
+    stub_model_http(monkeypatch, lambda *_a, **_k: pytest.fail("network forbidden"))
 
 
 def headers(*pairs):

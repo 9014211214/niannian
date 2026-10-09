@@ -15,6 +15,7 @@ from aria.engine.policy.prompt import (
     delivery_profile,
     render_delivery_block,
     select_delivery_mode,
+    update_delivery_state,
 )
 from aria.scenes.registry import get_scene
 
@@ -99,6 +100,7 @@ def test_hysteresis_keeps_committed_mode_text_until_switch_is_confirmed():
         user_id="hysteresis",
         person_hypotheses=[_hypothesis("h_direct", tags=["general"])],
     )
+    update_delivery_state(persona)  # bind commitment to the current source pool
     persona.delivery_state.committed = "low_pressure"
     assert render_delivery_block(persona, block="profile_v1") == _MODE_GUIDANCE["low_pressure"]
     assert delivery_basis_ids(persona, block="profile_v1") == []

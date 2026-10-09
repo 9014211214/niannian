@@ -1,4 +1,5 @@
 """Execution qualification and credential boundaries; all calls are local."""
+from tests._model_http_stub import stub_model_http
 from datetime import datetime, timezone, timedelta
 import json
 import io
@@ -202,7 +203,7 @@ def test_full_execute_actual_transport_with_local_receipts(tmp_path, monkeypatch
                                     "provider": "Anthropic", "usage": usage,
                                     "choices": [{"finish_reason": "stop", "message": {"content": content}}]}).encode())
 
-    monkeypatch.setattr(urllib.request, "urlopen", receive)
+    stub_model_http(monkeypatch, receive)
     registration = tmp_path / "freeze.json"
     run.prepare(root, root, registration)
     output = tmp_path / "execution"

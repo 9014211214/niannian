@@ -1,4 +1,5 @@
 """Approved selection and two-step capture; no live model or credential access."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import hashlib
 import json
@@ -20,7 +21,7 @@ SELECTED = [f"e1b_{g}{n}" for g in "abcdef" for n in (1, 2)]
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("no network in E1b-R contract tests"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("no network in E1b-R contract tests"))
 
 
 def test_fixed_balanced_selection_uses_neither_magnitude_nor_a1():

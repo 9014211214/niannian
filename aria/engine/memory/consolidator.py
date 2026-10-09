@@ -27,9 +27,14 @@ from ..model.persona import (
     PersonaProfile,
     RelationshipContextEntry,
     RelationshipEvidence,
+    RelationshipFactSource,
     StatedPreference,
 )
 from .persona_store import PersonaStore
+from .referenceability import (
+    SOURCE_CONTEXT_VERSION, must_not_reference as _must_not_reference,
+    source_context_sha256,
+)
 from .stated_preferences import (
     confirmed_preference_payloads, extract_preference_rows, heuristic_preferences, merge_preferences,
 )
@@ -83,43 +88,7 @@ class HeuristicExtractor:
         return ConsolidationResult(new_episodes=[ep], stated_preferences=heuristic_preferences(ctx, persona))
 
 
-# 敏感标记：即便模型判定可引用，也强制压成「内化不可主动提」。这是
-# referenceability 地板，不代表不保存；任何向家属/外部分享仍需单独的当轮授权。
-_SENSITIVE = (
-    "老伴", "过世", "去世", "逝", "忌日", "自杀", "自残", "遗嘱", "病危",
-    "欠钱", "欠债", "债务", "借款", "贷款", "负债", "转账", "汇款", "存款",
-    "账户", "账号", "银行卡", "卡号", "密码", "验证码", "余额",
-    "身份证", "证件号", "护照", "社保卡", "医保卡", "户口簿", "户口本",
-    "手机号", "电话号码", "微信号", "联系方式", "住址", "门牌号",
-    "家庭隐情", "家丑", "婚外情", "出轨", "私生", "收养", "领养", "离婚",
-)
-_CONFIDENTIALITY_PATTERNS = (
-    re.compile(r"(?:别|不要|不许).{0,12}(?:告诉|透露|提起|说给)"),
-    re.compile(r"(?:别|不要|不许).{0,12}(?:跟|对|向).{0,10}(?:说|提|讲)"),
-    re.compile(r"(?:不想|不能|别|不要).{0,8}让.{0,12}知道"),
-    re.compile(r"(?:替我|帮我|给我)?保密"),
-    re.compile(r"(?:瞒着|背着).{0,12}(?:家里|家人|家属|孩子|女儿|儿子|老伴)?"),
-)
-_CONTACT_OR_CREDENTIAL_PATTERNS = (
-    re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"),
-    re.compile(r"(?<!\d)\d{16,19}(?!\d)"),
-    re.compile(r"(?<!\d)\d{17}[0-9Xx](?!\d)"),
-    re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
-)
 _NON_WORD = re.compile(r"[^\w\u3400-\u9fff]+", re.UNICODE)
-
-
-def _must_not_reference(text: str) -> bool:
-    """Return true for locally enforceable private/no-reference contexts."""
-    value = " ".join(str(text or "").strip().split())
-    return (
-        any(marker in value for marker in _SENSITIVE)
-        or any(pattern.search(value) for pattern in _CONFIDENTIALITY_PATTERNS)
-        or any(
-            pattern.search(value)
-            for pattern in _CONTACT_OR_CREDENTIAL_PATTERNS
-        )
-    )
 
 
 def _sensitive_memory_excluded_turns(ctx: EngineContext) -> set[int]:
@@ -297,7 +266,7 @@ class LLMExtractor:
     """会后事实抽取器，不诊断人格，也不决定如何回应。
 
     它与在线生成、人物反思使用独立客户端和触发时机。失败不影响主流程；
-    隐私由 `_SENSITIVE` 和关系分享授权的确定性规则兜底。
+    隐私由完整本人来源上下文和关系分享授权的确定性边界兜底。
     """
 
     def __init__(self, llm):
@@ -361,6 +330,7 @@ class LLMExtractor:
                 "每条事实必须给出同一轮用户原话中的逐字 evidence_quote；不能"
                 "仅给摘要或模型推断。turn_index 必须沿用输入中的原始编号；系统会"
                 "丢弃无法与该轮原话匹配或已被隐私层排除的条目。"
+                "referenceable必须为JSON布尔值true或false，不能用字符串或数字。"
                 "私密/敏感（明确要求保密、逝者、家庭隐情、自伤、债务/转账/"
                 "存款/账户、证件或联系方式）一律 referenceable=false。"
                 "必须审阅输入中的全部本人轮次，并输出cognitive_privacy数组；没有认知隐私也须显式输出[]。"
@@ -434,8 +404,9 @@ class LLMExtractor:
             # 长期记忆正文只保存可追溯原话，模型 summary 仅作为抽取导航，
             # 不能把未被原话支持的改写变成长期事实。
             summary = f"用户提到：{quote}"
-            ref = bool(item.get("referenceable", False))
-            if _must_not_reference(summary):
+            source_context = ctx.turns[turn_index].user
+            ref = item.get("referenceable") is True
+            if _must_not_reference(summary) or _must_not_reference(source_context):
                 ref = False                    # 隐私兜底:敏感内容绝不主动引用
             eps.append(EpisodicMemoryEntry(
                 id=f"llm_{date.today().isoformat()}_{base + i + 1}",
@@ -447,6 +418,9 @@ class LLMExtractor:
                 source_session_id=ctx.session_id,
                 source_turn_index=turn_index,
                 source_quote=_verbatim_source_quote(quote, ctx.turns[turn_index].user),
+                source_context=source_context,
+                source_context_sha256=source_context_sha256(source_context),
+                source_context_version=SOURCE_CONTEXT_VERSION,
             ))
         relationships = self._relationships(
             relationship_rows, ctx, persona
@@ -489,7 +463,10 @@ class LLMExtractor:
                     row.get("evidence_quote"), row.get("turn_index"), ctx
                 )
                 if grounded is not None:
-                    grounded_facts.append(grounded)
+                    quote, index = grounded
+                    grounded_facts.append((
+                        _verbatim_source_quote(quote, ctx.turns[index].user), index,
+                    ))
             if not name or not grounded_facts:
                 continue
             facts = list(dict.fromkeys(
@@ -504,6 +481,9 @@ class LLMExtractor:
                 continue
             sensitive = _must_not_reference(
                 f"{name}{relation or ''}{' '.join(facts)}"
+            ) or any(
+                _must_not_reference(ctx.turns[index].user)
+                for _quote, index in grounded_facts
             )
             indices = list(dict.fromkeys(
                 index for _quote, index in grounded_facts
@@ -520,7 +500,7 @@ class LLMExtractor:
                 relation=relation,
                 facts=list(dict.fromkeys(facts)),
                 referenceable=(
-                    bool(item.get("referenceable", False))
+                    item.get("referenceable") is True
                     and not sensitive
                 ),
                 consent_to_share=False,
@@ -532,6 +512,13 @@ class LLMExtractor:
                     summary=summary,
                     turn_indices=list(dict.fromkeys(indices)),
                     source="user_conversation",
+                    fact_sources=[RelationshipFactSource(
+                        quote=quote,
+                        turn_index=index,
+                        source_context=ctx.turns[index].user,
+                        source_context_sha256=source_context_sha256(ctx.turns[index].user),
+                        source_context_version=SOURCE_CONTEXT_VERSION,
+                    ) for quote, index in grounded_facts if quote in facts],
                 )],
             ))
         return result

@@ -1,5 +1,6 @@
 """Quality, provenance, isolation and current-turn contracts (no sensor/API)."""
 from __future__ import annotations
+from tests._model_http_stub import stub_model_http
 
 from copy import deepcopy
 from dataclasses import asdict
@@ -28,7 +29,7 @@ from aria.scenes.registry import get_scene
 def no_network(monkeypatch):
     def denied(*_args, **_kwargs):
         raise AssertionError("emotion contract tests cannot call a network service")
-    monkeypatch.setattr("urllib.request.urlopen", denied)
+    stub_model_http(monkeypatch, denied)
 
 
 def _observation(scenario="sad", turn=0):

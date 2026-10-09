@@ -53,14 +53,19 @@ def _channel(value):
 def _occurrence(row):
     if row is None:
         return None
+    from .minimal_care import MinimalCareService
+
     return {
         "id": _identifier(row.get("id")),
         "reminder_id": _identifier(row.get("reminder_id")),
         "status": _choice(row.get("status"), _OCCURRENCE_STATUSES),
         "timezone": _choice(row.get("timezone"), {"UTC", "Asia/Shanghai"}),
-        "delivery_status": _choice(row.get("delivery_status"), {"offered_local"}),
+        "delivery_status": _choice(row.get("delivery_status"), {"offered_local", "awaiting_display", "displayed_local"}),
+        "generation": _count(row.get("generation")),
+        "displayed_generation": _count(row.get("displayed_generation")),
+        "page_displayed": MinimalCareService._displayed(row),
         **{key: _timestamp(row.get(key)) for key in (
-            "due_at", "offered_at", "deadline_at", "responded_at",
+            "due_at", "generated_at", "offered_at", "displayed_at", "deadline_at", "responded_at",
             "snoozed_until", "superseded_at",
         )},
     }

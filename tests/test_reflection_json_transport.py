@@ -1,4 +1,5 @@
 """Real payload/guard code with synthetic HTTP; never calls an external model."""
+from tests._model_http_stub import stub_model_http
 from contextlib import closing
 from copy import deepcopy
 import json
@@ -103,7 +104,7 @@ def test_changed_format_cannot_rebind_existing_allowance(tmp_path):
 
 def test_custom_reflection_model_requires_explicit_native_mode(monkeypatch):
     import urllib.request
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("unexpected network"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("unexpected network"))
     with pytest.raises(ValueError, match="verified default model"):
         create_minimal_clients(model_calls_enabled=True, api_key="fixture", reflection_model="custom/model")
     c = create_minimal_clients(model_calls_enabled=True, api_key="fixture",

@@ -1,4 +1,4 @@
-"""Opt-in local connection events, with standard proxy and TLS verification.
+"""Redirect-safe HTTP transport with opt-in local connection events.
 
 Default mode never retries. Explicit preparation recovery can rebuild once
 before application request entry; it never retries an application HTTP write.
@@ -298,6 +298,16 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         # Let the standard error processor raise the original HTTPError. A
         # redirect must not create an unreserved second application request.
         return None
+
+
+def open_unredirected(request, *, timeout):
+    """Open exactly the registered address, preserving normal proxy/TLS setup.
+
+    A redirect is an HTTP failure of this request, never authority to issue a
+    second request with its credentials or consume an unrecorded fee attempt.
+    No process-global opener, auth, cookie, or retry handler is installed.
+    """
+    return urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout)
 
 
 def open_observed(request, *, timeout, trace):

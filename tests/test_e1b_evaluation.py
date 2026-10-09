@@ -1,4 +1,5 @@
 """Blinding, immutable first judgments and fixed-denominator local arithmetic."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import json
 import urllib.request
@@ -17,7 +18,7 @@ from scripts.e1b_evaluation import (
 def no_network(monkeypatch):
     def blocked(*args, **kwargs):
         raise AssertionError("local evaluation must not contact a model or network")
-    monkeypatch.setattr(urllib.request, "urlopen", blocked)
+    stub_model_http(monkeypatch, blocked)
 
 
 def make_run(tmp_path, phase="main", count=12):

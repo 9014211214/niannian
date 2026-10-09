@@ -1,4 +1,5 @@
 """E1c actual product assembly with named local stubs, no holdout questions."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import hashlib
 import json
@@ -20,7 +21,7 @@ from e1c_software_fixture import fixture_author, fixture_payload
 def no_network(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("E1c software integration cannot access network")
-    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    stub_model_http(monkeypatch, forbidden)
     monkeypatch.setattr(socket.socket, "connect", forbidden)
     monkeypatch.setattr(socket, "create_connection", forbidden)
 

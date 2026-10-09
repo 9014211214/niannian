@@ -18,6 +18,7 @@ import re
 class ElderCompanionScene(BaseScene):
     id = "companion_elder"
     default_persona_id = "laochen_demo"
+    grounding_privacy_predicate = staticmethod(is_cognitive_health_sensitive_utterance)
 
     def agent_persona(self) -> AgentPreset:
         return AgentPreset(
@@ -76,7 +77,8 @@ class ElderCompanionScene(BaseScene):
     ) -> str:
         """动作执行后统一核验现实完成态和第三方新事件。"""
         safe = guard_external_delivery_response(
-            ctx, response, utterance, persona
+            ctx, response, utterance, persona,
+            privacy_predicate=self.grounding_privacy_predicate,
         )
         private_observation_response = bool(ctx.working_memory.pop("_cognitive_block_selected", False))
         if persona is not None and persona.cognitive_observations:

@@ -1,4 +1,5 @@
 """Independent neutral software checks; no model or sealed semantic cases."""
+from tests._model_http_stub import stub_model_http
 import hashlib
 import json
 import socket
@@ -15,7 +16,7 @@ def forbid_network(monkeypatch):
     def fail(*args, **kwargs):
         raise AssertionError("network is forbidden during independent software review")
     monkeypatch.setattr(socket, "create_connection", fail)
-    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    stub_model_http(monkeypatch, fail)
 
 
 def digest(text):
@@ -41,11 +42,12 @@ def test_semantic_safety_projection_matches_persisted_delivery(tmp_path, mode):
 
 
 def test_next_turn_does_not_reuse_safety_or_wait_stage(tmp_path):
-    app, sid, engine, ctx, online = app_fixture(tmp_path, "wait")
+    app, sid, engine, ctx, online = app_fixture(tmp_path, "wait", payload("我已经通知女儿了。"))
     try:
         first = app.submit("中性一。", "review-first", sid)["state"]["turns"][-1]
         assert first["delivery_protection"]["response_changed"] is True
         engine._state_reasoner.mode = "ask"
+        online.response = payload()
         second = app.submit("中性二。", "review-second", sid)["state"]["turns"][-1]
         assert second["source"] == "live"
         assert second["delivery_protection"]["response_changed"] is False

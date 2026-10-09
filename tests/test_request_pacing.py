@@ -1,4 +1,5 @@
 """Shared pacing uses injected clocks and fake HTTP; no real sleeps or keys."""
+from tests._model_http_stub import stub_model_http
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
@@ -29,7 +30,7 @@ class Clock:
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: pytest.fail("unstubbed network"))
+    stub_model_http(monkeypatch, lambda *a, **kw: pytest.fail("unstubbed network"))
 
 
 def guard(path, clock, *, interval=10, reserved=False):
@@ -68,7 +69,7 @@ def test_default_zero_does_not_wait_or_change_attempt_contract(tmp_path, monkeyp
     current._pacing_clock = lambda: pytest.fail("default needs no pacing clock")
     current._pacing_sleep = lambda _: pytest.fail("default must not sleep")
     client = _client(); current.attach(client)
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: _Response())
+    stub_model_http(monkeypatch, lambda *a, **kw: _Response())
     _call(current, client, "one"); _call(current, client, "two")
     assert all("pacing" not in r for r in current.snapshot()["attempts"])
     assert current._db.execute("SELECT name FROM sqlite_master WHERE name='request_pacing'").fetchone() is None
@@ -104,7 +105,7 @@ def test_concurrent_callers_cannot_race_shared_pacing_or_operations(tmp_path, mo
     def opened(*args, **kwargs):
         starts.append(clock.now)
         return _Response()
-    monkeypatch.setattr(urllib.request, "urlopen", opened)
+    stub_model_http(monkeypatch, opened)
     with ThreadPoolExecutor(max_workers=3) as pool:
         results = list(pool.map(lambda item: _call(current, item[1], f"thread-{item[0]}"), enumerate(clients)))
     assert len(results) == 3 and starts == [0, 10, 20]
@@ -116,7 +117,7 @@ def test_concurrent_callers_cannot_race_shared_pacing_or_operations(tmp_path, mo
 def test_stop_from_another_thread_interrupts_wait_before_claim(tmp_path, monkeypatch, stop):
     clock = Clock(); current = guard(tmp_path / "cancel.sqlite3", clock)
     client = _client(); current.attach(client); sends = []
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: (sends.append(1) or _Response()))
+    stub_model_http(monkeypatch, lambda *a, **kw: (sends.append(1) or _Response()))
     _call(current, client, "first")
     waiting = threading.Event()
     def pause(seconds):
@@ -142,7 +143,7 @@ def test_second_instance_constructed_while_empty_checks_current_history(tmp_path
     client_a, client_b = _client(), _client("memory")
     first.attach(client_a); second.attach(client_b)
     starts = []
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: (starts.append(clock.now) or _Response()))
+    stub_model_http(monkeypatch, lambda *a, **kw: (starts.append(clock.now) or _Response()))
     _call(first, client_a, "one"); _call(second, client_b, "two"); _call(first, client_a, "three")
     assert starts == [0, 10, 20]
     assert second.snapshot()["attempts"][1]["pacing"]["wait_ms"] == 10000
@@ -154,7 +155,7 @@ def test_ledger_change_during_wait_is_rejected_by_atomic_claim(tmp_path, monkeyp
     path = tmp_path / "prefix.sqlite3"; clock = Clock(); first, second = guard(path, clock), guard(path, clock)
     client_a, client_b = _client(), _client("memory")
     first.attach(client_a); second.attach(client_b); starts = []
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: (starts.append(clock.now) or _Response()))
+    stub_model_http(monkeypatch, lambda *a, **kw: (starts.append(clock.now) or _Response()))
     _call(first, client_a, "one")
     inserted = False
     def insert_other_call(seconds):
@@ -175,7 +176,7 @@ def test_ledger_change_during_wait_is_rejected_by_atomic_claim(tmp_path, monkeyp
 def test_wait_failure_stops_without_another_claim_or_send(tmp_path, monkeypatch, failure):
     clock = Clock(); current = guard(tmp_path / "wait.sqlite3", clock)
     client = _client(); current.attach(client); sends = []
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: (sends.append(1) or _Response()))
+    stub_model_http(monkeypatch, lambda *a, **kw: (sends.append(1) or _Response()))
     _call(current, client, "first")
     before = deepcopy(current.snapshot()["attempts"])
     def broken(_):
@@ -198,7 +199,7 @@ def test_wait_failure_stops_without_another_claim_or_send(tmp_path, monkeypatch,
 def test_wait_does_not_hold_db_transaction_and_rechecks_halt_before_claim(tmp_path, monkeypatch):
     clock = Clock(); path = tmp_path / "halt.sqlite3"; current = guard(path, clock)
     client = _client(); current.attach(client); sends = []
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: (sends.append(1) or _Response()))
+    stub_model_http(monkeypatch, lambda *a, **kw: (sends.append(1) or _Response()))
     _call(current, client, "first")
     def stop_during_wait(seconds):
         with sqlite3.connect(path, timeout=.1) as db:
@@ -237,7 +238,7 @@ def test_reopen_keeps_accounting_and_waits_full_interval_without_old_monotonic(t
     path = tmp_path / "reopen.sqlite3"; clock = Clock(); current = guard(path, clock)
     client = _client(); current.attach(client)
     starts = []
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: (starts.append(clock.now) or _Response()))
+    stub_model_http(monkeypatch, lambda *a, **kw: (starts.append(clock.now) or _Response()))
     _call(current, client, "before")
     before = current.snapshot()["attempts"]; current.close()
     # A new clock origin proves no serialized monotonic value is re-used.
@@ -252,7 +253,7 @@ def test_reopen_keeps_accounting_and_waits_full_interval_without_old_monotonic(t
 def test_existing_unpaced_attempts_cannot_be_reinterpreted_as_paced(tmp_path, monkeypatch):
     path = tmp_path / "legacy.sqlite3"; current = guard(path, Clock(), interval=0)
     client = _client(); current.attach(client)
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: _Response())
+    stub_model_http(monkeypatch, lambda *a, **kw: _Response())
     _call(current, client); current.close()
     before = path.read_bytes()
     with pytest.raises(ValueError, match="no_pacing_contract"):

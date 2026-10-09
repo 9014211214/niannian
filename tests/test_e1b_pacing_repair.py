@@ -1,4 +1,5 @@
 """Formal-v5 cost/identity checks with synthetic parents and fake HTTP only."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 from decimal import Decimal
 import hashlib
@@ -19,7 +20,7 @@ from tests.test_e1b_structure_repair import history3  # noqa: F401
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("unexpected real network"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("unexpected real network"))
 
 
 @pytest.fixture(autouse=True)
@@ -239,7 +240,7 @@ def test_parent_is_rechecked_at_each_send_and_no_restart(history4, monkeypatch):
         reply = network(request, **kwargs)
         changed.write_bytes(b"synthetic mutation")
         return reply
-    monkeypatch.setattr(urllib.request, "urlopen", mutate_after_first)
+    stub_model_http(monkeypatch, mutate_after_first)
     result = entry.execute(root, root, registration, **args)
     assert result["status"] == "not_evaluable" and len(calls) == 1
     changed.write_bytes(old)

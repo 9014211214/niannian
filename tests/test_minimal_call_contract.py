@@ -1,4 +1,5 @@
 """Bound client options must match the actual request before a paid attempt."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import json
 import sqlite3
@@ -15,7 +16,7 @@ from tests.test_minimal_call_guard import _Response, _call, _client, _stub
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("unexpected network"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("unexpected network"))
 
 
 def wire_client(monkeypatch, *, role="online_fast", integrated=True):

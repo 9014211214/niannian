@@ -1,4 +1,5 @@
 """Synthetic exceptions only; categories never imply non-dispatch or no charge."""
+from tests._model_http_stub import stub_model_http
 from decimal import Decimal
 import errno
 import http.client
@@ -18,7 +19,7 @@ from tests.test_reserved_calls import call, client, guard, policy, receipt, stub
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: pytest.fail("unstubbed network"))
+    stub_model_http(monkeypatch, lambda *a, **kw: pytest.fail("unstubbed network"))
 
 
 ERRORS = [
@@ -41,7 +42,7 @@ def test_future_first_failure_classification_keeps_fee_unknown_and_never_retries
     def failed(*args, **kwargs):
         sent.append(1)
         raise error
-    monkeypatch.setattr(urllib.request, "urlopen", failed)
+    stub_model_http(monkeypatch, failed)
     with pytest.raises(MinimalCallStopped):
         call(current, model)
     state = current.snapshot()
@@ -102,7 +103,7 @@ def test_returned_response_context_failure_is_not_claimed_as_connect_failure(tmp
             raise RuntimeError("PRIVATE")
         def __exit__(self, *args):
             return False
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: BrokenContext())
+    stub_model_http(monkeypatch, lambda *a, **kw: BrokenContext())
     with pytest.raises(MinimalCallStopped):
         call(current, model)
     row = current.snapshot()["attempts"][0]

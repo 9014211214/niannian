@@ -49,10 +49,16 @@ def rejection_surface(utterance: str) -> str:
     )
 
 
-def update_alliance(ctx: EngineContext, utterance: str) -> None:
+def update_alliance(
+    ctx: EngineContext, utterance: str, *, allow_surface_inference: bool = True,
+) -> None:
     al = ctx.alliance
     if ctx.emotion.rupture is not None:
         ruptured = ctx.emotion.rupture                      # 探针判定优先(语境化)
+    elif not allow_surface_inference:
+        # A reported refusal or a long sentence is not relationship evidence.
+        # The integrated current-intent model owns ordinary semantics.
+        return
     else:
         surface = rejection_surface(utterance)
         ruptured = any(w in surface for w in _RUPTURE) or any(
@@ -66,5 +72,5 @@ def update_alliance(ctx: EngineContext, utterance: str) -> None:
     else:
         al.ruptured = False
         # 愿意多说一点(不是「嗯/好」)→ 关系微升。
-        if len(utterance) >= 12:
+        if allow_surface_inference and len(utterance) >= 12:
             al.trust = min(1.0, al.trust + 0.03)

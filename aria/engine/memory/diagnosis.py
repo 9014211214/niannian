@@ -413,6 +413,8 @@ def build_reflection_messages(
     evidence_review_protocol: bool = False,
 ) -> list[dict[str, str]]:
     """The exact input builder shared with offline audit; never called online."""
+    from .hypothesis_context import reflection_hypotheses
+
     existing = [{
         "id": item.id, "framework": item.framework, "dimension": item.dimension,
         "claim": item.claim, "scope": item.scope, "scope_tags": item.scope_tags,
@@ -427,7 +429,7 @@ def build_reflection_messages(
         } for e in item.evidence[-4:]],
         **({"atomic_claim": item.atomic_claim.model_dump() if item.atomic_claim else None,
             "support_event_ids": sorted(item.supporting_events())} if evidence_review_protocol else {}),
-    } for item in persona.person_hypotheses][-30:]
+    } for item in reflection_hypotheses(persona)]
     content = (
         "当前人物假设：\n" + json.dumps(existing, ensure_ascii=False)
         + "\n\n本次会话：\n" + conversation

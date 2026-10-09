@@ -449,7 +449,7 @@ def test_v6_archive_keeps_original_scope_and_excludes_checkpoint_tools(source, t
     assert target.read_bytes() == before
 
 
-@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V13_POLICY_VERSION, release.V12_POLICY_VERSION, release.V11_POLICY_VERSION, release.V10_POLICY_VERSION, release.V9_POLICY_VERSION, release.V8_POLICY_VERSION, release.V7_POLICY_VERSION}))
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V14_POLICY_VERSION, release.V13_POLICY_VERSION, release.V12_POLICY_VERSION, release.V11_POLICY_VERSION, release.V10_POLICY_VERSION, release.V9_POLICY_VERSION, release.V8_POLICY_VERSION, release.V7_POLICY_VERSION}))
 @pytest.mark.parametrize("added", sorted(release.V7_POLICY_FILES))
 def test_checkpoint_files_cannot_enter_older_archive_policy(source, tmp_path, policy, added):
     _, contents, manifest = release.inspect_source(source)
@@ -502,7 +502,7 @@ def test_v7_archive_keeps_exact_scope_without_format_tools(source, tmp_path):
     assert target.read_bytes() == before
 
 
-@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V13_POLICY_VERSION, release.V12_POLICY_VERSION, release.V11_POLICY_VERSION, release.V10_POLICY_VERSION, release.V9_POLICY_VERSION, release.V8_POLICY_VERSION}))
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V14_POLICY_VERSION, release.V13_POLICY_VERSION, release.V12_POLICY_VERSION, release.V11_POLICY_VERSION, release.V10_POLICY_VERSION, release.V9_POLICY_VERSION, release.V8_POLICY_VERSION}))
 @pytest.mark.parametrize("added", sorted(release.V8_POLICY_FILES))
 def test_format_and_e1c_contract_files_cannot_enter_older_policy(source, tmp_path, policy, added):
     _, contents, manifest = release.inspect_source(source)
@@ -541,7 +541,7 @@ def test_v8_archive_keeps_exact_scope_without_e1c_execution_tools(source, tmp_pa
     }
 
 
-@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V13_POLICY_VERSION, release.V12_POLICY_VERSION, release.V11_POLICY_VERSION, release.V10_POLICY_VERSION, release.V9_POLICY_VERSION}))
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V14_POLICY_VERSION, release.V13_POLICY_VERSION, release.V12_POLICY_VERSION, release.V11_POLICY_VERSION, release.V10_POLICY_VERSION, release.V9_POLICY_VERSION}))
 @pytest.mark.parametrize("added", sorted(release.V9_POLICY_FILES))
 def test_e1c_execution_tools_cannot_enter_older_archive_policy(source, tmp_path, policy, added):
     _, contents, manifest = release.inspect_source(source)
@@ -581,7 +581,7 @@ def test_v9_archive_keeps_exact_scope_without_memory_continuation(source, tmp_pa
     }
 
 
-@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V13_POLICY_VERSION, release.V12_POLICY_VERSION, release.V11_POLICY_VERSION, release.V10_POLICY_VERSION}))
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V14_POLICY_VERSION, release.V13_POLICY_VERSION, release.V12_POLICY_VERSION, release.V11_POLICY_VERSION, release.V10_POLICY_VERSION}))
 @pytest.mark.parametrize("added", sorted(release.V10_POLICY_FILES))
 def test_memory_continuation_cannot_enter_older_policy(source, tmp_path, policy, added):
     _, contents, manifest = release.inspect_source(source)
@@ -620,7 +620,7 @@ def test_v10_archive_keeps_exact_scope_without_prewrite_tools(source, tmp_path):
     }
 
 
-@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V13_POLICY_VERSION, release.V12_POLICY_VERSION, release.V11_POLICY_VERSION}))
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V14_POLICY_VERSION, release.V13_POLICY_VERSION, release.V12_POLICY_VERSION, release.V11_POLICY_VERSION}))
 @pytest.mark.parametrize("added", sorted(release.V11_POLICY_FILES))
 def test_prewrite_continuation_cannot_enter_older_policy(source, tmp_path, policy, added):
     _, contents, manifest = release.inspect_source(source)
@@ -656,7 +656,7 @@ def test_v11_archive_keeps_original_scope_without_later_result_report(source, tm
     assert release.V12_POLICY_FILES == {"docs/E1BR_RESULTS_2026_10_05.md"}
 
 
-@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V13_POLICY_VERSION, release.V12_POLICY_VERSION}))
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V14_POLICY_VERSION, release.V13_POLICY_VERSION, release.V12_POLICY_VERSION}))
 def test_later_result_report_cannot_enter_older_policy(source, tmp_path, policy):
     _, contents, manifest = release.inspect_source(source)
     added = "docs/E1BR_RESULTS_2026_10_05.md"
@@ -697,7 +697,7 @@ def test_v12_archive_keeps_exact_scope_without_design_repair_tools(source, tmp_p
     }
 
 
-@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V13_POLICY_VERSION}))
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V14_POLICY_VERSION, release.V13_POLICY_VERSION}))
 @pytest.mark.parametrize("added", sorted(release.V13_POLICY_FILES))
 def test_design_repairs_cannot_enter_older_archive_policy(source, tmp_path, policy, added):
     _, contents, manifest = release.inspect_source(source)

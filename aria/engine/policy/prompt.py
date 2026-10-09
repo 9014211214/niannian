@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 from copy import deepcopy
@@ -18,8 +19,10 @@ from ..context import EngineContext
 from ..cognitive import online_cognitive_block
 from ..model.persona import PersonaProfile
 from ..memory.stated_preferences import PREFERENCE_PROTOCOL_VERSION, confirmed_preference_payloads
+from ..memory.hypothesis_context import online_influencing_hypotheses
 from ..perception.external_emotion import external_emotion_payload
 from .reply_contract import contract_prompt, reply_quality_contract
+from .user_grounding import prepare_user_grounding
 from .strategy import select_strategies
 
 # Prompt 资产版本号:任何会改变回应行为的 prompt 修改都要 bump,
@@ -55,7 +58,10 @@ from .strategy import select_strategies
 # 1.13.0: 全局 4 档交付模式改为多维相处画像：DISC/Big Five/依恋各维只在
 #         明显偏离中性时各自给出一条“怎么说”，并保留来源假设 id；4 档只
 #         作为兼容标签与候选打分。
-PROMPT_VERSION = "1.12.0"  # Default text; use prompt_version_for for run metadata.
+# 1.14.0/1.15.0: owner-source qualification, bounded reviewable hypothesis
+# influence and v3 advisory observation; earlier result identities stay frozen.
+# 1.16.0/1.17.0: current owner C1 semantic permission control, no enable/share.
+PROMPT_VERSION = "1.18.0"  # Delivered owner invitations and one-use text readiness.
 DELIVERY_BLOCK_ENV = "ARIA_DELIVERY_BLOCK"
 DELIVERY_BLOCK_DEFAULT = "mode_v1"
 DELIVERY_BLOCK_PROFILE = "profile_v1"
@@ -71,8 +77,8 @@ def configured_delivery_block(block: str | None = None) -> str:
 def prompt_version_for(block: str | None = None) -> str:
     """Version of the delivery text actually selected for this run."""
     return (
-        "1.13.0" if configured_delivery_block(block) == DELIVERY_BLOCK_PROFILE
-        else "1.12.0"
+        "1.19.0" if configured_delivery_block(block) == DELIVERY_BLOCK_PROFILE
+        else PROMPT_VERSION
     )
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -185,9 +191,8 @@ def _adjusted_traits(persona: PersonaProfile) -> dict:
     sources: dict[tuple[str, str], list[str]] = {}
     attachment_source: Optional[str] = None
     active = [
-        item for item in persona.person_hypotheses
-        if item.status in {"working", "stable"}
-        and _is_general_delivery_hypothesis(item)
+        item for item in online_influencing_hypotheses(persona)
+        if _is_general_delivery_hypothesis(item)
     ]
     for hypothesis in active:
         weight = (
@@ -432,7 +437,7 @@ def render_delivery_block(
         return _MODE_GUIDANCE[select_delivery_mode(persona)]
     if persona is None:
         return _MODE_GUIDANCE["neutral"]
-    committed = persona.delivery_state.committed
+    committed = _current_committed_mode(persona)
     raw = _raw_delivery_mode(persona)
     if committed and committed != raw:
         return _MODE_GUIDANCE[committed]
@@ -456,7 +461,7 @@ def delivery_basis_ids(
     """本轮提示中实际出现的画像维度键；滞回回退旧文案时没有画像可引用。"""
     if configured_delivery_block(block) != DELIVERY_BLOCK_PROFILE or persona is None:
         return []
-    committed = persona.delivery_state.committed
+    committed = _current_committed_mode(persona)
     if committed and committed != _raw_delivery_mode(persona):
         return []
     return [item["axis"] for item in delivery_profile(persona)]
@@ -466,10 +471,7 @@ def confirmed_prompt_hypotheses(persona: Optional[PersonaProfile]) -> list:
     """进入在线提示的人物假设：最后 4 条 working/stable。"""
     if persona is None:
         return []
-    return [
-        item for item in persona.person_hypotheses
-        if item.status in {"working", "stable"}
-    ][-4:]
+    return online_influencing_hypotheses(persona)[-4:]
 
 
 def _is_general_delivery_hypothesis(hypothesis) -> bool:
@@ -484,7 +486,25 @@ def select_delivery_mode(persona: Optional[PersonaProfile]) -> str:
     """运行时取交付模式:已定挡用定挡(滞回,P2-#9),否则按阈值即时算。"""
     if persona is None:
         return "neutral"
-    return persona.delivery_state.committed or _raw_delivery_mode(persona)
+    return _current_committed_mode(persona) or _raw_delivery_mode(persona)
+
+
+def _delivery_hypothesis_fingerprint(persona: PersonaProfile) -> str:
+    # Identity/removal/scope corrections invalidate an old commitment. Numeric
+    # confidence changes retain the existing hysteresis within the same basis.
+    basis = [{"id": item.id, "framework": item.framework, "dimension": item.dimension,
+              "claim": item.claim, "scope": item.scope, "scope_tags": item.scope_tags,
+              "target_value": item.target_value}
+             for item in online_influencing_hypotheses(persona)
+             if _is_general_delivery_hypothesis(item)]
+    return hashlib.sha256(json.dumps(basis, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _current_committed_mode(persona: PersonaProfile) -> str | None:
+    state = persona.delivery_state
+    if state.hypothesis_basis_fingerprint == _delivery_hypothesis_fingerprint(persona):
+        return state.committed
+    return None
 
 
 def update_delivery_state(persona: PersonaProfile, *, n_consistent: int = 2) -> str:
@@ -495,7 +515,8 @@ def update_delivery_state(persona: PersonaProfile, *, n_consistent: int = 2) -> 
     """
     raw = _raw_delivery_mode(persona)
     st = persona.delivery_state
-    if st.committed is None:
+    basis = _delivery_hypothesis_fingerprint(persona)
+    if st.committed is None or st.hypothesis_basis_fingerprint != basis:
         st.committed, st.candidate, st.streak = raw, None, 0
     elif raw == st.committed:
         st.candidate, st.streak = None, 0                   # 证据回到旧挡,候选作废
@@ -505,6 +526,7 @@ def update_delivery_state(persona: PersonaProfile, *, n_consistent: int = 2) -> 
             st.committed, st.candidate, st.streak = raw, None, 0
     else:
         st.candidate, st.streak = raw, 1
+    st.hypothesis_basis_fingerprint = basis
     return st.committed
 
 
@@ -759,10 +781,7 @@ def build_messages(
         )
 
     relationships = (
-        [
-            item for item in persona.relationship_context
-            if item.referenceable
-        ]
+        persona.referenceable_relationships()
         if persona is not None else []
     )
     if relationships:
@@ -824,6 +843,8 @@ def build_messages(
             "available仅表示记录可读；not_configured表示护理未配置；unavailable表示无法核查，"
             "不能回答成没有提醒或未发送。记录有omitted时不能据摘要断言历史上从未通知。"
             "unconfirmed仅为尚未收到确认，不等于没服药或遇险；acknowledged仅为确认收到提醒，"
+            "awaiting_display只表示提醒已生成且无本期页面展示回执；displayed_local/page_displayed"
+            "只表示本人可见页面回调，不证明本人已读、收到真实通知或完成活动。"
             "不证明活动已完成。consent的valid_now只描述期限，不等于触发条件已满足。"
             "queued/sending/accepted/delivered/family_ack和护理跟进分别表示排队、发送中、"
             "网关受理、送达、家属确认及后续处置，不能相互替代。unknown须核查且不得重发。"
@@ -909,11 +930,16 @@ def build_messages(
         )
 
     cognitive_block = online_cognitive_block(
-        persona, utterance, ctx.turns, external_emotion=emo.external_reading,
+        persona, utterance, ctx.turns, external_emotion=emo.external_reading, ctx=ctx,
     )
     ctx.working_memory["_cognitive_block_selected"] = bool(cognitive_block)
     if cognitive_block:
         blocks.append(cognitive_block)
+
+    from ..memory.preference_dialogue import preference_dialogue_prompt
+    preference_invitation = preference_dialogue_prompt(persona, ctx)
+    if preference_invitation:
+        blocks.append(preference_invitation)
 
     # 10) One contract shared with the structured online envelope. The same
     # epistemic and capability boundaries also apply to ordinary short replies.
@@ -961,6 +987,8 @@ def build_messages(
             "provenance_not_injected": [e.model_dump() for e in item.evidence[-6:]],
         } for item in selected_hypotheses],
         "stated_preferences": _clean_untrusted(preferences),
+        "preference_invitation_exposed": bool(preference_invitation),
+        "cognitive_readiness": deepcopy(ctx.working_memory.get("_cognitive_readiness_prepared")),
         "delivery_basis_ids": delivery_basis_ids(persona, block=delivery_block),
         "relationship_context": _clean_untrusted([{"name": item.name, "relation": item.relation or "关系未说明", "facts": item.facts[:3]} for item in relationships[-6:]]),
     })
@@ -973,7 +1001,8 @@ def build_messages(
     messages: list[dict] = [{"role": "system", "content": "\n\n".join(blocks)}]
 
     # 最近 N 轮历史
-    for t in ctx.turns[-history_turns:]:
+    prepare_user_grounding(ctx, history_turns, getattr(scene, "grounding_privacy_predicate", None), current_utterance=utterance)
+    for t in (ctx.turns[-history_turns:] if history_turns > 0 else []):
         messages.append({"role": "user", "content": t.user})
         messages.append({"role": "assistant", "content": t.agent})
 

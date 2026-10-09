@@ -1,4 +1,5 @@
 """Pending formal-v3 authorization and immutable cost-chain software checks."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 from decimal import Decimal
 import hashlib
@@ -18,7 +19,7 @@ from tests.test_e1b_repair import prior  # noqa: F401 - provides the isolated v1
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("unexpected network"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("unexpected network"))
 
 
 def tree(root):
@@ -283,7 +284,7 @@ def test_new_wire_saved_before_one_fake_failure_and_campaign_cannot_restart(hist
         raw = (entry.campaign(root) / "prescreen/wire-requests/0001.json").read_bytes()
         assert raw == request.data and b"synthetic-inert-key" not in raw
         return network(request, **kwargs)
-    monkeypatch.setattr(urllib.request, "urlopen", check)
+    stub_model_http(monkeypatch, check)
     result = entry.execute(root, root, registration, **args)
     assert result["status"] == "not_evaluable" and len(calls) == 1
     value = entry.read_json(entry.campaign(root) / "prescreen/execution-receipt.json")

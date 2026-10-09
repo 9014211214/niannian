@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from aria.voice.minimal import MinimalWebApp
+from aria.engine.memory.referenceability import SOURCE_CONTEXT_VERSION, source_context_sha256
 from aria.engine.model.persona import EpisodicMemoryEntry, PersonHypothesis, PersonHypothesisEvidence
 from tests.test_minimal_web import (
     live_fixture, local_server, request, snapshot_files, start_and_submit,
@@ -174,7 +175,10 @@ def test_actual_recall_is_bounded_and_input_history_survives_profile_changes(tmp
     persona = app._profile()
     persona.episodic_memory = [
         EpisodicMemoryEntry(id="pinwheel", summary="以前修过纸风车。", keywords=["纸风车"], referenceable=True,
-                            source_session_id="source-session", source_turn_index=0, source_quote="我以前修过纸风车。"),
+                            source_session_id="source-session", source_turn_index=0, source_quote="我以前修过纸风车。",
+                            source_context="我以前修过纸风车。",
+                            source_context_sha256=source_context_sha256("我以前修过纸风车。"),
+                            source_context_version=SOURCE_CONTEXT_VERSION),
         EpisodicMemoryEntry(id="unrelated", summary="喜欢苹果。", keywords=["苹果"], referenceable=True),
         EpisodicMemoryEntry(id="private", summary="纸风车的私密经历。", keywords=["纸风车"], referenceable=False),
     ]
@@ -211,7 +215,7 @@ def test_grounded_model_preference_proposal_survives_offline_queue_commit(tmp_pa
         "quotes": [{"session_id": sid, "turn_index": 0, "text": words[0]}],
     }]}
     app.seal(sid)
-    result = app.reflect("model-fixture-review")
+    result = app.reflect("model-fixture-review", wait=True)
     assert result["ok"], result
     item = result["state"]["profile"]["stated_preferences"][0]
     assert item["status"] == "proposed" and item["extraction_source"] == "model"

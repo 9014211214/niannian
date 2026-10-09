@@ -18,6 +18,8 @@ from ...engine.policy.reply_contract import (
     UNAVAILABLE_CONTACT_REPLY, contact_offer_violations, reply_quality_contract,
     physical_offer_violations,
 )
+from ...engine.policy.user_grounding import user_grounding_sources
+from .medical_privacy import is_cognitive_health_sensitive_utterance
 from .device_grounding import (
     UNCONFIRMED_DEVICE_CAPABILITY_REPLY, device_capability_violations,
 )
@@ -88,9 +90,7 @@ _USER_FEEDBACK_CONDITION = re.compile(
 def _actor_aliases(persona: PersonaProfile | None) -> dict[str, str]:
     aliases = {item: item for item in _GENERIC_EXTERNAL_ACTORS}
     if persona is not None:
-        for item in persona.relationship_context[-6:]:
-            if not item.referenceable:
-                continue
+        for item in persona.referenceable_relationships()[-6:]:
             canonical = item.name.strip() or item.relation.strip()
             if not canonical:
                 continue
@@ -238,8 +238,9 @@ def _grounding_sources(
     ctx: EngineContext,
     utterance: str,
     persona: PersonaProfile | None,
+    *, privacy_predicate=is_cognitive_health_sensitive_utterance,
 ) -> list[str]:
-    sources = [str(utterance or "")]
+    sources = user_grounding_sources(ctx, str(utterance or ""), privacy_predicate)
     sources.extend(
         _grounding_text(item)
         for item in list(
@@ -247,9 +248,8 @@ def _grounding_sources(
         )[:2]
     )
     if persona is not None:
-        for item in persona.relationship_context[-6:]:
-            if item.referenceable:
-                sources.extend(str(fact) for fact in item.facts[:3])
+        for item in persona.referenceable_relationships()[-6:]:
+            sources.extend(str(fact) for fact in item.facts[:3])
     return sources
 
 
@@ -463,6 +463,7 @@ def guard_external_delivery_response(
     response: str,
     utterance: str,
     persona: PersonaProfile | None,
+    *, privacy_predicate=is_cognitive_health_sensitive_utterance,
 ) -> str:
     """Enforce receipts for Aria actions and grounding for third parties."""
     compact = " ".join(str(response or "").strip().split())
@@ -476,7 +477,7 @@ def guard_external_delivery_response(
     checked_candidate, invalid_care_status = _minimal_care_record_claims(ctx, candidate)
     claims = _extract_claims(checked_candidate, persona, require_completion=True)
     receipts = _successful_receipts(ctx, persona)
-    sources = _grounding_sources(ctx, utterance, persona)
+    sources = _grounding_sources(ctx, utterance, persona, privacy_predicate=privacy_predicate)
     # Use the actual deliverable, not a superseded model candidate, for future
     # offers. This also covers the unstructured fast path without another LLM.
     future_violations = contact_offer_violations(compact, reply_quality_contract(ctx))

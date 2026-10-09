@@ -1,4 +1,5 @@
 """Independent formation denominators and immutable local labels, no models."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import hashlib
 import json
@@ -18,7 +19,7 @@ from scripts.e1b_formation import (
 def no_network(monkeypatch):
     def blocked(*args, **kwargs):
         raise AssertionError("formation tooling must not use network or model")
-    monkeypatch.setattr(urllib.request, "urlopen", blocked)
+    stub_model_http(monkeypatch, blocked)
 
 
 def proposal(case):

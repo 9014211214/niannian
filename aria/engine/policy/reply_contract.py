@@ -204,22 +204,22 @@ def reply_quality_contract(
     # ask plan is a hypothesis, not authority to force a diagnostic question.
     # Safety takeover and explicit wait remain separate, stronger boundaries.
     semantic_v3 = ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v3"
-    advisory = bool(semantic_v3 and plan and plan.mode == "ask"
+    advisory = bool(semantic_v3 and plan
                     and not ctx.working_memory.get("risk_flag"))
     return {
-        "version": "1.7.1" if semantic_v3 else REPLY_CONTRACT_VERSION,
+        "version": "1.7.3" if semantic_v3 else REPLY_CONTRACT_VERSION,
         "observation_advisory": advisory,
         "observation_mode": plan.mode if plan is not None else "observe",
         "observation_question": plan.question.strip() if plan is not None else "",
-        "question_budget": 0 if leave_space or (plan and plan.mode == "wait") else 1,
+        "question_budget": 1 if advisory else (0 if leave_space or (plan and plan.mode == "wait") else 1),
         "question_requirement": (
-            "none" if leave_space or (plan and plan.mode == "wait")
-            else "optional" if advisory
+            "optional" if advisory
+            else "none" if leave_space or (plan and plan.mode == "wait")
             else "invitation_optional" if optional_invitation
             else "exact" if plan and plan.mode == "ask"
             else "optional"
         ),
-        "person_requires_space": leave_space,
+        "person_requires_space": leave_space and not advisory,
         "task_questions_separate": True,
         "draft_requested": _draft_requested(current_surface),
         # This does not classify the activity as fraudulent. Even a low-risk
@@ -254,6 +254,9 @@ def contract_prompt(contract: dict[str, Any]) -> str:
             "可直接交付答案或内容、接受纠正、安静倾听；只有当前需要且缺少必要信息时"
             "才问一个相关问题，不因候选状态或关键词要求本人回答心理二选一。"
             "当前身体求助须认真回应；急症或自伤关注仍按独立安全合同分流。\n"
+            "本地等待或冷却建议只限制重复推动对应方向，不取消本人另一个当前请求；"
+            "第三人转述不等于本人拒绝，局部停止不等于结束全部交流。"
+            "有依据的留白偏好仍按本轮范围尊重，不据此索要解释。\n"
         )
     elif mode == "ask" and contract.get("question_requirement") == "invitation_optional":
         observation = (
@@ -313,6 +316,9 @@ def contract_prompt(contract: dict[str, Any]) -> str:
         "人物候选做法。观察/留白许可优先，候选示例不是每拍必做的任务。\n"
         + observation
         + task_delivery + offer_boundary
+        + "相处说明只确认本轮已实际展示、仍有效的具体复述，不把人物推断、分享或通知权限一并确认。"
+        "本人回答的语义判断只是提案；服务器核对并保存前，不声称已经确认或撤回。"
+        "本人选择现在聊变化记录，只允许接下来一次当前会话的请求，不证明本人平静，也不是长期提醒或外发授权。\n"
         + "用户明确提出的生活任务仍需交代真实状态；留白不取消任务，必要的任务"
         "确认只围绕任务，不借机问情绪。全轮最多一个问题。\n"
         "承接事实，不代言内心：他说过的感受可按原话回应；你推测的感受只作"

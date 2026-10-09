@@ -20,13 +20,15 @@ from aria.scenes.registry import get_scene
 from tests.test_online_json import DECISION
 
 
-def engine_with_response(monkeypatch, concern, response="继续聊。"):
+def engine_with_response(monkeypatch, concern, response="继续聊。", cognitive_control=None):
     clients = create_minimal_clients(model_calls_enabled=True, api_key="inert-software-fixture")
     calls = []
     def receive(request):
         wire = json.loads(request.data)
         calls.append(wire)
         value = {**deepcopy(DECISION), "safety_concern": concern, "response": response}
+        if cognitive_control is not None:
+            value["cognitive_control"] = cognitive_control
         return {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(value, ensure_ascii=False)}}]}
     monkeypatch.setattr(clients.online, "_request_json", receive)
     engine = create_minimal_engine(get_scene("companion_elder"), PersonaProfile(user_id="owner"), clients=clients)
@@ -171,7 +173,7 @@ def test_valid_clear_semantics_runs_care_only_after_same_call(monkeypatch, tmp_p
         id="previous", label="已交付", goal="陪伴", turn_index=0))
     engine.process_turn(ctx, "今天我想接着和外孙女试试纸风车。")
     assert order == [("observe", 1, 1, "none"), ("execute", 1, 1, "none")]
-    assert ctx.alliance.trust == 0.53
+    assert ctx.alliance.trust == 0.5  # sentence length is not relationship evidence
     assert ctx.reasoning.outcomes[-1].signal == "continued_engagement"
 
 
@@ -205,39 +207,65 @@ def test_legacy_care_order_is_unchanged(monkeypatch, tmp_path):
     assert order == [("observe", 0), ("execute", 0)]
 
 
-@pytest.mark.parametrize("concern,utterance,expected_calls", [
-    ("invalid", "不要再提醒我的记性。", 1),
-    ("medical_emergency", "不要再提醒我的记性，左边胳膊突然麻了。", 1),
-    ("none", "不要再提醒我的记性，我胸口痛得厉害，喘不上气。", 0),
+@pytest.mark.parametrize("concern,utterance,expected_calls,control_present,closed", [
+    ("invalid", "不要再提醒我的记性。", 1, True, False),
+    ("medical_emergency", "不要再提醒我的记性，左边胳膊突然麻了。", 1, True, True),
+    ("none", "不要再提醒我的记性，我胸口痛得厉害，喘不上气。", 0, True, False),
+    ("none", "不要再提醒我的记性。", 1, True, True),
+    ("none", "不要再提醒我的记性。", 1, False, False),
 ])
-def test_privacy_withdrawal_precedes_failed_or_risky_model(monkeypatch, tmp_path, concern, utterance, expected_calls):
+def test_current_semantic_withdrawal_is_saved_before_same_call_safety(monkeypatch, tmp_path, concern, utterance, expected_calls, control_present, closed):
     from aria.engine.cognitive import cognitive_action
-    engine, calls = engine_with_response(monkeypatch, concern)
+    control = {"version": "cognitive_permission_v1", "action": "disable_observation", "evidence_quote": utterance}
+    engine, calls = engine_with_response(monkeypatch, concern, cognitive_control=control if control_present else None)
     engine.store = PersonaStore(tmp_path / "profiles")
     cognitive_action(engine.persona, "enable", actor="owner")
+    engine.store.save(engine.persona)
     ctx = EngineContext(user_id="owner", scene_id="companion_elder")
     ctx.working_memory["_cognitive_source_turns"] = [{"turn_index": 0, "text": "旧原话"}]
     ctx.working_memory["_cognitive_owner_enabled"] = True
-    original = engine.fast_llm._request_json
-    def after_withdrawal(request):
-        saved = engine.store.load("owner")
-        assert not saved.cognitive_health_consent.has_text_monitoring_consent()
-        return original(request)
-    monkeypatch.setattr(engine.fast_llm, "_request_json", after_withdrawal)
-    engine.process_turn(ctx, utterance)
+    original_request, original_save = engine.fast_llm._request_json, engine.store.save
+    events = []
+    def before_semantic_result(request):
+        assert engine.store.load("owner").cognitive_health_consent.has_text_monitoring_consent()
+        events.append(("request", len(calls)))
+        return original_request(request)
+    def record_save(persona):
+        events.append(("save", len(calls), persona.cognitive_health_consent.has_text_monitoring_consent()))
+        return original_save(persona)
+    monkeypatch.setattr(engine.fast_llm, "_request_json", before_semantic_result)
+    monkeypatch.setattr(engine.store, "save", record_save)
+    reply = engine.process_turn(ctx, utterance)
     assert len(calls) == expected_calls
-    assert not engine.persona.cognitive_health_consent.has_text_monitoring_consent()
-    assert not engine.store.load("owner").cognitive_health_consent.has_text_monitoring_consent()
-    assert "_cognitive_source_turns" not in ctx.working_memory
-    assert "_cognitive_owner_enabled" not in ctx.working_memory
+    assert engine.persona.cognitive_health_consent.has_text_monitoring_consent() is (not closed)
+    assert engine.store.load("owner").cognitive_health_consent.has_text_monitoring_consent() is (not closed)
+    if closed:
+        assert events[:2] == [("request", 0), ("save", 1, False)]
+        assert "_cognitive_source_turns" not in ctx.working_memory
+        assert "_cognitive_owner_enabled" not in ctx.working_memory
+    if concern == "invalid":
+        assert reply == DETERMINISTIC_MODEL_FAILURE_REPLY
+    if concern == "medical_emergency" or expected_calls == 0:
+        assert "120" in reply
+    assert len(ctx.turns) == 1
 
 
-def test_privacy_withdrawal_save_failure_prevents_model_request(monkeypatch, tmp_path):
+def test_semantic_withdrawal_save_failure_stops_delivery_after_one_result(monkeypatch, tmp_path):
     from aria.engine.cognitive import cognitive_action
-    engine, calls = engine_with_response(monkeypatch, "none")
+    utterance = "不要再提醒我的记性。"
+    engine, calls = engine_with_response(monkeypatch, "none", cognitive_control={
+        "version": "cognitive_permission_v1", "action": "disable_observation", "evidence_quote": utterance})
     engine.store = PersonaStore(tmp_path / "profiles")
     cognitive_action(engine.persona, "enable", actor="owner")
+    engine.store.save(engine.persona)
+    effects = []
+    monkeypatch.setattr(engine.scene, "observe_care", lambda *args: effects.append("observe"))
+    monkeypatch.setattr(engine.scene, "execute_care_skills", lambda *args: effects.append("execute"))
     monkeypatch.setattr(engine.store, "save", lambda *_: (_ for _ in ()).throw(OSError("fixture save failure")))
+    ctx = EngineContext(user_id="owner", scene_id="companion_elder")
     with pytest.raises(OSError):
-        engine.process_turn(EngineContext(user_id="owner", scene_id="companion_elder"), "不要再提醒我的记性。")
-    assert not calls
+        engine.process_turn(ctx, utterance)
+    assert len(calls) == 1 and not effects and not ctx.turns
+    # An in-memory reduction is not a claim that the failed disk write succeeded.
+    assert not engine.persona.cognitive_health_consent.has_text_monitoring_consent()
+    assert engine.store.load("owner").cognitive_health_consent.has_text_monitoring_consent()

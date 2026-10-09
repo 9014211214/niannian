@@ -1,4 +1,5 @@
 """Pre-send hard failures use only synthetic input and a denied network."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import json
 import urllib.request
@@ -14,7 +15,7 @@ from tests.test_reserved_calls import client, policy, receipt, stub
 
 @pytest.fixture(autouse=True)
 def deny_network(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("network forbidden"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("network forbidden"))
 
 
 def guard(path, cls=ProductCallGuard, *, limit=31999):

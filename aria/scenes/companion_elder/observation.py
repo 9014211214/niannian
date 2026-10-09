@@ -127,6 +127,8 @@ class ElderActiveObservationPolicy:
                 reason="关系或安全信号优先；这一拍停止收集信息，先维持安全与自主。",
             )
         if (
+            ctx.working_memory.get("_online_decision_version") != "online_turn_decision_v3"
+            and
             not current_user_reopened
             and (
                 ctx.alliance.ruptured

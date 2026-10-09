@@ -108,12 +108,32 @@ class EpisodicMemoryEntry(BaseModel):
     summary: str
     keywords: List[str] = []
     sentiment: Optional[str] = None
-    referenceable: bool = False
+    referenceable: StrictBool = False
     # Optional lineage for new extractions. Legacy/imported memories keep
     # missing provenance; a timestamp or matching text is not a source ID.
     source_session_id: Optional[str] = None
     source_turn_index: Optional[StrictInt] = Field(default=None, ge=0)
     source_quote: Optional[str] = None
+    # Full owner turn supplied by the engine, not by the model. Missing legacy
+    # context remains readable but cannot authorize proactive reference.
+    source_context: Optional[str] = None
+    source_context_sha256: Optional[str] = None
+    source_context_version: Optional[str] = None
+
+    def can_reference(self) -> bool:
+        from ..memory.referenceability import (
+            must_not_reference, reference_context_is_valid,
+        )
+        return bool(
+            self.referenceable is True
+            and isinstance(self.source_session_id, str) and self.source_session_id.strip()
+            and type(self.source_turn_index) is int and self.source_turn_index >= 0
+            and reference_context_is_valid(
+                self.source_context, self.source_context_sha256,
+                self.source_context_version, self.source_quote,
+            )
+            and not must_not_reference(self.summary)
+        )
 
     @field_validator("timestamp", mode="before")
     @classmethod
@@ -203,12 +223,13 @@ class DeliveryModeState(BaseModel):
     换挡需连续 N 次会话给出一致的新证据;单次诊断波动不改变对他说话的方式。
     """
     committed: Optional[str] = None      # 当前生效的交付模式(None=尚未定挡)
+    hypothesis_basis_fingerprint: Optional[str] = None
     candidate: Optional[str] = None     # 待确认的新挡位
     streak: int = 0                      # candidate 连续一致的会话数
 
 
 class RiskEvent(BaseModel):
-    """安全账本单条(启发式筛查的落账)—— 纵向基线漂移的原始信号。
+    """历史或模型分流记录；不是本人危险、人格或纵向变化的证明。
 
     note 只存证据摘要(截断),不存全文;整个账本随档案一起受
     PIPL 删除权与(可选的)静态加密保护。
@@ -217,6 +238,23 @@ class RiskEvent(BaseModel):
     tier: int
     kind: str                            # ideation / high_distress / low_mood ...
     note: Optional[str] = None
+
+
+class SafetyScreeningRecord(BaseModel):
+    """Operational keyword takeover audit; subject is deliberately unverified.
+
+    This contains no raw utterance, permission or person/health inference and
+    must not be consumed as ordinary memory, a person trait or a care consent.
+    """
+    model_config = ConfigDict(extra="forbid")
+    at: str
+    session_id: str = Field(min_length=1, max_length=128)
+    turn_index: StrictInt = Field(ge=0)
+    tier: StrictInt = Field(ge=2, le=3)
+    kind: str = Field(min_length=1, max_length=128)
+    source: Literal["keyword_backstop"] = "keyword_backstop"
+    subject: Literal["unverified"] = "unverified"
+    evidence_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class InterventionOutcomeRecord(BaseModel):
@@ -398,6 +436,16 @@ class PersonModelState(BaseModel):
     last_reflected_at: Optional[str] = None
 
 
+class RelationshipFactSource(BaseModel):
+    """A verbatim relationship fact and its complete owner source turn."""
+
+    quote: str
+    turn_index: StrictInt = Field(ge=0)
+    source_context: str
+    source_context_sha256: str
+    source_context_version: str
+
+
 class RelationshipEvidence(BaseModel):
     """一条关系事实的来源；关系图不能靠模型臆测。"""
 
@@ -406,6 +454,8 @@ class RelationshipEvidence(BaseModel):
     summary: str
     turn_indices: List[int] = Field(default_factory=list)
     source: str = "user_conversation"
+    # Old evidence summaries/indices alone do not preserve privacy context.
+    fact_sources: List[RelationshipFactSource] = Field(default_factory=list)
 
 
 class RelationshipContextEntry(BaseModel):
@@ -419,11 +469,36 @@ class RelationshipContextEntry(BaseModel):
     name: str
     relation: Optional[str] = None
     facts: List[str] = Field(default_factory=list)
-    referenceable: bool = False
+    referenceable: StrictBool = False
     consent_to_share: bool = False
     first_observed_at: str
     last_confirmed_at: Optional[str] = None
     evidence: List[RelationshipEvidence] = Field(default_factory=list)
+
+    def can_reference(self) -> bool:
+        from ..memory.referenceability import (
+            must_not_reference, reference_context_is_valid,
+        )
+        if self.referenceable is not True or not self.facts:
+            return False
+        if must_not_reference(f"{self.name}{self.relation or ''}{' '.join(self.facts)}"):
+            return False
+        verified: set[str] = set()
+        for evidence in self.evidence:
+            if evidence.source != "user_conversation" or not evidence.session_id.strip():
+                continue
+            for source in evidence.fact_sources:
+                if source.quote not in self.facts:
+                    continue
+                if (type(source.turn_index) is not int or source.turn_index < 0
+                        or source.turn_index not in evidence.turn_indices
+                        or not reference_context_is_valid(
+                            source.source_context, source.source_context_sha256,
+                            source.source_context_version, source.quote,
+                        )):
+                    return False
+                verified.add(source.quote)
+        return all(fact in verified for fact in self.facts)
 
 
 class PersistentTaskRecord(BaseModel):
@@ -840,7 +915,8 @@ class PersonaProfile(BaseModel):
     alliance: AllianceRecord = Field(default_factory=AllianceRecord)      # 关系账本(跨会话)
     delivery_state: DeliveryModeState = Field(default_factory=DeliveryModeState)  # 交付滞回
     last_interaction_at: Optional[str] = None  # 最近一次互动时间(ISO);久未联系主动触发用
-    risk_events: List[RiskEvent] = Field(default_factory=list)  # 安全账本(跨会话,纵向基线用)
+    risk_events: List[RiskEvent] = Field(default_factory=list)  # 历史/模型分流记录，不证明本人风险
+    safety_screenings: List[SafetyScreeningRecord] = Field(default_factory=list)  # 主体未核实的兜底操作审计
     intervention_history: List[InterventionOutcomeRecord] = Field(default_factory=list)
     longitudinal_baseline: LongitudinalBaseline = Field(
         default_factory=LongitudinalBaseline
@@ -894,8 +970,11 @@ class PersonaProfile(BaseModel):
         return "cold_start"
 
     def referenceable_episodes(self) -> List[EpisodicMemoryEntry]:
-        return [e for e in self.episodic_memory if e.referenceable]
+        return [e for e in self.episodic_memory if e.can_reference()]
+
+    def referenceable_relationships(self) -> List[RelationshipContextEntry]:
+        return [e for e in self.relationship_context if e.can_reference()]
 
     def internal_episodes(self) -> List[EpisodicMemoryEntry]:
         """Aria 内化但不能挑明的。"""
-        return [e for e in self.episodic_memory if not e.referenceable]
+        return [e for e in self.episodic_memory if not e.can_reference()]

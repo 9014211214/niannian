@@ -1,4 +1,5 @@
 """Formal-v6 cost/identity checks with synthetic parents and fake HTTP only."""
+from tests._model_http_stub import stub_model_http
 from decimal import Decimal
 import hashlib
 import json
@@ -20,7 +21,7 @@ from tests.test_e1b_pacing_repair import history4  # noqa: F401
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("unexpected real network"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("unexpected real network"))
     monkeypatch.setattr(socket, "create_connection", lambda *a, **k: pytest.fail("unexpected real network"))
 
 

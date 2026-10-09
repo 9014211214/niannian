@@ -1,4 +1,5 @@
 """Strictly local interrupted-transport fixtures; no provider/API traffic."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 from email.message import Message
 import http.client
@@ -25,7 +26,7 @@ REQ_B = "req-1789480804-abcdefgh12345678"
 @pytest.fixture(autouse=True)
 def forbid_network(monkeypatch):
     monkeypatch.setattr("socket.socket.connect", lambda *_a, **_k: pytest.fail("network forbidden"))
-    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: pytest.fail("network forbidden"))
+    stub_model_http(monkeypatch, lambda *_a, **_k: pytest.fail("network forbidden"))
 
 
 class InterruptedResponse:

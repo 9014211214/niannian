@@ -1,4 +1,5 @@
 """Neutral deterministic fixtures: software mechanics, never model accuracy."""
+from tests._model_http_stub import stub_model_http
 import hashlib
 import json
 from pathlib import Path
@@ -23,7 +24,7 @@ from aria.voice.minimal import MinimalWebApp
 def forbid_network(monkeypatch):
     def fail(*a, **kw):
         raise AssertionError("software fixture attempted network")
-    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    stub_model_http(monkeypatch, fail)
     monkeypatch.setattr(socket, "create_connection", fail)
 
 
@@ -74,7 +75,7 @@ def test_v3_provisional_question_and_route_do_not_override_valid_output(physical
     assert not trace["delivery_guard"]["activated"]
 
 
-@pytest.mark.parametrize("mode,risk,requirement", [("wait", False, "none"), ("ask", True, "exact")])
+@pytest.mark.parametrize("mode,risk,requirement", [("wait", True, "none"), ("ask", True, "exact")])
 def test_wait_and_risk_are_not_relaxed(mode, risk, requirement):
     ctx = context(mode=mode, risk=risk)
     contract = reply_quality_contract(ctx)
@@ -149,7 +150,7 @@ def app_fixture(tmp_path, mode="ask", response=None):
     return app, sid, engine, ctx, online
 
 
-@pytest.mark.parametrize("mode,changed", [("ask", False), ("wait", True)])
+@pytest.mark.parametrize("mode,changed", [("ask", False), ("wait", False)])
 def test_actual_web_source_survives_later_unchanged_guard(tmp_path, mode, changed):
     app, sid, engine, ctx, online = app_fixture(tmp_path, mode)
     try:

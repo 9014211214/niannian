@@ -1,4 +1,5 @@
 """Version/source/state contracts with explicit labels, not an LLM semantic test."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import json
 import urllib.request
@@ -23,7 +24,7 @@ from tests.test_minimal_web import live_fixture
 def no_network(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("Software fixtures cannot call external services")
-    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    stub_model_http(monkeypatch, forbidden)
 
 
 def source():
@@ -189,7 +190,7 @@ def test_explicitly_imported_rule_profile_does_not_enter_live_request(tmp_path):
     assert pref_id not in json.dumps(clients.online.calls, ensure_ascii=False)
     turn = live.state()["turns"][-1]
     assert turn["input_evidence"]["stated_preferences"] == []
-    assert turn["input_evidence"]["stated_preference_protocol_version"] == "2.0"
+    assert turn["input_evidence"]["stated_preference_protocol_version"] == "2.1"
     item = live.state()["profile"]["stated_preferences"][0]
     assert item["status"] == "confirmed" and not item["usable"]
     assert live.preference_action("withdraw", pref_id)["ok"]

@@ -1,4 +1,5 @@
 """Prospective, finite feedback-instruction guard regressions; no model calls."""
+from tests._model_http_stub import stub_model_http
 import pytest
 
 from aria.engine.context import EngineContext
@@ -17,7 +18,7 @@ ORIGINAL_REPLY = (
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_kw: pytest.fail("network forbidden"))
+    stub_model_http(monkeypatch, lambda *_a, **_kw: pytest.fail("network forbidden"))
 
 
 def _guard(text, source="我想自己学，你说怎么开始？"):

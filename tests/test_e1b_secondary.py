@@ -1,4 +1,5 @@
 """Secondary dispatch uses fake HTTP envelopes; no live network or credentials."""
+from tests._model_http_stub import stub_model_http
 import json
 import urllib.request
 
@@ -61,7 +62,7 @@ def stub(monkeypatch, judge, bundle, *, change=None):
         if change:
             change(envelope, row)
         return Response(envelope)
-    monkeypatch.setattr(urllib.request, "urlopen", opened)
+    stub_model_http(monkeypatch, opened)
     return calls
 
 
@@ -69,7 +70,7 @@ def stub(monkeypatch, judge, bundle, *, change=None):
 def deny_network(monkeypatch):
     def fail(*args, **kwargs):
         raise AssertionError("unmocked network is forbidden")
-    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    stub_model_http(monkeypatch, fail)
 
 
 def test_forty_joint_calls_use_existing_guard_and_only_blind_content(tmp_path, monkeypatch):

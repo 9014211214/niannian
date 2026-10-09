@@ -3,6 +3,8 @@
 The token allowance is a conservative planning convention, not a provider
 invoice guarantee. Unknown outcomes remain charged against the allowance and
 halt the run. No function here obtains credentials or refreshes prices.
+The inherited physical transport rejects HTTP redirects in every mode; a
+redirect never creates a second request outside this reservation ledger.
 """
 from __future__ import annotations
 

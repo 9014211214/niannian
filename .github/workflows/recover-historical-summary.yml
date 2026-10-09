@@ -1,0 +1,39 @@
+name: Recover bound historical software summary
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  original-evidence-summary:
+    if: github.repository == '9014211214/niannian'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the reviewed recovery candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Read exact old artifact IDs, validate, and summarize
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python tools/ci_recovery/recover_original.py
+          --download
+          --output "$RUNNER_TEMP/aria-historical/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Save only the new derived summary and receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: historical-summary-source-37651687095-1-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/aria-historical/${{ github.run_id }}-${{ github.run_attempt }}/public/receipt.json
+            ${{ runner.temp }}/aria-historical/${{ github.run_id }}-${{ github.run_attempt }}/public/four-platforms.original-evidence.json
+          if-no-files-found: error
+          retention-days: 30

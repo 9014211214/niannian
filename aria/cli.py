@@ -15,7 +15,7 @@ def web_main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--host", choices=("127.0.0.1", "localhost"), default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--minimal", action="store_true", help="兼容旧命令；当前唯一入口已是最小陪伴 Demo")
-    parser.add_argument("--enable-model-calls", action="store_true", help="显式启用有费用的在线及手动会后模型；默认不读取.env")
+    parser.add_argument("--enable-model-calls", action="store_true", help="显式启用有费用的在线及会后模型；自动整理还须在本人页面开启；默认不读取.env")
     parser.add_argument("--minimal-data-dir", type=Path, default=Path("data/minimal_demo"), help="独立虚构资料目录；本地示意与真实生成分开保存")
     parser.add_argument("--model-max-requests", type=int, help="真实模式必填：三职责累计调用尝试上限，重启不归零")
     parser.add_argument("--model-stop-cost-usd", help="真实模式必填：已观测USD费用停止阈值；不是账单硬上限")
@@ -68,7 +68,7 @@ def _minimal_main(args) -> int:
     server = make_minimal_server(app, args.host, args.port)
     print(app.state()["notice"])
     print(f"最小体验入口：http://{args.host}:{server.server_port}")
-    print("仅虚构角色资料；关闭/闲置只封存。会后模型须明确点击整理。护理通知仅本地模拟。")
+    print("仅虚构角色资料；封存后可手动整理，或由本人在页面明确开启自动整理。停止服务不会启动整理。护理通知仅本地模拟。")
     print(f"护理员后台：http://{args.host}:{server.server_port}/care（需先用--care-setup-admin创建账号）")
     try:
         server.serve_forever()

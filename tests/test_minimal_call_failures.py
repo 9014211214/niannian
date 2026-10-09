@@ -1,4 +1,5 @@
 """Separate completed HTTP bodies from post-receipt content failures."""
+from tests._model_http_stub import stub_model_http
 from decimal import Decimal
 import http.client
 import json
@@ -14,7 +15,7 @@ from tests.test_reserved_calls import client, policy, receipt, call, stub
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("unstubbed network"))
+    stub_model_http(monkeypatch, lambda *a, **k: pytest.fail("unstubbed network"))
 
 
 class _InnerJSONGuard(ReservedCallGuard):
@@ -82,7 +83,7 @@ def test_real_outer_transport_failures_remain_interrupted_unknown_and_no_retry(t
     def receive(*args, **kwargs):
         calls.append(1)
         return Response()
-    monkeypatch.setattr(urllib.request, "urlopen", receive)
+    stub_model_http(monkeypatch, receive)
     g = make_guard(tmp_path, _InnerJSONGuard)
     c = client(); g.attach(c)
     with pytest.raises(MinimalCallStopped):

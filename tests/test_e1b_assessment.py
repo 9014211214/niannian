@@ -1,4 +1,5 @@
 """Read-only assessment rejects incomplete/tampered evidence without billing."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 from decimal import Decimal
 import json
@@ -15,7 +16,7 @@ from scripts import e1b_evaluation as evaluation
 def no_network(monkeypatch):
     def blocked(*args, **kwargs):
         raise AssertionError("assessment must not contact a model")
-    monkeypatch.setattr(urllib.request, "urlopen", blocked)
+    stub_model_http(monkeypatch, blocked)
 
 
 def ledger_fixture(tmp_path):

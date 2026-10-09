@@ -1,4 +1,5 @@
 """Independent fee-boundary review: no live model or credentials."""
+from tests._model_http_stub import stub_model_http
 from copy import deepcopy
 import json
 import urllib.request
@@ -30,7 +31,7 @@ def raw_response(monkeypatch, raw):
         def read(self, size):
             reads.append(size)
             return raw[:size]
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: Response())
+    stub_model_http(monkeypatch, lambda *_a, **_k: Response())
     return reads
 
 

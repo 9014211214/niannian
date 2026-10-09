@@ -14,8 +14,11 @@ requests; the page token does not authenticate an elder or caregiver.
 Caregiver setup uses private password prompts, explicit elder assignments, salted
 PBKDF2 password hashes, hashed session tokens, bounded failed logins, and HttpOnly,
 SameSite=Strict cookies. The care API checks the authenticated caregiver's elder
-scope. These controls do not provide institutional identity, TLS, or production
-operations. The companion page remains bound to one fictional elder.
+scope and rejects caregiver confirmation, refusal, or postponement of an elder's
+reminder response. Assigned caregivers can manage reminders and follow-up without
+recording those actions as the elder's response. These controls do not provide
+institutional identity, TLS, or production operations. The companion page remains
+bound to one fictional elder.
 
 ## Stored data
 
@@ -24,6 +27,12 @@ subdirectories. Profile and replay records contain fictional conversation text.
 The original-conversation queue is bounded to eight jobs and 120 turns / 60,000
 characters per session, with a 24-hour retention policy. Replay records remain until
 explicit deletion; queue expiry does not promise deletion of every transcript.
+
+Active recall of a saved episode or relationship fact requires its complete,
+verified owner-source context. Older records with incomplete context remain stored
+and readable, but cannot authorize active reference. Reference permission fields
+accept only booleans; an invalid legacy field fails profile loading and preserves
+the original file for repair rather than silently deleting it.
 
 With the `secure` extra and `ARIA_PROFILE_KEY`, the profile envelope and minimal
 replay file can be encrypted. Without them, these files are plaintext.
@@ -63,8 +72,16 @@ is not secure disk erasure.
 Default preview reads no `.env` and activates no model or media service. Explicit
 `--enable-model-calls` requires request and observed-cost limits before credentials
 are loaded. Online, memory, and reflection calls share a persistent ledger: intent
-is saved before sending; unknown cost/result, invalid responses, or failed persistence
-stop later calls. Refresh, restart, and clearing chat do not reset that ledger.
+is saved before sending. Product output failures retain the failed result and use
+a labelled fallback; three consecutive failed operations pause future calls until
+the owner explicitly resumes. Resume does not resend old requests or restore budget.
+Unknown cost/result, failed persistence, or a budget, routing or privacy violation
+remains a hard stop that the recovery button cannot clear. Verified no-content
+429/5xx errors with known cost may receive at most two additional physical attempts,
+each reserved and recorded. Default physical requests reject HTTP redirects rather
+than send credentials or create an unrecorded request at another address. The
+[local guide](docs/MINIMAL_DEMO_LOCAL.md#显式启用文字模型) describes the complete conditions.
+Refresh, restart, and clearing chat do not reset that ledger.
 Existing live conversations without a ledger cannot silently start accounting at zero.
 
 The ledger stores bounded IDs, role/configuration bindings, request digests, and

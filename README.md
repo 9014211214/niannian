@@ -4,38 +4,32 @@
 
 Aria is a local elder-companionship prototype: understand how someone wants to be
 approached, keep the evidence behind that understanding, and respect their choices.
-It combines continuous conversation, revisable person hypotheses, and a small care
-workflow. Personality frameworks guide communication; they are not diagnoses.
+It combines conversation, revisable person hypotheses, and a small local care
+workflow. **Model effectiveness has not passed acceptance.** Known model errors
+include false safety alarms and incomplete task replies. This is not a production
+care service; notifications are simulated. See the [evidence boundaries](docs/EVIDENCE.md).
 
-Model effectiveness has **not passed acceptance**. In the completed E1b-R run,
-all 14 proposed communication preferences were rejected before confirmation, so
-the intended preference-use effect was not measured. See the
-[fixed result and diagnosis](docs/E1BR_RESULTS_2026_10_05.md). Later repairs need
-their own model evidence; software tests do not establish a benefit to elders.
+Three design choices guide the prototype:
 
-The first E1c run dispatched 124 of 1,056 planned positions and completed one of
-12 cases before a response violated the output schema. It remains **not evaluable**;
-the short-plan prompt repair has software checks, not proven model reliability.
-See the [evidence boundaries](docs/EVIDENCE.md) for what these results can support.
+- Keep facts, owner-confirmed communication preferences, and inferred hypotheses separate.
+- Preserve sources, scope, corrections and counterevidence; personality frameworks
+  guide communication and are not diagnoses or permanent labels.
+- Require actual capability, permission and receipts for actions. A conversation,
+  preference or model risk label cannot grant care authority.
 
-The [design audit repairs](docs/DESIGN_REPAIR_2026_10_06.md) cover preference admission,
-cognitive privacy, same-call safety checks, call recovery and pre-send reservations.
-The subsequent E1c-v2 run completed generation and first model scoring, and failed
-its effect gates. The later 24-case check also failed its task and reply gates.
-Three real-model story repeats are complete, but supported person hypotheses were
-not injected, so they do not establish a personality-understanding benefit. See the
-[versioned validation results](docs/VALIDATION_RESULTS_2026_10_07.md) for failures,
-exposure, subsequent repairs, and the separate repair check.
+## What you can try
 
-A later 24-case, two-arm check did **not qualify the 1.8 prompt candidate for
-integration**. It stopped after 30 replies and one rate-limited request; 17 planned
-positions remain unissued. Both effect gates are not evaluable because exposure
-was below 80%, while the separate protection and fixed-denominator format gates
-failed. All 30 received replies passed the output schema. See the
-[fixed two-arm result](docs/VALIDATION_RESULTS_2026_10_07.md#8-2026-10-08-另版双臂检查). The prompt candidate
-and an optional reflection-format candidate remain isolated from the product.
-The separate response-source bookkeeping repair is integrated after software and
-independent checks; it does not inherit or change these model-effect results.
+Use a fictional person and explore the local workflow. These features are
+implemented; the table does not claim real-world effectiveness.
+
+| Experience | Available locally | What remains unproven or limited |
+| --- | --- | --- |
+| Conversation | Captions, editable input, saved playback, optional real text-model replies | Task and reply quality have failed checks on frozen versions. Default replies are placeholders. |
+| Facts and communication preferences | Sources, corrections, owner confirmation and withdrawal; explicitly started post-session processing | Preference use has been observed after repairs; benefit and consistent quality remain unproven. |
+| Person hypotheses | Revisable candidates, evidence and scope, with gates before use | Earlier E1c-v2 and three-session checks did not observe their actual injection or benefit. Long-term formation and benefit are unverified. |
+| Safety | Keyword fallback plus a safety signal in the same online model call | False alarms have replaced ordinary replies; broader risk recognition has not passed dedicated acceptance. |
+| Care | Caregiver scope, reminders, revocable consent, receipt states and follow-up | The notification channel is local simulation; no real recipient delivery or care outcome is established. |
+| Daily-change observations | Off by default; owner can enable, inspect, delete or disable quoted records | No diagnosis; dedicated real-model effectiveness checks are incomplete. |
 
 ## Run locally
 
@@ -56,8 +50,10 @@ python3 -m venv .venv
 ```
 
 Open the loopback address printed in the terminal. The default preview uses clearly
-labelled placeholder replies, reads no `.env`, and makes no model or notification
-calls. Use fictional inputs. Installing dependencies may require internet access.
+labelled placeholder replies, reads no `.env`, makes no model calls, and sends no
+real notifications. Local simulated care records can still advance while the
+service runs. Use fictional inputs. Installing dependencies may require internet
+access.
 
 For a caregiver account, run the same command with `--care-setup-admin caregiver`.
 Set its password in the private terminal prompts; there is no default password.
@@ -70,36 +66,23 @@ lists its three inputs and commands. Neither a saved key nor a policy file enabl
 calls by itself. The guard reserves estimated costs before sending and retains
 unknown results; this is not a provider billing guarantee.
 
-## First-version scope
-
-- Several conversations with the same fictional person, visible fact/person
-  distinctions, sources, corrections, and explicitly started post-session processing.
-- Owner-confirmed communication preferences, kept separate from inferred hypotheses,
-  with withdrawal and a saved account of the inputs used for each reply.
-- A lightweight stage, verbatim captions, editable input, and saved playback.
-- Caregiver login and elder scope, dated one-off/daily reminders, responses,
-  revocable consent, a simulated notification ledger, and follow-up tasks.
-- Optional, explicitly enabled text-model calls with persistent request/cost stops.
-- Optional per-turn external emotion readings, labelled as fallible hints. No
-  reading means no extra emotion prompt; unknown never means calm.
-- Memory and daily-change observations, off by default and enabled by the fictional
-  owner. Original quotes can be inspected/deleted; this does not diagnose illness.
+## Model mode and boundaries
 
 The minimal live client uses `v3` with `mode_v1`: the same online call includes a
 safety signal, including on simple turns. Earlier `v1/v2` experiments retain their
 original contracts; `profile_v1` remains experimental. Keyword safety checks stay
-in place. A model signal grants no notification or medical authority, and the new
-semantic path has been checked with real models on frozen versions, with failed
-effect gates. Later layout and receipt-state repairs have software checks only.
-The proposed consented
-message experience and real-model short film have not been completed. See the
-progress page for version-specific implementation and acceptance results.
+in place. A model signal grants no notification or medical authority. Software
+checks, real-model checks and acceptance belong to their tested versions; later
+repairs and isolated candidates do not inherit earlier model conclusions.
+Post-session processing defaults to manual. The owner can explicitly enable automatic processing for newly sealed sessions, with a daily session limit and the same cost guard. Model-reviewed preference proposals can be restated on the owner page and answered in the next conversation turn; code checks the delivered question and saves before confirming. An eligible owner can also choose to discuss change records for one next request without a fabricated emotion reading. These are local engineering paths; model accuracy and timing remain unverified. The owner can separately select one complete saved utterance from the active session, review its recipient and local channel, approve it, and then send it to a local simulated inbox. The preview expires after five minutes; refresh does not resend, and uncertain attempts stop further sharing. Real external delivery and the real-model short film remain incomplete.
 
 The first version uses a simulated notification channel. Camera, acoustic emotion,
 ASR/TTS, Omni, full-duplex voice, hardware, other product scenes, and the old large
 research platform are outside this version. This is not a production care service.
 The external emotion interface does not start a sensor or emotion model. Synthetic
 readings require a separate Python experiment namespace and are visibly labelled.
+Optional readings are fallible hints; missing readings add no emotion prompt,
+and unknown never means calm. Each reply keeps a record of its actual input basis.
 The local demo token lets its holder act as the fictional owner; this is not identity
 verification for a real elder. Caregiver permissions do not grant those owner controls.
 
@@ -117,13 +100,25 @@ separate claims. The only current status and next-work list is
 [PROGRESS](docs/PROGRESS.md). Historical research remains preserved in a private
 archive; it is not a prerequisite for running this product.
 
-E1 generated 204 responses to authored fictional scenarios. Uncalibrated Codex
-judgments failed the core improvement gate, and measured experimental overhead
-failed the latency gates. These results do not establish benefits for real elders
-or personality learning. Optional human review
-could calibrate these judgments; running or developing the prototype does not
-require recruiting elders. CPED preparation stopped at a local feasibility gate;
-no real E2 was run. Later product changes do not inherit E1's model conclusions.
+Versioned negative results remain available:
+
+- [E1b-R](docs/E1BR_RESULTS_2026_10_05.md): all 14 communication-preference
+  candidates were rejected before confirmation; the intended use effect was not measured.
+- [E1c-v2](docs/E1CV2_RESULTS_2026_10_07.md) and the
+  [subsequent validation checks](docs/VALIDATION_RESULTS_2026_10_07.md): effect gates
+  failed or were not evaluable. Earlier three-session checks recorded no person-hypothesis
+  injection; this does not establish a fixed number of conversations needed for formation.
+- [The 24-case two-arm check](docs/VALIDATION_RESULTS_2026_10_07.md#8-2026-10-08-另版双臂检查):
+  30 replies received, one rate-limited request, 17 positions unissued. All received
+  replies met the output schema; low exposure left both effect gates not evaluable,
+  and separate protection and fixed-denominator format gates failed. The 1.8 prompt
+  and reflection-format candidates remain isolated from the product.
+- [Evidence and earlier research](docs/EVIDENCE.md): incomplete runs and the failed
+  original E1 improvement/latency gates are preserved. CPED stopped at local preparation;
+  no real E2 was run. Optional human review is not required to run or develop the prototype.
+
+Current repairs and new isolated candidates are tracked only in the progress page.
+Software tests and simulated workflows do not establish benefits for real elders.
 
 ## Licence
 

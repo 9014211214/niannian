@@ -1,5 +1,6 @@
 """Minimal runtime assembly checks; all outputs are local software fixtures."""
 from __future__ import annotations
+from tests._model_http_stub import stub_model_http
 
 from copy import deepcopy
 import urllib.error
@@ -43,7 +44,7 @@ def test_preview_ignores_keys_and_factories_and_does_not_learn(tmp_path, monkeyp
     monkeypatch.setenv("ARIA_OMNI_REALTIME_PROVIDER", "bailian")
     monkeypatch.setattr(runtime, "openrouter_api_key", _forbid_call)
     monkeypatch.setattr(runtime, "OpenRouterLLMClient", _forbid_call)
-    monkeypatch.setattr(urllib.request, "urlopen", _forbid_call)
+    stub_model_http(monkeypatch, _forbid_call)
     clients = runtime.create_minimal_clients()
     assert not clients.model_calls_enabled
     assert all(isinstance(client, MockLLMClient) for client in (
@@ -80,7 +81,7 @@ def test_permission_flag_cannot_be_accidentally_truthy(value):
 
 def test_minimal_scene_keeps_safety_without_legacy_care_mutation(monkeypatch):
     monkeypatch.setenv("ARIA_CARE_WEBHOOK_URL", "https://example.invalid/care")
-    monkeypatch.setattr(urllib.request, "urlopen", _forbid_call)
+    stub_model_http(monkeypatch, _forbid_call)
     persona = PersonaProfile(user_id="local-care")
     engine = runtime.create_minimal_engine(get_scene("companion_elder"), persona)
     ctx = EngineContext(user_id=persona.user_id, scene_id="companion_elder")
@@ -105,7 +106,7 @@ def test_explicit_live_setup_requires_key_and_never_silently_uses_mock():
 
 
 def test_live_setup_is_inert_and_retries_and_fallbacks_stay_disabled(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", _forbid_call)
+    stub_model_http(monkeypatch, _forbid_call)
     monkeypatch.setenv("OPENROUTER_FALLBACK_MODELS", "some/other-model")
     monkeypatch.setenv("ARIA_LLM_MAX_RETRIES", "9")
     monkeypatch.setenv("OPENROUTER_ONLINE_FAST_MODEL", "unrequested/override")
@@ -135,7 +136,7 @@ def test_live_failure_attempts_once_and_does_not_substitute_story(monkeypatch):
         attempts.append(request)
         raise urllib.error.URLError("local fixture failure")
 
-    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    stub_model_http(monkeypatch, fail)
     clients = runtime.create_minimal_clients(
         model_calls_enabled=True, api_key="not-a-real-key",
     )
@@ -153,7 +154,7 @@ def test_live_failure_attempts_once_and_does_not_substitute_story(monkeypatch):
 
 
 def test_online_and_sealing_do_not_call_offline_roles(tmp_path, monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", _forbid_call)
+    stub_model_http(monkeypatch, _forbid_call)
     fast = _FixtureLLM("本地软件夹具回复，不是模型效果。")
     memory = _FixtureLLM('{"episodes":[],"relationships":[],"cognitive_privacy":[]}')
     reflection = _FixtureLLM('{"protocol_version":"2.0","reviews":[],"changes":[]}')

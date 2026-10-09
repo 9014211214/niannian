@@ -16,7 +16,7 @@ from ..model.persona import (
     PreferenceUIConfirmation, PreferenceSemanticReview, StatedPreference,
 )
 
-PREFERENCE_PROTOCOL_VERSION = "2.0"
+PREFERENCE_PROTOCOL_VERSION = "2.1"
 
 
 def _semantic_eligible(review: PreferenceSemanticReview | None) -> bool:

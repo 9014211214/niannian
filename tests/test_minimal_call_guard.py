@@ -1,5 +1,6 @@
 """Persistent live-demo call limits, using synthetic transport only."""
 from __future__ import annotations
+from tests._model_http_stub import stub_model_http
 
 from contextlib import contextmanager
 from decimal import Decimal
@@ -45,7 +46,7 @@ class _Response:
 def _deny_unstubbed_transport(monkeypatch):
     def denied(*args, **kwargs):
         raise AssertionError("a call-guard test attempted unstubbed network access")
-    monkeypatch.setattr(urllib.request, "urlopen", denied)
+    stub_model_http(monkeypatch, denied)
 
 
 def _client(role="online_fast", *, retries=0, fallbacks=None, model="fixture/model"):
@@ -82,7 +83,7 @@ def _stub(monkeypatch, *responses):
             raise value
         return value
 
-    monkeypatch.setattr(urllib.request, "urlopen", open_response)
+    stub_model_http(monkeypatch, open_response)
     return calls
 
 
@@ -279,7 +280,7 @@ def test_intent_is_persisted_before_transport_and_crash_blocks_restart(tmp_path,
             assert state["attempts"][0]["status"] == "pending"
             raise KeyboardInterrupt("synthetic abrupt stop")
 
-        monkeypatch.setattr(urllib.request, "urlopen", interrupt)
+        stub_model_http(monkeypatch, interrupt)
         with pytest.raises(KeyboardInterrupt):
             _call(guard, client)
     with _guard(tmp_path) as reopened:
@@ -347,7 +348,7 @@ def test_second_guard_sees_committed_pending_before_network(tmp_path, monkeypatc
             assert second_client.network_request_count == 0
             return _Response({"cost": 0.01})
 
-        monkeypatch.setattr(urllib.request, "urlopen", first_response)
+        stub_model_http(monkeypatch, first_response)
         _call(first, first_client, "first-turn")
         assert len(requests) == 1
         for state in (first.snapshot(), second.snapshot()):
