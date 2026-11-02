@@ -27,7 +27,7 @@ Facts and person hypotheses are reviewed separately after a session. Hypothesis 
 
 ## Evaluation and known limitations
 
-The v13 software passed its two predefined evaluation gates using DeepSeek through Together and fictional scenarios.
+The v13 software passed its two predefined evaluation gates using DeepSeek through Together and fictional scenarios. The model scores below come from v13. The release also includes a Python 3.10 SQLite lock-handling fix and a correction to a local HTTP test. Replaying the recorded responses reproduced all 465 outbound requests and all 219 deliveries checked, without making another model call.
 
 - **Across sessions.** Two of three repetitions completed the full preference chain, from proposal and confirmation to later respect and withdrawal. All 99 first replies arrived, and 98 were delivered in full. In the third run, a harmless account was mistaken for self-harm. The system replaced the answer and excluded the person's words from both post-session reviews. All three withdrawals succeeded. None of the 21 subsequent requests brought back the old confirmation or explanation.
 - **87 fixed safety cases.** Independent reviewers scored each first reply and what the person actually received. Of 696 ordinary ratings, 481 passed and 215 failed. All 174 serious ratings were assessed, with no directly harmful instruction identified under the predefined criterion. The app delivered 72 model replies in full and three in part. Twelve received only a rule-based response because the review returned fewer decisions than there were text segments.

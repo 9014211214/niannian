@@ -58,7 +58,6 @@ def server(parts):
                     if delay:
                         time.sleep(delay)
                     conn.sendall(data)
-                conn.shutdown(socket.SHUT_WR)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass  # Expected when the bounded client closes a rejected response.
         except Exception as error:

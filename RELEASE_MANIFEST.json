@@ -41,14 +41,14 @@
       "sha256": "5a8b41dbe67d67ac24f57da5a9b3d072554166ebe181153d62c065c520846359"
     },
     {
-      "bytes": 6945,
+      "bytes": 7224,
       "path": "README.md",
-      "sha256": "613376f97e12100e632e4b111acc471be6a3561ecfcbdb1c5ce72c24f40f0e48"
+      "sha256": "33bf40536dd5f2e867b2c47a2e3dc7bafe94ac0ddf4e58370462637d41abf769"
     },
     {
-      "bytes": 5677,
+      "bytes": 5919,
       "path": "README.zh.md",
-      "sha256": "d3fd98ee11ab8460e498e994aae4a540beed0d70943f9621528aad309f791987"
+      "sha256": "981b8380af99baaac32c2d18f1418652119bb94b04560a9a9fda38aa23fae2a3"
     },
     {
       "bytes": 8250,
@@ -1001,9 +1001,9 @@
       "sha256": "63c03c72e5fd44493d3779f31fb9257b9cef1c7b5b92f69f163d427522401bad"
     },
     {
-      "bytes": 19846,
+      "bytes": 20195,
       "path": "aria/voice/held_input.py",
-      "sha256": "a2a26a63bb08ee113d032d34d73b6eafb3cd492b996da2aa9cc8136f199d0c32"
+      "sha256": "3c45db45f5277a4199191be88f9b917c3eb16c21beeadb1bedd593324ebeb5b5"
     },
     {
       "bytes": 113300,
@@ -1191,9 +1191,9 @@
       "sha256": "9d2ab2361ea276f0c560ab9064eab18e4ae53a54d06b9181a6c0f9716e3c0d11"
     },
     {
-      "bytes": 2028,
+      "bytes": 2271,
       "path": "docs/EVIDENCE.md",
-      "sha256": "741bef7e69223099c2be38d86f5318196da08185347e962bc86f80fb7c75da7d"
+      "sha256": "1ac1380d2bc43f38415f12749775d6fa7340c94c7d9ee270980f2b874a779b7c"
     },
     {
       "bytes": 11326,
@@ -1236,9 +1236,9 @@
       "sha256": "87760dcafdd1937341dff55dabc18e0a6dd2f4bd99722dd374db286282f12b99"
     },
     {
-      "bytes": 1520,
+      "bytes": 1763,
       "path": "docs/PROGRESS.md",
-      "sha256": "01efe590ca4f3e475271c1206693254f3de03c1c8d5890da51bfd42b4a904817"
+      "sha256": "2e2fa4ed313311630edc7b789e9da5d869b612c45e8384371197c683d8a46859"
     },
     {
       "bytes": 10304,
@@ -2001,9 +2001,9 @@
       "sha256": "50a0836f178ce52a4084b9572331b0f5530e0c9d888ac0eb3db64f082241f31f"
     },
     {
-      "bytes": 10033,
+      "bytes": 9986,
       "path": "tests/test_bounded_response_body.py",
-      "sha256": "a52985aa4464b361000acde55fbf523544095ec8a1c1d4bd7c3ea1816b9943e0"
+      "sha256": "409b6805531694996f9517f5e9e466ca126197c9e6f1a27d274ee223e9f5de26"
     },
     {
       "bytes": 6650,
@@ -2736,9 +2736,9 @@
       "sha256": "d641e42584657d3dc9b6bbd0f5962847e3465c54c5e54bdda8608847eaf3e1c0"
     },
     {
-      "bytes": 28448,
+      "bytes": 29707,
       "path": "tests/test_minimal_offline_background.py",
-      "sha256": "757a67c19a153c0dd06b02ff3ccdf8da7f1afe0dc656b2f59a514c6d4507e205"
+      "sha256": "77ae7f530e80e51202ac30633a96f85f75c7ea7b9cd3da4885c9cfa59097c7cc"
     },
     {
       "bytes": 20689,

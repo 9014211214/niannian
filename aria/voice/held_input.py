@@ -11,6 +11,16 @@ from ..engine.policy.max_release.validation_support import require, digest_json
 _ACTION = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
+def _sqlite_read_locked(error):
+    if hasattr(sqlite3, "SQLITE_BUSY"):
+        return getattr(error, "sqlite_errorcode", -1) & 0xff in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+    # Python 3.10 exposes only SQLite's error message. A table or schema
+    # lock can include its name after the colon.
+    message = str(error)
+    return message == "database is locked" or message.partition(": ")[0] in (
+        "database table is locked", "database schema is locked")
+
+
 def business(app):
     profile=app.store.load(app._settled_owner).model_dump(mode="json")
     sharing=deepcopy(app.sharing_state());sharing.pop("writable",None)
@@ -98,7 +108,7 @@ class HeldInputAppMixin:
             if proof["state"] in {"prepared","accepted"}:
                 try:self._held_current_record(proof, read_only=read_only)
                 except sqlite3.OperationalError as error:
-                    if read_only and getattr(error, "sqlite_errorcode", -1) & 0xff in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+                    if read_only and _sqlite_read_locked(error):
                         raise
                     self._halt_held_models()
                     return set()
@@ -149,7 +159,7 @@ class HeldInputAppMixin:
                 "action":"continue_new_input","response_retry_allowed":False,
                 "notice":"这条请求没有收到回复，费用仍不确定。保留全部费用预留；本人确认后仅可提交新的输入，不重发这条请求。"}
         except sqlite3.OperationalError as error:
-            if getattr(error, "sqlite_errorcode", -1) & 0xff in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+            if _sqlite_read_locked(error):
                 # A concurrent commit is not proof that a source changed. Show
                 # unknown without granting consent or caching a valid result.
                 return {"available":False,"requires_review":True,

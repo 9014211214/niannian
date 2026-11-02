@@ -313,7 +313,8 @@ def release_app(tmp_path, monkeypatch, *, maximum=40, unknown_memory_fee=False, 
     sid = app.start()["state"]["session_id"]
     if first_settled_failure:
         failed = app.submit("格式拒绝软件输入。", "settled-before-review", sid)
-        assert failed["settled_validation_failure"] and failed["continue_next_input"]
+        assert failed.get("settled_validation_failure") is True and failed.get("continue_next_input") is True, (
+            sorted(failed), failed.get("state", {}).get("model_usage", {}).get("stop_reason"), len(calls))
     for index in range(3):
         result = app.submit("中性软件输入。", "old-" + str(index), sid)
         assert result["ok"], result
@@ -527,6 +528,27 @@ def test_settled_history_does_not_block_state_start_or_immediate_waiting_protect
     assert results[0]["ok"], results
     assert app._profile().stated_preferences[0].status == "withdrawn"
     app.close()
+
+
+def test_held_read_distinguishes_sqlite_lock_from_storage_fault(tmp_path):
+    import sqlite3
+    from contextlib import closing
+    from aria.voice.held_input import _sqlite_read_locked
+
+    db = tmp_path / "locks.sqlite"
+    with closing(sqlite3.connect(db)) as writer, closing(sqlite3.connect(db, timeout=0)) as reader:
+        writer.execute("CREATE TABLE receipts (id INTEGER)")
+        writer.execute("BEGIN EXCLUSIVE")
+        with pytest.raises(sqlite3.OperationalError) as locked:
+            reader.execute("SELECT * FROM receipts")
+        assert _sqlite_read_locked(locked.value)
+        writer.rollback()
+        with pytest.raises(sqlite3.OperationalError) as missing:
+            reader.execute("SELECT * FROM missing_table")
+        assert not _sqlite_read_locked(missing.value)
+    for message in ("database is locked", "database table is locked: receipts", "database schema is locked: main"):
+        assert _sqlite_read_locked(sqlite3.OperationalError(message)) is (not hasattr(sqlite3, "SQLITE_BUSY"))
+    assert not _sqlite_read_locked(sqlite3.OperationalError("disk I/O error"))
 
 
 @pytest.mark.parametrize("damage", ["disposition", "public_output", "ledger_row", "ledger_identity", "ledger_read", "ledger_locked", "run"])
