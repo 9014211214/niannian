@@ -85,3 +85,4 @@ include aria/bench/cases/fixed_safety_v1/protocol_v2.json
 # Offline CI smoke and authored regression fixtures.
 include scripts/smoke_demo.py scripts/smoke_fixture.py
 include tests/fixtures/fs013-first-visible.json tests/fixtures/online-v7-empty-first-visible.json tests/fixtures/online-v7-mismatch-first-visible.json
+include .gitattributes

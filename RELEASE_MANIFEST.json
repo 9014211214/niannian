@@ -6,6 +6,11 @@
       "sha256": "c83555cc8fe89b7498a93053a8b03d1a7d883f0248bed8972c2c22b944b0fad3"
     },
     {
+      "bytes": 19,
+      "path": ".gitattributes",
+      "sha256": "d60f352d0db1404c70afb4bb8b2ca3fd1c610572aa40720e8a0b7baa7885418c"
+    },
+    {
       "bytes": 7358,
       "path": ".github/workflows/test.yml",
       "sha256": "8e1d7f16cab6ccb60e01366fe67b75f757908a424007f69508b509d346efe7de"
@@ -31,9 +36,9 @@
       "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
     },
     {
-      "bytes": 5519,
+      "bytes": 5542,
       "path": "MANIFEST.in",
-      "sha256": "904e365501c8d6dc8e4ed38af5b6537f62d9b50d4d187cece8878a951efaa54c"
+      "sha256": "5a8b41dbe67d67ac24f57da5a9b3d072554166ebe181153d62c065c520846359"
     },
     {
       "bytes": 6945,
@@ -1461,9 +1466,9 @@
       "sha256": "2eb06951ed495482955e038ec05162591fd9b7bb65ca9dd0bda863a657deea27"
     },
     {
-      "bytes": 41558,
+      "bytes": 41580,
       "path": "scripts/build_minimal_release.py",
-      "sha256": "8002200eee952371011148e76e1ccd6e74a293ab72b65a0f3794a9143ff3fb2d"
+      "sha256": "53fed7f0979e73ee53bacbb0901b183b3c6262c5b4079273ea4bd829b1775cdf"
     },
     {
       "bytes": 4275,

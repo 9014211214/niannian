@@ -151,6 +151,7 @@ V16_POLICY_FILES = frozenset({
 V16_REQUIRED_FILES = V16_POLICY_FILES | {"aria/bench/safety_regression.py"}
 V17_POLICY_FILES = frozenset({"docs/ASR_LOCAL.md"})
 CURRENT_SOURCE_FILES = frozenset({
+    ".gitattributes",
     "scripts/run_story.py", "scripts/run_safety_set.py", "scripts/capture_utf8_process.py",
     "scripts/smoke_demo.py", "scripts/smoke_fixture.py",
     "tests/fixtures/fs013-first-visible.json", "tests/fixtures/online-v7-empty-first-visible.json",
