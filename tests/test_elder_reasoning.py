@@ -504,6 +504,28 @@ def test_semantic_candidates_cover_dialect_without_keyword_dependency():
     } >= {"俺也去凑啥热闹", "坐那儿插不上话"}
 
 
+@pytest.mark.parametrize("text", ["老伴在旁边看书。", "他说一个人出门，我帮他拿书。", "我不想聊天气，先说清修理步骤。"])
+def test_v7_ordinary_vocabulary_cannot_create_state_hypotheses(text):
+    ctx = EngineContext(user_id="fixture", scene_id="companion_elder")
+    ctx.working_memory["_online_decision_version"] = "online_turn_decision_v7"
+    reasoner = ElderStateReasoner()
+    reasoner.update(ctx, None, text, collect_evidence(text, ctx.emotion, turn_index=0))
+    assert ctx.reasoning.hypotheses == []
+
+
+def test_v7_grounded_semantic_support_and_counter_survive_without_lexical_classifier():
+    from aria.interfaces.reasoning import ObservationEvidence
+    text = "我不是在说别人，心里空落落的。"
+    support = ObservationEvidence(id="semantic-support", modality="semantic", signal="grief_or_transition",
+                                  value=text, confidence=.9, source="online_single_pass_decision", turn_index=0)
+    counter = ObservationEvidence(id="semantic-counter", modality="semantic", signal="counter:grief_or_transition",
+                                  value=text, confidence=.95, source="online_single_pass_decision", turn_index=0)
+    reasoner = ElderStateReasoner()
+    result = reasoner._infer_hypotheses([support], None, text, lexical_fallback=False)
+    assert [item.id for item in result] == ["grief_or_transition"]
+    assert reasoner._infer_hypotheses([support, counter], None, text, lexical_fallback=False) == []
+
+
 def test_grounded_counterevidence_suppresses_keyword_false_positive():
     state_llm = _StateLLM(
         '{"response":"那就先把快递等到，下午活动室见。",'
@@ -792,6 +814,67 @@ def test_current_explicit_request_reopens_cooldown_without_erasing_history():
     assert outcome["adaptation_state"] == "cooldown"
     assert outcome["score_adjustment"] == 0.0
     assert outcome["current_request_override"] is True
+
+
+@pytest.mark.parametrize("words,selection", [
+    ("我想联系女儿聊聊。", "human_reconnection"),
+    ("他问我是不是想联系女儿，我说今天先不谈。", "quiet_companionship"),
+])
+def test_v7_retains_cooldown_evidence_and_same_call_decides_current_request(words, selection):
+    from copy import deepcopy
+    from aria.engine.policy import PolicyEngine
+    from aria.interfaces.reasoning import ObservationEvidence
+    from tests.test_observation_delivery_v3 import V7Client
+    persona = _cooled_human_connection_persona("v7-current-request")
+    original = deepcopy(persona.model_dump())
+    ctx = EngineContext(user_id=persona.user_id, scene_id="companion_elder")
+    ctx.working_memory["_online_decision_version"] = "online_turn_decision_v7"
+    evidence = ObservationEvidence(id="bound-semantic", modality="semantic", signal="social_disconnection",
+                                   value=words, confidence=.8, source="online_single_pass_decision", turn_index=0)
+    reasoner = ElderStateReasoner()
+    reasoner.update(ctx, persona, words, [evidence])
+    basis = ctx.working_memory["personality_decision"]
+    assert basis["current_request_override_routes"] == []
+    assert basis["verified_cooldown_routes"] == ["human_reconnection"]
+    assert "本人本轮没有重新提出" not in ctx.reasoning.observation_plan.reason
+    raw = json.dumps({"response_segments": [{"text": "按当前意愿回应。"}], "safety_concern": "none",
+                      "selected_intervention_id": selection}, ensure_ascii=False)
+    client = V7Client(raw)
+    response = PolicyEngine(fast_llm=client).respond(ctx, get_scene("companion_elder"), words, persona)
+    assert response == "按当前意愿回应。" and len(client.calls) == 1
+    assert words in str(client.calls[0])
+    assert "历史冷却不证明当前意愿" in client.calls[0][0]["content"]
+    assert ctx.reasoning.selected.id == selection
+    assert reasoner.record_intervention_delivery(ctx, response).id == selection
+    assert persona.model_dump() == original
+
+
+def test_v7_person_route_uses_scoped_dimensions_not_words_inside_claims():
+    from aria.interfaces.reasoning import WorkingHypothesis
+    reasoner = ElderStateReasoner()
+    states = [WorkingHypothesis(id="grief_or_transition", label="fixture", category="fixture",
+                               confidence=.5)]
+    persona = PersonaProfile(user_id="route-fixture", person_hypotheses=[PersonHypothesis(
+        id="fixture", framework="response", claim="不想被催着回忆、纪念或讨论离别",
+        scope_tags=["grief_or_transition"], status="working", confidence=.8,
+        first_observed_at="2026-07-01T09:00:00")])
+    def score():
+        return {item.id: item.score for item in reasoner._build_candidates(
+            states, persona, lexical_fallback=False)}["meaning_oriented_companionship"]
+    without_dimension = score()
+    persona.person_hypotheses[0].claim = "一段不含路线词的已审核主张"
+    assert score() == without_dimension
+    persona.person_hypotheses[0].dimension = "meaning_memory"
+    assert score() > without_dimension
+
+
+def test_v7_observation_plan_does_not_turn_reported_words_into_current_refusal():
+    ctx = EngineContext(user_id="observation-fixture", scene_id="companion_elder")
+    ctx.working_memory["_online_decision_version"] = "online_turn_decision_v7"
+    reasoner = ElderStateReasoner()
+    reasoner.update(ctx, None, "邻居说别问了，我想把这件事说清。", [])
+    assert ctx.reasoning.observation_plan.mode == "observe"
+    assert not ctx.alliance.ruptured
 
 
 def test_current_physical_change_outranks_relevant_social_cooldown():

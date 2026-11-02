@@ -121,6 +121,7 @@ class ElderActiveObservationPolicy:
         current_physical_evidence_qualified: bool = False,
     ) -> ActiveObservationPlan:
         current_turn = len(ctx.turns)
+        semantic_v7 = ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v7"
         if ctx.working_memory.get("risk_flag"):
             return ActiveObservationPlan(
                 mode="wait",
@@ -132,7 +133,7 @@ class ElderActiveObservationPolicy:
             not current_user_reopened
             and (
                 ctx.alliance.ruptured
-                or _has_current_rejection(utterance)
+                or (not semantic_v7 and _has_current_rejection(utterance))
             )
         ):
             return ActiveObservationPlan(
@@ -144,12 +145,14 @@ class ElderActiveObservationPolicy:
                 mode="wait",
                 reason=(
                     "相关沟通方向已在至少两个独立会话得到明确负面结果；"
-                    "本人本轮没有重新提出该需要，这一拍停止重复推动。"
+                    + ("默认停止重复推动；当前本人是否重新提出该需要，由同次语义判断结合完整原话决定。"
+                       if semantic_v7 else "本人本轮没有重新提出该需要，这一拍停止重复推动。")
                 ),
                 hypothesis_ids=[item.id for item in hypotheses[:2]],
             )
         if (
             not current_physical_evidence_qualified
+            and not semantic_v7
             and not current_user_reopened
             and _current_sound_explanation(ctx, utterance)
         ):
@@ -199,7 +202,7 @@ class ElderActiveObservationPolicy:
                 ),
                 hypothesis_ids=[item.id for item in hypotheses[:2]],
             )
-        if any(marker in utterance for marker in _DIRECT_REASON):
+        if not semantic_v7 and any(marker in utterance for marker in _DIRECT_REASON):
             return ActiveObservationPlan(
                 mode="observe",
                 reason="用户已经主动给出原因，先接住并观察，不把披露变成问卷。",

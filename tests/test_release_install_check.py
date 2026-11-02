@@ -16,7 +16,7 @@ def members():
 
 
 def test_real_distribution_layout_preserves_assets_and_license_notices():
-    assert release.inspect_members(members(), sdist=False)["required_assets"] == 7
+    assert release.inspect_members(members(), sdist=False)["required_assets"] == 11
     source = ["aria-source/" + name for name in [*members(), *release.SOURCE_ENTRY_FILES]]
     assert release.inspect_members(source, sdist=True)["license_files"] == sorted(release.LICENSE_FILES)
 

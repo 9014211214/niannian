@@ -197,7 +197,9 @@ def test_long_actual_wire_keeps_byte_margin_and_more_expensive_budget_reservatio
     payload = {"provider": {"only": ["alibaba"]}, "max_tokens": 1024,
                "messages": [{"role": "user", "content": "示" * 9000}]}
     wire = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request, client = SimpleNamespace(data=wire), SimpleNamespace(model=DEFAULT_ONLINE_FAST_MODEL)
+    request, client = SimpleNamespace(data=wire), SimpleNamespace(
+        model=DEFAULT_ONLINE_FAST_MODEL, role="online_fast",
+    )
     state = {"known_cost_usd": "0", "reserved_cost_usd": "0"}
     old = SimpleNamespace(policy=derive(inputs())[0], threshold="1")
     expanded = SimpleNamespace(policy=derive(inputs(), cover_all_price_tiers=True)[0], threshold="1")

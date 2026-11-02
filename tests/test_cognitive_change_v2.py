@@ -113,19 +113,29 @@ def test_only_literal_source_quote_is_accepted(quote):
     assert extract_cognitive_rows([{"domain": "memory", "evidence_quote": quote, "turn_index": 0}], p, ctx) == []
 
 
-@pytest.mark.parametrize("text", ["我妈又想不起钥匙放哪儿了。", "如果我忘了交电费怎么办？", "我没有忘交电费。", "护理提醒未确认。", "我又想不起钥匙了，这个别保存。"])
-def test_non_owner_negation_care_status_and_do_not_save_are_not_signals(text):
+@pytest.mark.parametrize("text", ["我妈又想不起钥匙放哪儿了。", "如果我忘了交电费怎么办？", "我没有忘交电费。", "护理提醒未确认。"])
+def test_missing_semantic_signal_never_manufactures_countable_evidence(text):
     p = enabled()
     ctx = context_with(p, text)
     rows = [{"domain": "memory", "evidence_quote": text, "turn_index": 0}]
-    assert extract_cognitive_rows(rows, p, ctx) == []
+    result = extract_cognitive_rows(rows, p, ctx)
+    assert len(result) == 1 and not result[0].counting and not result[0].functional_impact
+
+
+def test_explicit_do_not_save_remains_a_privacy_backstop():
+    p = enabled()
+    text = "我又想不起钥匙了，这个别保存。"
+    ctx = context_with(p, text)
+    assert extract_cognitive_rows([{"domain": "memory", "evidence_quote": text,
+                                    "turn_index": 0, "signal": "explicit_change"}], p, ctx) == []
 
 
 @pytest.mark.parametrize("text", ["老了记性差，我一时想不起钥匙放哪。", "我没睡好，想不起东西放哪儿了。"])
 def test_context_is_visible_but_does_not_count(text):
     p = enabled()
     ctx = context_with(p, text)
-    result = extract_cognitive_rows([{"domain": "memory", "evidence_quote": text, "turn_index": 0}], p, ctx)
+    result = extract_cognitive_rows([{"domain": "memory", "evidence_quote": text, "turn_index": 0,
+                                     "signal": "context"}], p, ctx)
     assert len(result) == 1 and result[0].counting is False and not result[0].functional_impact
 
 
@@ -133,7 +143,8 @@ def test_functional_impact_uses_model_semantics_without_keyword_prerequisite():
     p = enabled()
     ctx = context_with(p)
     result = extract_cognitive_rows([{"domain": "memory", "evidence_quote": ctx.turns[0].user,
-                                     "turn_index": 0, "functional_impact": True}], p, ctx)
+                                     "turn_index": 0, "functional_impact": True,
+                                     "signal": "explicit_change"}], p, ctx)
     assert len(result) == 1 and result[0].functional_impact
     # This tests applying a synthetic semantic annotation, not its correctness.
     assert result[0].source_quote == ctx.turns[0].user
@@ -158,13 +169,15 @@ def test_repetition_requires_three_known_same_events_within_seven_days():
     for day in (1, 3, 5):
         ctx = context_with(p, words, now=T0+timedelta(days=day))
         result = extract_cognitive_rows([{"domain": "repetition", "evidence_quote": words, "turn_index": 0,
-                                          "event_kind": "same_event", "prior_event_id": "known-envelope"}], p, ctx)
+                                          "event_kind": "same_event", "prior_event_id": "known-envelope",
+                                          "signal": "explicit_change"}], p, ctx)
         assert len(result) == 1
         assert result[0].counting is (day == 5)
         p.cognitive_observations.extend(result)
     old = context_with(p, words, now=T0+timedelta(days=20))
     result = extract_cognitive_rows([{"domain": "repetition", "evidence_quote": words, "turn_index": 0,
-                                      "event_kind": "same_event", "prior_event_id": "known-envelope"}], p, old)
+                                      "event_kind": "same_event", "prior_event_id": "known-envelope",
+                                      "signal": "explicit_change"}], p, old)
     assert not result[0].counting
 
 

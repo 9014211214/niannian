@@ -36,7 +36,8 @@ def labeled_payload(*, observation=True, privacy=True):
     payload["cognitive_privacy"] = [{"turn_index": 0, "evidence_quote": NATURAL}] if privacy else []
     if observation:
         payload["cognitive_observations"] = [{"domain": "memory", "evidence_quote": NATURAL,
-            "turn_index": 0, "functional_impact": True, "event_kind": "new_event", "prior_event_id": None}]
+            "turn_index": 0, "functional_impact": True, "event_kind": "new_event", "prior_event_id": None,
+            "signal": "explicit_change"}]
     # Deliberately contradictory fixed labels: privacy must win over every
     # ordinary extractor even if the model proposes this text in both places.
     payload["episodes"] = [{"summary": "fixture", "keywords": [], "referenceable": True,

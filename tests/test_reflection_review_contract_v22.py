@@ -1,4 +1,4 @@
-"""Contract 2.2 deterministic replay, not a rerun or rescore of r7.
+"""Current-contract fixture checks, not a rerun or rescore of historical r7.
 
 The one source response below is the saved synthetic r7 cold-start response at
 dev_private_setback/free/session_1. Its byte fingerprint is retained for audit.
@@ -71,27 +71,48 @@ def source_context():
     ])
 
 
+def authored_r7_current_contract_copy():
+    """Explicit local adaptation; the saved response and both hashes stay fixed."""
+    payload = json.loads(R7_UNKNOWN_SOURCE_RESPONSE)
+    for item in payload["reviews"]:
+        del item["event_kind"]
+        del item["prior_event_id"]
+    return payload
+
+
 def test_prompt_declares_new_scope_and_event_context_without_upgrading_schema():
-    assert EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION == "2.4"
+    assert EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION == "2.5"
     assert EVIDENCE_REVIEW_PROTOCOL_VERSION == "2.0"
     prompt = reflection_system_prompt(True)
     for statement in (
-        "prompt contract 2.4", "atomic_claim.conditions", "本身不是 unknown",
+        "prompt contract 2.5", "atomic_claim.conditions", "本身不是 unknown",
         "低置信候选", "不能为形成标签强改 within_scope",
-        "附属 context_only review 也遵守相同事件合同",
-        "没有已知 event_id 时不得填 same_event", "审查完成也不代表人物已经学会",
+        "附属 context_only review 同样只引用当前逐字原话",
+        "你不输出事件分类或旧事件 ID", "新原话也不自动证明事件刚刚发生",
+        "审查完成也不代表人物已经学会",
     ):
         assert statement in prompt
     assert "prompt contract" not in reflection_system_prompt(False)
 
 
-def test_saved_r7_unknown_new_proposal_remains_unknown_and_is_now_observable():
+def test_saved_r7_bytes_remain_fixed_and_removed_model_fields_are_rejected():
     assert hashlib.sha256(R7_UNKNOWN_SOURCE_RESPONSE.encode()).hexdigest() == R7_UNKNOWN_SOURCE_TEXT_SHA256
     encoded = json.dumps(R7_UNKNOWN_SOURCE_RESPONSE, ensure_ascii=False, sort_keys=True,
                          separators=(",", ":"), allow_nan=False)
     assert hashlib.sha256(encoded.encode()).hexdigest() == R7_UNKNOWN_SOURCE_FINGERPRINT
     updater, persona, llm = replay(R7_UNKNOWN_SOURCE_RESPONSE, source_context())
-    assert updater.last_status == "ok"  # Backward-compatible review success.
+    assert updater.last_status == "failed"
+    assert updater.last_error_detail == "invalid_review_fields"
+    assert persona.person_hypotheses == []
+    assert persona.evidence_review_ledger == []
+    assert llm.raw == R7_UNKNOWN_SOURCE_RESPONSE and llm.calls == 1
+
+
+def test_authored_r7_contract_adaptation_keeps_unknown_scope_without_claiming_original_pass():
+    payload = authored_r7_current_contract_copy()
+    adapted = json.dumps(payload, ensure_ascii=False)
+    updater, persona, llm = replay(adapted, source_context())
+    assert updater.last_status == "ok"
     assert persona.person_hypotheses == []
     assert persona.evidence_review_ledger[0].disposition == "unknown_scope_no_update"
     assert updater.last_proposal_results == [{
@@ -101,21 +122,21 @@ def test_saved_r7_unknown_new_proposal_remains_unknown_and_is_now_observable():
     }]
     assert updater.last_application_summary["applied_count"] == 0
     assert updater.last_application_summary["deferred_count"] == 1
-    assert llm.raw == R7_UNKNOWN_SOURCE_RESPONSE and llm.calls == 1
+    assert llm.raw == adapted and llm.calls == 1
+    assert hashlib.sha256(R7_UNKNOWN_SOURCE_RESPONSE.encode()).hexdigest() == R7_UNKNOWN_SOURCE_TEXT_SHA256
 
 
-def test_authored_within_scope_contrast_can_create_bounded_candidate_without_old_id():
+def test_authored_within_scope_contrast_still_cannot_create_evidence_without_event_time():
     # Deliberately a NEW local contrast, never repair/rewrite the source response.
-    payload = json.loads(R7_UNKNOWN_SOURCE_RESPONSE)
+    payload = authored_r7_current_contract_copy()
     payload["reviews"][0]["applicability"] = "within_scope"
     updater, persona, _ = replay(json.dumps(payload, ensure_ascii=False), source_context())
     assert updater.last_status == "ok"
-    assert updater.last_application_summary["status"] == "applied"
-    assert updater.last_application_summary["applied_count"] == 1
-    hypothesis = persona.person_hypotheses[0]
-    assert hypothesis.status == "candidate"
-    assert hypothesis.scope == hypothesis.atomic_claim.conditions
-    assert len(hypothesis.supporting_events()) == 1
+    assert updater.last_application_summary["status"] == "deferred"
+    assert updater.last_application_summary["applied_count"] == 0
+    assert persona.person_hypotheses == []
+    assert updater.last_proposal_results[0]["reason"] == "event_identity_unknown_no_update"
+    assert persona.evidence_review_ledger[0].independent_event_count == 0
     assert persona.active_tasks == [] and persona.notification_receipts == []
 
 
@@ -141,13 +162,14 @@ def test_exact_single_json_wrapper_is_audited_but_content_is_unchanged(eol):
     raw = json.dumps(payload, ensure_ascii=False)
     wrapped = f"  ```json{eol}{raw}{eol}```  "
     updater, persona, llm = replay(wrapped, ctx)
-    assert updater.last_status == "ok" and len(persona.person_hypotheses) == 1
+    assert updater.last_status == "ok" and persona.person_hypotheses == []
     assert updater.last_response_transport == {
-        "prompt_contract_version": "2.4", "format": "single_json_fence",
+        "prompt_contract_version": "2.5", "format": "single_json_fence",
         "wrapper_removed": True, "json_status": "parsed", "content_repaired": False,
     }
     assert llm.raw == wrapped
-    assert updater.last_proposal_results[0]["status"] == "applied"
+    assert updater.last_proposal_results[0]["status"] == "deferred"
+    assert updater.last_proposal_results[0]["reason"] == "event_identity_unknown_no_update"
 
 
 @pytest.mark.parametrize("raw", [
@@ -188,7 +210,7 @@ def test_accepted_wrapper_does_not_rescue_fabricated_quote_or_mark_proposal_appl
     assert "PRIVATE_" not in json.dumps(updater.last_proposal_results)
 
 
-def test_invalid_supplementary_context_review_rolls_back_otherwise_valid_new_proposal():
+def test_legacy_event_fields_in_supplementary_review_reject_transaction_without_learning():
     updater, llm, persona = setup()
     ctx = context()
     item = review(ctx)
@@ -196,30 +218,34 @@ def test_invalid_supplementary_context_review_rolls_back_otherwise_valid_new_pro
                    event_kind="same_event", prior_event_id=None)
     before = persona.model_dump()
     apply(updater, llm, persona, ctx, [item, extra], [change(item)])
-    assert updater.last_error_detail == "same_event_requires_known_reference"
+    assert updater.last_error_detail == "invalid_review_fields"
     assert persona.model_dump() == before
     assert updater.last_application_summary["review_status"] == "failed"
     assert updater.last_application_summary["applied_count"] == 0
-    assert updater.last_proposal_results[0]["reason"] == "same_event_requires_known_reference"
+    assert updater.last_proposal_results[0]["reason"] == "invalid_review_fields"
     assert updater.last_proposal_results[0]["status"] == "rejected"
 
 
-@pytest.mark.parametrize("extra_event", ["new_event", "unknown"])
-def test_current_correction_and_valid_supplementary_context_do_not_block_each_other(extra_event):
+@pytest.mark.parametrize("boundary_quote", [
+    "今天我来纠正上次说的办法。", "这只是更喜欢的办法，没有授权替我转发。",
+])
+def test_correction_applies_without_turning_supplementary_context_into_permission(boundary_quote):
     updater, llm, persona = setup()
     hypothesis = support(updater, llm, persona)
     old_confidence = hypothesis.confidence
     ctx = context(2, words=["今天我来纠正上次说的办法。", "现在我改为喜欢先看完整步骤，不想等每一步。", "这只是更喜欢的办法，没有授权替我转发。"])
     correction = review(ctx, hypothesis, relation="counter")
     correction["event_evidence"] = deepcopy(correction["evidence"])
-    boundary = review(ctx, id="boundary", evidence_basis="context_only", relation="neutral",
-                      event_kind=extra_event, prior_event_id=None)
+    boundary = review(ctx, id="boundary", evidence_basis="context_only", relation="neutral")
+    boundary["event_evidence"] = [{"turn_index": 0 if boundary_quote == ctx.turns[0].user else 2,
+                                  "evidence_quote": boundary_quote}]
     apply(updater, llm, persona, ctx, [correction, boundary], [change(correction, hypothesis)])
     assert updater.last_status == "ok"
     assert hypothesis.confidence < old_confidence
     assert len(hypothesis.counter_sessions()) == 1
     assert updater.last_proposal_results[0]["scope_basis"] == "existing_claim_scope"
     assert updater.last_proposal_results[0]["status"] == "applied"
+    assert updater.last_proposal_results[0]["reason"] == "applied"
     assert persona.evidence_review_ledger[-1].disposition == "context_only_no_update"
     assert persona.active_tasks == [] and persona.notification_receipts == []
 
@@ -228,21 +254,23 @@ def test_known_same_event_remains_nonfresh_even_when_proposal_is_wrapped():
     updater, llm, persona = setup()
     hypothesis = support(updater, llm, persona)
     before = hypothesis.model_dump()
-    ctx = context(2)
-    item = review(ctx, hypothesis, event_kind="same_event", prior_event_id=hypothesis.evidence[0].event_id)
+    # Code recognizes the same verbatim event context, with no model-owned ID.
+    ctx = context(2, words=[turn.user for turn in context(1).turns])
+    item = review(ctx, hypothesis)
     payload = {"protocol_version": "2.0", "reviews": [item], "changes": [change(item, hypothesis)]}
     updater.llm = RawResponse("```json\n" + json.dumps(payload) + "\n```")
     updater.update(persona, ctx)
     assert updater.last_status == "ok" and hypothesis.model_dump() == before
     assert updater.last_proposal_results[0]["reason"] == "same_event_no_fresh_evidence"
+    assert persona.evidence_review_ledger[-1].prior_event_id == hypothesis.evidence[0].event_id
 
 
 @pytest.mark.parametrize("prior", ["r1", "controlled_candidate", "invented_event"])
-def test_no_inference_of_event_id_from_review_hypothesis_or_unknown_text(prior):
+def test_model_cannot_supply_event_id_from_review_hypothesis_or_unknown_text(prior):
     item = review(context(), event_kind="same_event", prior_event_id=prior)
     payload = {"protocol_version": "2.0", "reviews": [item], "changes": [change(item)]}
     updater, persona, _ = replay(json.dumps(payload))
-    assert updater.last_error_detail == "unknown_prior_event_reference"
+    assert updater.last_error_detail == "invalid_review_fields"
     assert persona.evidence_review_ledger == []
     assert updater.last_proposal_results[0]["status"] == "rejected"
 
@@ -251,6 +279,9 @@ def test_no_inference_of_event_id_from_review_hypothesis_or_unknown_text(prior):
 def test_diagnostics_reset_and_no_proposal_is_not_learning_success(next_action):
     updater, llm, persona = setup()
     support(updater, llm, persona)
+    # Seeding historical evidence is not a model call or a reflected session.
+    # Complete one real empty review so the duplicate-session branch is tested.
+    apply(updater, llm, persona, context(1), [], [])
     ctx = context(2)
     if next_action == "no_proposal":
         llm.payload = {"protocol_version": "2.0", "reviews": [], "changes": []}
@@ -302,18 +333,19 @@ def test_excessive_transaction_has_bounded_rows_but_counts_every_rejected_propos
     assert persona.person_hypotheses == []
 
 
-def test_legacy_multiple_proposals_compatibility_still_selects_one_and_accounts_for_all():
+def test_multiple_proposals_are_both_accounted_for_without_new_person_evidence():
     updater, llm, persona = setup()
     ctx = context()
     one = review(ctx, id="r1")
     two = review(ctx, id="r2")
     apply(updater, llm, persona, ctx, [one, two], [change(one), change(two)])
     assert updater.last_status == "ok"
-    assert len(persona.person_hypotheses) == 1
+    assert persona.person_hypotheses == []
     assert updater.last_application_summary["proposal_count"] == 2
-    assert updater.last_application_summary["applied_count"] == 1
-    assert updater.last_application_summary["deferred_count"] == 1
-    assert updater.last_proposal_results[1]["reason"] == "not_selected_for_application"
+    assert updater.last_application_summary["applied_count"] == 0
+    assert updater.last_application_summary["deferred_count"] == 2
+    assert updater.last_proposal_results[0]["reason"] == "event_identity_unknown_no_update"
+    assert updater.last_proposal_results[1]["reason"] == "same_event_no_fresh_evidence"
 
 
 def test_legacy_nonreview_parser_is_unchanged_and_has_no_review_diagnostics():

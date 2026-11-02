@@ -6,7 +6,7 @@ import pytest
 
 from aria.engine.policy import online_json
 from aria.engine.policy.online_decision import (
-    ONLINE_DECISION_VERSIONS, online_decision_tool_spec,
+    ONLINE_DECISION_VERSIONS, ONLINE_DECISION_VERSION_V7, online_decision_tool_spec,
     validate_communication_plan,
 )
 
@@ -31,6 +31,14 @@ def _synthetic_value(schema):
     if kind == "boolean":
         return False
     raise AssertionError(kind)
+
+
+def _value_with_plan(version):
+    schema = _schema(version)
+    value = _synthetic_value(schema)
+    # The v7 plan is optional; include it explicitly when testing its bounds.
+    value["communication_plan"] = _synthetic_value(schema["properties"]["communication_plan"])
+    return value
 
 
 def _messages():
@@ -122,15 +130,24 @@ def test_plan_markers_and_quoted_contract_do_not_erase_user_or_system_content(ve
 @pytest.mark.parametrize("field", ["support_order", "boundary"])
 @pytest.mark.parametrize("length", [0, 1, 80, 81])
 def test_plan_parser_keeps_length_boundaries_without_repair(version, field, length):
-    value = _synthetic_value(_schema(version))
+    value = _value_with_plan(version)
     value["communication_plan"][field] = "界" * length
     raw = json.dumps(value, ensure_ascii=False, separators=(", ", ": "))
     if 1 <= length <= 80:
         assert online_json.parse_json_decision(raw, version) == raw
         assert validate_communication_plan(value["communication_plan"]) == value["communication_plan"]
+        if version == ONLINE_DECISION_VERSION_V7:
+            parsed, dropped = online_json.parse_v7_payload(raw)
+            assert parsed["communication_plan"] == value["communication_plan"] and dropped == []
     else:
-        with pytest.raises(ValueError, match="invalid_online_json_schema"):
-            online_json.parse_json_decision(raw, version)
+        if version == ONLINE_DECISION_VERSION_V7:
+            assert online_json.parse_json_decision(raw, version) == raw
+            parsed, dropped = online_json.parse_v7_payload(raw)
+            assert "communication_plan" not in parsed and dropped == ["communication_plan"]
+            assert parsed["response"] == "".join(row["text"] for row in value["response_segments"])
+        else:
+            with pytest.raises(ValueError, match="invalid_online_json_schema"):
+                online_json.parse_json_decision(raw, version)
         assert validate_communication_plan(value["communication_plan"]) is None
     assert value["communication_plan"][field] == "界" * length
 
@@ -138,22 +155,36 @@ def test_plan_parser_keeps_length_boundaries_without_repair(version, field, leng
 @pytest.mark.parametrize("version", ONLINE_DECISION_VERSIONS)
 @pytest.mark.parametrize("field", ["support_order", "boundary"])
 def test_plan_whitespace_still_rejected_by_existing_product_gate(version, field):
-    value = _synthetic_value(_schema(version))
+    value = _value_with_plan(version)
     value["communication_plan"][field] = " \t\n" * 20
     raw = json.dumps(value, ensure_ascii=False)
     # JSON minLength counts whitespace; the existing product gate rejects it.
     assert online_json.parse_json_decision(raw, version) == raw
     assert validate_communication_plan(value["communication_plan"]) is None
+    if version == ONLINE_DECISION_VERSION_V7:
+        parsed, dropped = online_json.parse_v7_payload(raw)
+        assert "communication_plan" not in parsed and dropped == ["communication_plan"]
+        assert parsed["response"] == "".join(row["text"] for row in value["response_segments"])
 
 
 @pytest.mark.parametrize("version", ONLINE_DECISION_VERSIONS)
 def test_plan_limits_count_punctuation_spaces_and_unicode_characters(version):
-    value = _synthetic_value(_schema(version))
+    value = _value_with_plan(version)
     text = "界 .🙂" * 20
     assert len(text) == 80 and len(text.encode("utf-8")) > 80
     value["communication_plan"].update(support_order=text, boundary=text)
     raw = json.dumps(value, ensure_ascii=False)
     assert online_json.parse_json_decision(raw, version) == raw
+    if version == ONLINE_DECISION_VERSION_V7:
+        parsed, dropped = online_json.parse_v7_payload(raw)
+        assert parsed["communication_plan"] == value["communication_plan"] and dropped == []
     value["communication_plan"]["boundary"] += " "
-    with pytest.raises(ValueError, match="invalid_online_json_schema"):
-        online_json.parse_json_decision(json.dumps(value, ensure_ascii=False), version)
+    raw = json.dumps(value, ensure_ascii=False)
+    if version == ONLINE_DECISION_VERSION_V7:
+        assert online_json.parse_json_decision(raw, version) == raw
+        parsed, dropped = online_json.parse_v7_payload(raw)
+        assert "communication_plan" not in parsed and dropped == ["communication_plan"]
+        assert parsed["response"] == "".join(row["text"] for row in value["response_segments"])
+    else:
+        with pytest.raises(ValueError, match="invalid_online_json_schema"):
+            online_json.parse_json_decision(raw, version)

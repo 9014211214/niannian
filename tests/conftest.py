@@ -6,7 +6,16 @@ a paid request merely because the developer has configured the project ``.env``.
 """
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
 import pytest
+
+# New installable-release tests use the explicit tests package. Keep historical
+# sibling fixture imports local when pytest therefore imports modules by package.
+_TEST_DIRECTORY = str(Path(__file__).resolve().parent)
+if _TEST_DIRECTORY not in sys.path:
+    sys.path.insert(0, _TEST_DIRECTORY)
 
 
 # These tests bind the exact T6/T7 runtime AND its recorded Python/dependency

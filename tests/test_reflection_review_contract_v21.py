@@ -19,6 +19,7 @@ from aria.engine.memory.diagnosis import (
     reflection_system_prompt,
 )
 from aria.engine.model.persona import PersonaProfile
+from tests.test_reflection_evidence_review import support
 
 
 class LocalResponse:
@@ -51,7 +52,7 @@ def fixture(index=1, old=None, words=None):
         "claim_quote": old.claim if old else None,
         "scope_quote": (old.scope or "") if old else None,
         "applicability": "within_scope", "relation": "support",
-        "evidence_basis": "stated_preference", "event_kind": "new_event", "prior_event_id": None,
+        "evidence_basis": "stated_preference",
         "evidence": evidence,
         "event_evidence": [{"turn_index": 0, "evidence_quote": ctx.turns[0].user}],
         "reason": "本人明确描述了教学沟通偏好。", "event_summary": "本次新操作的教学节奏选择。",
@@ -74,11 +75,11 @@ def fixture(index=1, old=None, words=None):
 
 
 def test_prompt_contract_revision_does_not_change_data_protocol_or_legacy_prompt():
-    assert EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION == "2.4"
+    assert EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION == "2.5"
     assert EVIDENCE_REVIEW_PROTOCOL_VERSION == "2.0"
     prompt = reflection_system_prompt(True)
     for statement in (
-        "prompt contract 2.4", 'protocol_version 仍必须为字符串 "2.0"',
+        "prompt contract 2.5", 'protocol_version 仍必须为字符串 "2.0"',
         "response/big_five/disc/attachment/cbt", "general 只能单独使用",
         "每个引用对象必须完全复制", "不能缩短成另一子串", "1..3 项数组",
         "2..240 个字符", "各最多 100", "总长度不得超过 180", "最多 240 个字符",
@@ -86,7 +87,7 @@ def test_prompt_contract_revision_does_not_change_data_protocol_or_legacy_prompt
         "observed_response 必须为用户有据的反应字符串", "只允许 change.relation=support",
     ):
         assert statement in prompt
-    assert "prompt contract 2.4" not in reflection_system_prompt(False)
+    assert "prompt contract 2.5" not in reflection_system_prompt(False)
 
 
 @pytest.mark.parametrize(("mutation", "expected"), [
@@ -165,7 +166,7 @@ def test_declared_limits_reject_without_mutation_and_report_safe_detail(mutation
     assert updater.last_review_summary is None
 
 
-def test_exact_boundary_lengths_and_subset_quote_binding_still_form_candidate():
+def test_exact_boundary_lengths_and_subset_quote_binding_validate_without_fresh_evidence():
     updater, llm, persona = setup()
     ctx, payload = fixture()
     review, change = payload["reviews"][0], payload["changes"][0]
@@ -178,8 +179,10 @@ def test_exact_boundary_lengths_and_subset_quote_binding_still_form_candidate():
     llm.payload = payload
     updater.update(persona, ctx)
     assert updater.last_status == "ok" and updater.last_error_detail is None
-    assert len(persona.person_hypotheses[0].claim) == 180
-    assert persona.person_hypotheses[0].status == "candidate"
+    assert persona.person_hypotheses == []
+    assert persona.evidence_review_ledger[0].disposition == "event_identity_unknown_no_update"
+    assert updater.last_proposal_results[0]["status"] == "deferred"
+    assert updater.last_application_summary["applied_count"] == 0
 
 
 @pytest.mark.parametrize("length", [1, 2, 240, 241])
@@ -214,10 +217,12 @@ def test_canonical_framework_wire_names_remain_valid(framework, dimension):
     llm.payload = payload
     updater.update(persona, ctx)
     assert updater.last_status == "ok" and updater.last_error_detail is None
-    assert persona.person_hypotheses[0].framework == framework
+    assert persona.person_hypotheses == []
+    assert persona.evidence_review_ledger[0].disposition == "event_identity_unknown_no_update"
+    assert updater.last_proposal_results[0]["status"] == "deferred"
 
 
-def test_reported_response_with_grounded_outcome_is_not_forced_to_no_change():
+def test_reported_response_with_grounded_outcome_validates_but_cannot_prove_freshness():
     updater, llm, persona = setup()
     ctx, payload = fixture(words=["这次第一次试这个功能。", "一次只说一步，我照着做，感觉轻松。", "刚才自己完成了。"])
     payload["reviews"][0]["evidence_basis"] = "observed_response"
@@ -227,14 +232,17 @@ def test_reported_response_with_grounded_outcome_is_not_forced_to_no_change():
     llm.payload = payload
     updater.update(persona, ctx)
     assert updater.last_status == "ok"
-    assert persona.person_hypotheses[0].atomic_claim.outcome
+    assert persona.person_hypotheses == []
+    assert persona.evidence_review_ledger[0].evidence_basis == "observed_response"
+    assert updater.last_proposal_results[0]["reason"] == "event_identity_unknown_no_update"
+    assert updater.last_application_summary["applied_count"] == 0
 
 
-def test_existing_support_cannot_silently_disappear_as_new_but_support_and_counter_work():
+def test_existing_support_identity_stays_strict_and_new_support_counter_require_freshness():
     updater, llm, persona = setup()
-    first, llm.payload = fixture()
-    updater.update(persona, first)
-    hypothesis = persona.person_hypotheses[0]
+    first, _ = fixture()
+    hypothesis = support(updater, llm, persona, ctx=first)
+    prior_hypothesis = hypothesis.model_dump()
     second, payload = fixture(2, hypothesis)
     payload["changes"][0]["relation"] = "new"
     llm.payload = payload
@@ -247,7 +255,9 @@ def test_existing_support_cannot_silently_disappear_as_new_but_support_and_count
     payload["changes"][0]["relation"] = "support"
     updater.update(persona, second)
     assert updater.last_status == "ok" and updater.last_error_detail is None
-    assert len(hypothesis.supporting_events()) == 2 and hypothesis.status == "working"
+    assert hypothesis.model_dump() == prior_hypothesis
+    assert len(hypothesis.supporting_events()) == 1 and hypothesis.status == "candidate"
+    assert updater.last_proposal_results[0]["reason"] == "event_identity_unknown_no_update"
     confidence = hypothesis.confidence
     third, payload = fixture(3, hypothesis, words=["这次试了另一个功能。", "我改主意了，现在要先看完整步骤。", "不想一次等一个动作了。"])
     payload["reviews"][0]["relation"] = payload["changes"][0]["relation"] = "counter"
@@ -255,6 +265,9 @@ def test_existing_support_cannot_silently_disappear_as_new_but_support_and_count
     updater.update(persona, third)
     assert updater.last_status == "ok" and updater.last_error_detail is None
     assert hypothesis.confidence < confidence and len(hypothesis.counter_sessions()) == 1
+    assert hypothesis.claim == prior_hypothesis["claim"]
+    assert updater.last_proposal_results[0]["status"] == "applied"
+    assert updater.last_proposal_results[0]["reason"] == "applied"
 
 
 @pytest.mark.parametrize("next_action", ["success", "no_change", "short_session", "already_reflected"])
@@ -262,11 +275,11 @@ def test_error_detail_resets_before_success_and_both_skip_paths(next_action):
     updater, llm, persona = setup()
     first, llm.payload = fixture()
     updater.update(persona, first)
-    failed, llm.payload = fixture(2, persona.person_hypotheses[0])
+    failed, llm.payload = fixture(2)
     llm.payload["changes"][0]["scope_tags"] = ["general", "task_request"]
     updater.update(persona, failed)
     assert updater.last_error_detail == "invalid_explicit_scope_tags"
-    next_ctx, llm.payload = fixture(3, persona.person_hypotheses[0])
+    next_ctx, llm.payload = fixture(3)
     if next_action == "no_change":
         llm.payload = {"protocol_version": "2.0", "reviews": [], "changes": []}
     elif next_action == "short_session":

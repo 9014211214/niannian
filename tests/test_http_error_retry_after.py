@@ -46,7 +46,7 @@ def observe(*pairs, observed_at=EPOCH):
                                           (str(MAX_RETRY_AFTER_SECONDS), MAX_RETRY_AFTER_SECONDS)])
 def test_numeric_wait_is_bounded_metadata_without_billing_or_raw_headers(raw, seconds):
     value = observe(("Retry-After", raw), ("Authorization", "Bearer PRIVATE-key"))
-    assert value["version"] == "1.3"
+    assert value["version"] == "1.5"
     assert value["retry_after_status"] == "accepted"
     assert value["retry_after_seconds"] == seconds
     assert value["retry_after_source"] == "delta_seconds"
@@ -218,7 +218,7 @@ def test_wait_hint_and_candidate_do_not_clear_unknown_cost_or_allow_a_second_req
 
 def test_legacy_error_and_interrupted_versions_remain_supported():
     current = observe(("Retry-After", "4"))
-    prior_error = {k: v for k, v in current.items() if not k.startswith(("provider_native_", "provider_raw_"))}
+    prior_error = {k: v for k, v in current.items() if not k.startswith(("provider_native_", "provider_raw_", "limit_source", "router_error_type"))}
     prior_error["version"] = "1.2"
     before = deepcopy(prior_error)
     validate_observation(prior_error)

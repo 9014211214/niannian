@@ -5,6 +5,8 @@
 这些环节都不能独立保证模型的语义判断正确。任务状态、测试结果、
 浏览器验收和未完成项只维护在 [PROGRESS](PROGRESS.md)，本页不另立进度表。
 
+版本阅读说明（2026-10-25）：本页中 v3、在线确认待定、`scope` 从整句机械回填及旧长度限制是历史协议说明。后续获授权的 v7 使用独立确认判断、真实保存后由代码追加回执；范围使用当前有出处约束的模型提案协议，完整本人原话另行保留。现行合同见 [stated_preferences.py](../aria/engine/memory/stated_preferences.py)、[preference_dialogue.py](../aria/engine/memory/preference_dialogue.py) 和 [产品设计](PRODUCT.md)，不因旧文档回退已授权实现。
+
 ## 1. 要解决的缺口
 
 产品三件事的第一件是“本人能确认和纠正的相处说明”（见 [PRODUCT](PRODUCT.md)）。设计前的缺口：

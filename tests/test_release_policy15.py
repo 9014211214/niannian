@@ -20,7 +20,7 @@ DOCUMENTS = frozenset({
 
 def fixture_root(tmp_path, extras=()):
     root = tmp_path / "synthetic-source"
-    for name in release.REQUIRED_FILES | set(extras):
+    for name in release._required_files(release.POLICY_VERSION) | set(extras):
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# authored software fixture only\n", encoding="utf-8")
@@ -32,6 +32,11 @@ def rewrite_archive(source, target, policy, scope, extra=None):
         contents = {name: archive.read(name) for name in archive.namelist()}
     manifest = json.loads(contents["RELEASE_MANIFEST.json"])
     manifest["policy_version"] = policy
+    if policy != release.POLICY_VERSION:
+        contents = {n: raw for n, raw in contents.items() if n not in release.V17_POLICY_FILES}
+    if policy not in {release.V16_POLICY_VERSION, release.POLICY_VERSION}:
+        contents = {n: raw for n, raw in contents.items() if n not in release.V16_REQUIRED_FILES | release.V17_POLICY_FILES}
+        manifest["files"] = [row for row in manifest["files"] if row["path"] in contents]
     if extra:
         name, raw = extra
         contents[name] = raw
@@ -44,11 +49,11 @@ def rewrite_archive(source, target, policy, scope, extra=None):
 
 
 def test_v15_additions_are_exactly_named_public_documents():
-    assert release.POLICY_VERSION == "aria-minimal-source-15"
+    assert release.V15_POLICY_VERSION == "aria-minimal-source-15"
     assert release.V15_POLICY_FILES == DOCUMENTS
     assert all(release._allowed(name) for name in DOCUMENTS)
     assert all(not release._allowed(name, policy) for name in DOCUMENTS
-               for policy in release.SUPPORTED_POLICIES - {release.POLICY_VERSION})
+               for policy in release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V16_POLICY_VERSION, release.V15_POLICY_VERSION})
     for name in ("artifacts/local/tasks/report.md", "artifacts/local/sealed.json", ".env",
                  "data/private.json", "docs/private_answers.md", "docs/unlisted_current_report.md"):
         assert not release._allowed(name)
@@ -61,22 +66,23 @@ def test_original_v14_scope_bytes_are_preserved():
     )
 
 
-@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION}))
+@pytest.mark.parametrize("policy", sorted(release.SUPPORTED_POLICIES - {release.POLICY_VERSION, release.V16_POLICY_VERSION, release.V15_POLICY_VERSION}))
 def test_every_older_policy_keeps_v15_documents_out(policy):
     assert all(not release._allowed(name, policy) for name in DOCUMENTS)
 
 
 @pytest.mark.parametrize("name", sorted(release.V14_POLICY_FILES))
-def test_v14_documents_remain_allowed_by_14_and_15_only(name):
+def test_v14_documents_remain_allowed_by_14_15_and_current(name):
     assert release._allowed(name, release.V14_POLICY_VERSION)
+    assert release._allowed(name, release.V15_POLICY_VERSION)
     assert release._allowed(name, release.POLICY_VERSION)
     assert all(not release._allowed(name, policy) for policy in release.SUPPORTED_POLICIES
-               - {release.V14_POLICY_VERSION, release.POLICY_VERSION})
+               - {release.V14_POLICY_VERSION, release.V15_POLICY_VERSION, release.V16_POLICY_VERSION, release.POLICY_VERSION})
 
 
-def test_v15_build_includes_named_present_docs_without_private_outputs(tmp_path):
+def test_current_build_retains_v15_named_docs_without_private_outputs(tmp_path):
     root = fixture_root(tmp_path, DOCUMENTS | {"artifacts/local/tasks/private.md"})
-    archive = tmp_path / "fixture-v15.zip"
+    archive = tmp_path / "fixture-current.zip"
     release.build_release(root, archive)
     verified = release.verify_release(archive)
     assert verified["policy_version"] == release.POLICY_VERSION
@@ -87,7 +93,7 @@ def test_v15_build_includes_named_present_docs_without_private_outputs(tmp_path)
 
 def test_v14_original_archive_contract_verifies_with_current_reader(tmp_path):
     root = fixture_root(tmp_path, release.V14_POLICY_FILES)
-    current = tmp_path / "synthetic-v15.zip"
+    current = tmp_path / "synthetic-current.zip"
     release.build_release(root, current)
     original = tmp_path / "synthetic-v14.zip"
     rewrite_archive(current, original, release.V14_POLICY_VERSION, release.V14_SCOPE_TEXT)
@@ -104,6 +110,6 @@ def test_v14_archive_cannot_be_relabelled_with_v15_scope(tmp_path):
     current = tmp_path / "fixture.zip"
     release.build_release(root, current)
     illegal = tmp_path / "scope-mismatch.zip"
-    rewrite_archive(current, illegal, release.V14_POLICY_VERSION, release.SCOPE_TEXT)
+    rewrite_archive(current, illegal, release.V14_POLICY_VERSION, release.V15_SCOPE_TEXT)
     with pytest.raises(release.ReleaseError, match="archive_scope_changed"):
         release.verify_release(illegal)

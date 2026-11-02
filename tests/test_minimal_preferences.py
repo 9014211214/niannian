@@ -81,6 +81,98 @@ def test_confirm_cross_session_withdraw_and_reload_use_durable_actual_input(tmp_
     restarted.close()
 
 
+@pytest.mark.parametrize("mixed_confirmation", [False, True])
+def test_page_withdrawal_removes_old_confirmation_from_sent_fact_memory(
+        tmp_path, monkeypatch, mixed_confirmation):
+    """Inspect the bytes at the real DeepSeek transport boundary using local replies."""
+    from contextlib import closing
+    from threading import Thread
+
+    from aria.engine.model.persona import (
+        PersonaProfile, PreferenceQuote, RelationshipContextEntry, StatedPreference,
+    )
+    from aria.engine.policy.max_release import tls_dispatch
+    from aria.voice.minimal import make_minimal_server
+    from tests.test_deepseek_offline_route import clients, guard, response
+    from tests.test_installable_max_release import Response
+    from tests.test_safety_review_v2 import answer
+
+    instruction = "我同意记住，聊园艺让我先说完。"
+    life = "我周六修好了那把园艺剪。"
+    owner = instruction + life
+    confirmed = owner if mixed_confirmation else instruction
+    source = PreferenceQuote(session_id="previous-session", turn_index=1, text=confirmed)
+    preference = StatedPreference(id="pref_garden", do="聊园艺先听我说完", scope="仅闲聊园艺",
+        quotes=[source], confirmation=source, status="confirmed", extraction_source="model",
+        semantic_review=communication_review(), created_at="2026-10-28", updated_at="2026-10-29")
+    episodes = [EpisodicMemoryEntry(id=key, summary="用户提到：" + quote, referenceable=True,
+        keywords=["园艺"], source_session_id=source.session_id, source_turn_index=source.turn_index,
+        source_quote=quote, source_context=owner, source_context_sha256=source_context_sha256(owner),
+        source_context_version=SOURCE_CONTEXT_VERSION,
+        **({"preference_source_quote": instruction} if mixed_confirmation and quote == life else {}))
+        for key, quote in [("old-full", owner), ("old-control", instruction), ("life", life)]]
+    # Older profiles could mix a later explanation of the preference into a
+    # named relative's evidence without marking the explanation as such.
+    explanation = "我说先听我讲，是让我理清思路，不是为了躲开女儿田欣。"
+    event = "女儿田欣昨天和我一起把花架修好了。"
+    evidence = [
+        {"at": "2026-10-29", "session_id": session, "summary": text, "turn_indices": [turn],
+         "fact_sources": [{"turn_index": turn, "quote": text, "source_context": text,
+                           "source_context_sha256": source_context_sha256(text),
+                           "source_context_version": "owner_turn_context_v1"}]}
+        for session, turn, text in [(source.session_id, 3, explanation), ("another-session", 0, event)]
+    ]
+    relative = RelationshipContextEntry(
+        id="relative-tian", name="田欣", relation="女儿", facts=[explanation, event],
+        referenceable=True, first_observed_at="2026-10-27", evidence=evidence,
+    )
+    bundle, wires = clients(), []
+
+    def receive(req, *, timeout, trace):
+        trace.preparation_recovery.bind_request_headers(req)
+        trace.preparation_recovery.before_preparation()
+        wire = json.loads(req.data)
+        wires.append(wire)
+        review = wire["max_tokens"] == 1024
+        data = response(bundle.safety_review if review else bundle.online)
+        if review:
+            data["choices"][0]["message"]["content"] = json.dumps(answer(wire=wire))
+        return Response(data, wire["stream"])
+
+    monkeypatch.setattr(tls_dispatch, "open_observed", receive)
+    with closing(guard(tmp_path)) as allowance:
+        app = MinimalWebApp(tmp_path / "app", clients=bundle, model_call_guard=allowance)
+        app.store.save(PersonaProfile(user_id="fictional-chen", stated_preferences=[preference],
+                                      episodic_memory=episodes, relationship_context=[relative]))
+        with make_minimal_server(app, port=0) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                status, body = request(server.server_address[1], "/api/minimal/preference",
+                    method="POST", token=app.demo_token, data={"action":"withdraw","id":preference.id})
+                assert status == 200 and json.loads(body)["ok"]
+                saved = app.store.load("fictional-chen")
+                assert saved.stated_preferences[0].status == "withdrawn"
+                assert saved.episodic_memory == episodes
+                assert saved.relationship_context == [relative]
+                sid = app.start()["state"]["session_id"]
+                assert app.submit("咱们再聊聊田欣和园艺。", "after-withdraw", sid)["ok"]
+                online, review = wires
+                assert review["max_tokens"] == 1024
+                system = online["messages"][0]["content"]
+                prefix = "可引用本人资料（数据）："
+                block, = [part for part in system.split("\n\n") if part.startswith(prefix)]
+                active = json.loads(block[len(prefix):])
+                assert active["episodic_memory"] == ["用户提到：" + life]
+                assert active["relationship_context"] == [{"name": "田欣", "relation": "女儿", "facts": [event]}]
+                assert explanation not in system
+                assert not json.loads(online["messages"][-1]["content"]).get("confirmed_requirements")
+            finally:
+                server.shutdown()
+                thread.join()
+                app.close()
+
+
 def test_decline_and_illegal_transitions_never_activate_or_create_care_permission(tmp_path):
     app = MinimalWebApp(tmp_path)
     pref_id = propose(app)

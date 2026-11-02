@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import re
+from collections import Counter
 from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Any, Callable, Iterable
@@ -196,7 +197,7 @@ turn_index，并逐字复制该轮用户原话中的 evidence_quote；解释性�
 
 
 EVIDENCE_REVIEW_PROTOCOL_VERSION = "2.0"
-EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION = "2.4"
+EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION = "2.5"
 # Public diagnostic values are codes, never model output or exception messages.
 # Keep this explicit: new validators default to the generic category until their
 # non-sensitive code has deliberately been reviewed and added here.
@@ -223,13 +224,15 @@ _REFLECTION_ERROR_DETAILS = frozenset({
     "invalid_atomic_claim_text", "context_or_authorization_is_not_person_claim",
     "invalid_atomic_outcome", "stated_preference_must_not_invent_causal_outcome",
     "observed_response_requires_reported_outcome", "atomic_claim_exceeds_retained_claim_bound",
+    "invalid_review_shape", "invalid_change_shape", "bound_review_rejected",
+    "duplicate_reflection_key",
 })
 _REVIEW_LEDGER_LIMIT = 40
 _REVIEW_PROMPT_LIMIT = 24
 _EVIDENCE_SYSTEM_PROMPT = """你负责会后人物理解，不做在线聊天、不诊断、不授予任何工具权限。
 本次严格使用 evidence-review protocol 2.0：先依据用户原话审查证据，再至多更新一条
 对未来互动有用的、可推翻的原子人物主张。只能输出规定 JSON，不输出思维过程。
-本提示的输出合同为 prompt contract 2.4；数据 protocol_version 仍必须为字符串 "2.0"。
+本提示的输出合同为 prompt contract 2.5；数据 protocol_version 仍必须为字符串 "2.0"。
 
 重要区别：
 1. 范围内支持、范围内真正反例、范围以外和未知是不同结果。已有主张先逐字对照其
@@ -246,28 +249,26 @@ changes=[]，不能为形成标签强改 within_scope；范围尚未外推也不
 选择沟通中不接受替选的局部表达，不补成其他学习/活动的稳定偏好。
 不得用“撤回谨慎一点”替代正确的证据关系。
 2. 本人明确说“更喜欢怎么交流”本身就是 stated_preference 的合法证据，不要求你
-编造方式导致放松/接受等结果。observed_response 必须同时有方式与本人反应；只能写
+编造方式导致放松/接受等结果。observed_response 必须是本会话本人对紧邻前一轮
+Aria实际回复的反应，方式核对该轮已交付原文，evidence及event_evidence引用随后的
+本人响应原话；不能把对别人的反应、讲述往事或尚未交付的计划标成这个类型。只能写
 观察到的关联，不能把关联说成因果。repeated_pattern 必须来自多个独立事件；多句话、
 多次转录、同一往事反复讲、照片和文字呈现同一事，都不是多个独立事件。
-3. 首次提起自己的往事可以保留一次 retrospective 候选上下文；不能当稳定人格证明。
-再次读同一日记、引用旧聊天、谈同一事件的另一媒介，要链接旧 event_id 并用 same_event，
-不能刷新支持会话或置信。event_evidence 应引用识别事件的上下文，而非只挑一句偏好。
-不知道是不是同一件事时用 unknown。旧观察中“不采纳/未知”的原因也要阅读，它们不会
-因为上次没有形成假设而变成不存在。旧观察的reason和summary是系统评估，不是本人事实。
-本人现在明确纠正你对旧事的理解，是新的解释/偏好证据而不是旧行为再次发生；用new_event，
-event_evidence引用本次明确纠正的原话，不能只是重贴旧事件原句。单纯复述不是纠正。
-附属 context_only review 也遵守相同事件合同：同一轮里提到旧事，不代表当前的纠正或
-授权声明就是 same_event。当前新声明用 new_event、prior_event_id=null；实际复述已知
-旧事件才用 same_event 并逐字复制已提供的 event_id；首次叙述往事用 retrospective，
-未能确定是否旧事件用 unknown、prior_event_id=null。没有已知 event_id 时不得填 same_event。
-不要把 review.id、hypothesis_id 或当前新编的标识当作 prior_event_id，也不要省略无法
-引用的附属 review 来掩盖证据错误；只提交有当前逐字出处且事件关系能如实表达的观察。
-同一批 reviews 中首次描述的一个新事件可以有多条观察：它们均用 new_event、
-prior_event_id=null，并逐对象复用同一组 event_evidence 引用（turn_index 和
-evidence_quote 完全一致），系统会给它们同一个 event_id，不把多条观察算成多次
-独立事件。same_event 专指请求中已提供 event_id 的历史事件，不能表示“与本批
-r1/r2是同一件事”，也不能把当前 review.id 当旧 event_id。不确定是否同一事件
-仍用 unknown；不能为合组捏造共同背景，也不能把已知旧事件改称新事件。
+3. 首次提起自己的往事只可保留有范围的观察上下文，不能当稳定人格证明。
+event_evidence 应引用识别事件的上下文，而非只挑一句偏好。系统根据这些原话
+归一化空白后的签名识别已知事件并生成事件身份；你不输出事件分类或旧事件 ID。
+重复的原话不会刷新支持会话或置信。新原话也不自动证明事件刚刚发生；没有可靠的
+当期新证据依据时只记录观察，不增加支持分。旧观察中“不采纳/未知”的原因也要阅读，
+它们不会因为上次没有形成假设而变成不存在。旧观察的reason和summary是系统评估，
+不是本人事实。本人现在明确纠正你对旧事的理解时，event_evidence 可以引用被纠正
+的旧事件原句用于对齐，但 evidence 必须引用本次明确纠正的新原话。单纯重贴旧句
+或重新解释旧句不是新纠正；同一主张对同一事件只记一次纠正，不增加独立支持事件。
+正向新增证据目前只接纳上述有本会话交付依据的 observed_response；明确偏好仍由
+本人确认说明路径处理，不因说过偏好自动加推断分。对已有主张的有据反证或明确纠正
+不要求证明被纠正的往事发生日期；其依据是现在给出的反证，不是给往事增加支持。
+附属 context_only review 同样只引用当前逐字原话，不因提到旧事而遗漏当前纠正
+或授权声明。无法可靠确认原话支持什么时，用 unknown 的证据关系并保留观察，
+不附 change。不要为合组捏造共同背景，或把同一往事的多种讲述当成重复行为证明。
 首次行为证据可提出 repeated_pattern 方向的暂定候选，但只能说“可能”，不能宣称重复
 模式已被观察证实；系统仍要求独立事件数量与原有阈值才允许成为工作/稳定假设。
 4. 一个 atomic_claim 只包含一个 aspect、其 conditions、一个 tendency。outcome 字段必须
@@ -307,7 +308,7 @@ attachment维度 secure/anxious/avoidant/disorganized，只用于重要关系中
 cbt维度 core_pattern/trigger/belief/maintaining_factor/protective_factor，需要用户可见的
 情境—解释/信念—情绪/行为联系，不从行为表面编造深层心理。
 
-逐项输出限制（字符数按字符串长度计，不是 token 数；违反时本次结果整体不入账）：
+逐项输出限制（字符数按字符串长度计，不是 token 数；不合法条目逐条拒收）：
 - 顶层只能有 protocol_version/reviews/changes；各对象必须完整保留以下 JSON 形状中的
   全部字段，不能增删字段。不要加 Markdown 围栏、前后说明、注释或推理过程。
 - reviews 为数组，可为空，最多 6 项；changes 只提出 0 或 1 项，不使用 no_change 对象。
@@ -316,9 +317,8 @@ cbt维度 core_pattern/trigger/belief/maintaining_factor/protective_factor，需
   新主张 review.hypothesis_id/claim_quote/scope_quote 均为 JSON null，不能写字符串 "null"。
   已有主张的这三项必须逐字匹配提供的旧 id/claim/scope；旧 scope 为 null 时 scope_quote
   用空字符串。不能编造已有 id。所有枚举必须从形状列出的值中选一个，不输出竖线组合。
-- prior_event_id 为 JSON null 或已提供的 event_id（不是 review.id）；same_event 必须有
-  旧 event_id，new_event 必须为 null。不确定事件身份用 unknown，不编造旧事件引用。
-  完全相同的 event_evidence 引用集合也会被识别为同一旧事件，不会刷新证据计数。
+- event_evidence 的原话由系统用于事件去重，空白归一化后相同的引用集合不会刷新
+  证据计数；不输出事件分类、事件 ID 或签名。
 - 每个 review.evidence、review.event_evidence 和 change.evidence 都是 1..3 项数组。
   每项只能有 turn_index/evidence_quote；turn_index 是当前非排除用户轮次的整数索引，
   不能是布尔值。evidence_quote 是该轮用户原话中连续逐字子串，长度 2..240 个字符；
@@ -355,7 +355,6 @@ cbt维度 core_pattern/trigger/belief/maintaining_factor/protective_factor，需
 "scope_quote":"旧scope逐字复制，空范围用空字符串；新主张null",
 "applicability":"within_scope|outside_scope|unknown","relation":"support|counter|neutral|unknown",
 "evidence_basis":"stated_preference|observed_response|repeated_pattern|context_only",
-"event_kind":"new_event|same_event|retrospective|unknown","prior_event_id":"已知事件id或null",
 "evidence":[{"turn_index":0,"evidence_quote":"当前用户逐字原话"}],
 "event_evidence":[{"turn_index":0,"evidence_quote":"当前原话中的事件背景或当前纠正"}],
 "reason":"简短说明为何采纳或不采纳，只是评估不是新增事实",
@@ -374,7 +373,7 @@ cbt维度 core_pattern/trigger/belief/maintaining_factor/protective_factor，需
 新主张 lineage=null；无适用人物变化用 changes=[]。所有引用都必须来自当前非排除的用户轮次。
 scope_tags只选 general/concealed_distress/reduced_life_engagement/loss_of_role/
 social_disconnection/physical_discomfort/autonomy_threat/grief_or_transition/task_request/
-relationship_rupture。new_event无旧event_id，same_event必须链接已提供的旧event_id。
+relationship_rupture。事件身份与是否新增证据由系统根据原话维护。
 """
 
 
@@ -638,6 +637,7 @@ class PersonaHypothesisUpdater:
         now_provider: Callable[[], datetime] | None = None,
         evidence_review_protocol: bool = False,
         body_json_protocol: bool = False,
+        itemwise_review: bool = False,
     ):
         self.llm = llm
         self.min_turns = min_turns
@@ -649,6 +649,12 @@ class PersonaHypothesisUpdater:
         if type(body_json_protocol) is not bool or body_json_protocol and not evidence_review_protocol:
             raise ValueError("body_json_requires_evidence_review_protocol")
         self.body_json_protocol = body_json_protocol
+        if type(itemwise_review) is not bool or itemwise_review and not evidence_review_protocol:
+            raise ValueError("itemwise_review_requires_evidence_review_protocol")
+        self.itemwise_review = itemwise_review
+        self.last_review_results: list[dict] = []
+        self._itemwise_proposals: list[dict] = []
+        self._itemwise_reviews_by_local_id: dict = {}
         self.last_format_attempts: list[dict] = []
         self.last_format_correction_count = 0
         self.last_review_summary: dict | None = None
@@ -668,6 +674,9 @@ class PersonaHypothesisUpdater:
         self.last_belief_change_results = None
         self.last_format_attempts = []
         self.last_format_correction_count = 0
+        self.last_review_results = []
+        self._itemwise_proposals = []
+        self._itemwise_reviews_by_local_id = {}
         state = persona.person_model_state
         if ctx.session_id in state.reflected_session_ids:
             self.last_status = "skipped"
@@ -736,7 +745,9 @@ class PersonaHypothesisUpdater:
                     format=response_format,
                     wrapper_removed=response_format == "single_json_fence",
                 )
-                data = json.loads(json_text, parse_constant=_reject_nonfinite_json)
+                data = json.loads(json_text, parse_constant=_reject_nonfinite_json,
+                                  **({"object_pairs_hook": _unique_review_object}
+                                     if self.itemwise_review else {}))
             else:
                 data = _parse_json_object(raw)
             if not isinstance(data, dict):
@@ -757,7 +768,7 @@ class PersonaHypothesisUpdater:
         if (
             "changes" not in data
             or not isinstance(raw_changes, list)
-            or not all(isinstance(item, dict) for item in raw_changes)
+            or (not self.itemwise_review and not all(isinstance(item, dict) for item in raw_changes))
         ):
             self.last_status = "failed"
             self.last_error_type = "invalid_json_response"
@@ -771,7 +782,8 @@ class PersonaHypothesisUpdater:
         if self.evidence_review_protocol:
             raw_reviews = data.get("reviews")
             try:
-                data, reviews = self._reviewed_changes(data, persona, ctx, now)
+                data, reviews = (self._reviewed_changes_itemwise(data, persona, ctx, now)
+                                 if self.itemwise_review else self._reviewed_changes(data, persona, ctx, now))
             except (ValueError, TypeError, KeyError) as error:
                 self.last_status = "failed"
                 self.last_error_type = "invalid_evidence_review_protocol"
@@ -803,23 +815,54 @@ class PersonaHypothesisUpdater:
                 "review_count": len(reviews), "applied_review_count": len(applied_ids),
                 "dispositions": [review.disposition for review in reviews],
             }
-            self._record_proposal_outcomes(
-                raw_changes, {raw["id"]: review for raw, review in zip(raw_reviews, reviews)},
-                review_status="completed",
-                selected_review_ids={change["_review_record_id"] for change in changes},
-            )
+            if self.itemwise_review:
+                self.last_review_summary.update(
+                    itemwise_review=True, submitted_review_count=len(raw_reviews),
+                    accepted_review_count=len(reviews),
+                    rejected_review_count=len(raw_reviews) - len(reviews),
+                )
+                self._finish_itemwise_outcomes(changes)
+            else:
+                self._record_proposal_outcomes(
+                    raw_changes, {raw["id"]: review for raw, review in zip(raw_reviews, reviews)},
+                    review_status="completed",
+                    selected_review_ids={change["_review_record_id"] for change in changes},
+                )
 
         state.sessions_observed += 1
         state.reflected_session_ids.append(ctx.session_id)
         state.reflected_session_ids = state.reflected_session_ids[-100:]
         state.last_reflected_at = now
-        self.last_status = "ok"
+        self.last_status = (
+            "partial" if self.itemwise_review and (
+                any(row["status"] == "rejected" for row in self.last_review_results)
+                or any(row["status"] == "rejected" for row in self.last_proposal_results)
+            ) else "ok"
+        )
         self.last_error_type = None
         return persona
 
     # 兼容原有调用名；语义已经从“诊断”变为“更新系统的可推翻假设”。
     def diagnose(self, persona: PersonaProfile, ctx) -> PersonaProfile:
         return self.update(persona, ctx)
+
+    def stage_audit_summary(self) -> dict | None:
+        """Bounded processing facts; not a claim that the candidate was saved."""
+        if not self.itemwise_review or self.last_status == "not_run":
+            return None
+        review, application = self.last_review_summary or {}, self.last_application_summary or {}
+        def bounded_count(value, bound):
+            # Malformed over-bound envelopes retain their original diagnostics;
+            # they do not become plausible bounded application counts in storage.
+            return value if type(value) is int and 0 <= value <= bound else None
+        return {
+            "protocol": "reflection_itemwise_v1", "status": self.last_status,
+            "accepted_review_count": review.get("accepted_review_count"),
+            "rejected_review_count": review.get("rejected_review_count"),
+            "applied_proposal_count": bounded_count(application.get("applied_count"), 1),
+            "deferred_proposal_count": bounded_count(application.get("deferred_count"), 3),
+            "rejected_proposal_count": bounded_count(application.get("rejected_count"), 3),
+        }
 
     def _body_json_response(self, messages: list[dict]) -> str | None:
         """At most one format correction, before the evidence transaction.
@@ -855,7 +898,10 @@ class PersonaHypothesisUpdater:
             body = raw
             try:
                 body, _ = _unwrap_review_response(raw)
-                parse_reflection_json(body)
+                if self.itemwise_review:
+                    parse_reflection_json(body, itemwise_review=True)
+                else:
+                    parse_reflection_json(body)
             except (ValueError, TypeError, RecursionError) as error:
                 attempt.update(status="shape_failed", shape=reflection_shape_diagnostic(error))
                 issues = reflection_correction_issues(error, body)
@@ -881,7 +927,7 @@ class PersonaHypothesisUpdater:
         """
         results = []
         for index, raw in enumerate((raw_changes or [])[:3]):
-            relation = raw.get("relation")
+            relation = raw.get("relation") if isinstance(raw, dict) else None
             result = {
                 "proposal_index": index,
                 "proposed_relation": relation if isinstance(relation, str) and relation in _RELATIONS else None,
@@ -931,7 +977,141 @@ class PersonaHypothesisUpdater:
             **{f"{key}_count": value for key, value in counts.items()},
         }
 
-    def _reviewed_changes(self, data: dict, persona: PersonaProfile, ctx, now: str) -> tuple[dict, list[PersonEvidenceReview]]:
+    def _reviewed_changes_itemwise(self, data: dict, persona: PersonaProfile, ctx, now: str):
+        """Classify all proposals against one unchanged pre-transaction profile.
+
+        The original evidence validator remains the authority. Failed items
+        never supply identity, event state or evidence to a later item. All
+        ambiguous duplicate participants are rejected, regardless of order.
+        """
+        from .reflection_contract import (
+            validate_reflection_response_envelope, validate_reflection_review_shape,
+            validate_reflection_change_shape,
+        )
+        validate_reflection_response_envelope(data)
+        raw_reviews, raw_changes = data["reviews"], data["changes"]
+        counts = Counter(raw.get("id") for raw in raw_reviews
+                         if isinstance(raw, dict) and isinstance(raw.get("id"), str))
+        valid_raw_reviews, reviews = [], []
+        by_local_id = {}
+        accepted_event_signatures = {}
+        for index, raw in enumerate(raw_reviews):
+            outcome = {"review_index": index, "status": "rejected", "reason": None}
+            try:
+                if isinstance(raw, dict) and isinstance(raw.get("id"), str) and counts[raw["id"]] > 1:
+                    raise ValueError("duplicate_or_invalid_review_id")
+                try:
+                    validate_reflection_review_shape(raw)
+                except ValueError:
+                    raise ValueError("invalid_review_shape") from None
+                _, accepted = self._reviewed_changes(
+                    {"protocol_version": "2.0", "reviews": [raw], "changes": []}, persona, ctx, now,
+                    accepted_event_signatures=accepted_event_signatures,
+                )
+            except (ValueError, TypeError, KeyError) as error:
+                outcome["reason"] = _safe_reflection_error_detail(error, "invalid_review_shape")
+            else:
+                valid_raw_reviews.append(raw)
+                reviews.append(accepted[0])
+                by_local_id[raw["id"]] = accepted[0]
+                accepted_event_signatures[accepted[0].event_signature] = accepted[0].event_id
+                accepted_event_signatures.update({
+                    f"source:{ctx.session_id}:{quote.turn_index}": accepted[0].event_id
+                    for quote in accepted[0].event_evidence
+                })
+                outcome.update(status="accepted", reason=accepted[0].disposition)
+            self.last_review_results.append(outcome)
+
+        # The first pass admits rows independently. Resolve the entire valid
+        # batch once against the same old profile before exposing canonical
+        # dispositions/counts; provisional first-row eligibility is not final.
+        if valid_raw_reviews:
+            _, reviews = self._reviewed_changes(
+                {"protocol_version": "2.0", "reviews": valid_raw_reviews, "changes": []},
+                persona, ctx, now,
+            )
+            by_local_id = {raw["id"]: row for raw, row in zip(valid_raw_reviews, reviews)}
+            for result in self.last_review_results:
+                if result["status"] == "accepted":
+                    local_id = raw_reviews[result["review_index"]]["id"]
+                    result["reason"] = by_local_id[local_id].disposition
+
+        duplicate_bindings = Counter(raw.get("review_id") for raw in raw_changes
+                                     if isinstance(raw, dict) and isinstance(raw.get("review_id"), str))
+        prepared = []
+        for index, raw in enumerate(raw_changes):
+            relation = raw.get("relation") if isinstance(raw, dict) else None
+            outcome = {
+                "proposal_index": index,
+                "proposed_relation": relation if isinstance(relation, str) and relation in _RELATIONS else None,
+                "review_status": "completed", "status": "rejected", "reason": None,
+                "scope_basis": "not_evaluated", "contract_warning": None,
+            }
+            try:
+                local_id = raw.get("review_id") if isinstance(raw, dict) else None
+                if isinstance(local_id, str) and duplicate_bindings[local_id] > 1:
+                    raise ValueError("one_review_cannot_duplicate_changes")
+                try:
+                    validate_reflection_change_shape(raw)
+                except ValueError:
+                    raise ValueError("invalid_change_shape") from None
+                if local_id not in by_local_id:
+                    raise ValueError("bound_review_rejected")
+                # All valid reviews are supplied, even those without a change:
+                # an eligible counter still takes priority over support.
+                checked, checked_reviews = self._reviewed_changes(
+                    {"protocol_version": "2.0", "reviews": valid_raw_reviews, "changes": [raw]},
+                    persona, ctx, now,
+                )
+            except (ValueError, TypeError, KeyError) as error:
+                outcome["reason"] = _safe_reflection_error_detail(error, "invalid_change_shape")
+            else:
+                canonical = by_local_id[local_id]
+                checked_review = next(item for item in checked_reviews if item.id == canonical.id)
+                canonical.disposition = checked_review.disposition
+                prepared.extend(checked["changes"])
+                outcome.update(status="validated", reason=canonical.disposition)
+                # The private local mapping uses the original index; no zip of
+                # filtered and unfiltered arrays can misattribute a rejection.
+                self._itemwise_reviews_by_local_id[index] = canonical
+            self._itemwise_proposals.append(outcome)
+        return {"changes": prepared}, reviews
+
+    def _finish_itemwise_outcomes(self, selected: list[dict]) -> None:
+        selected_ids = {item["_review_record_id"] for item in selected}
+        results = self._itemwise_proposals
+        for row in results:
+            if row["status"] != "validated":
+                continue
+            review = self._itemwise_reviews_by_local_id[row["proposal_index"]]
+            row["scope_basis"] = "new_atomic_conditions" if review.hypothesis_id is None else "existing_claim_scope"
+            row["reason"] = review.disposition
+            if review.disposition == "applied":
+                row["status"] = "applied"
+            elif review.disposition == "eligible_not_applied":
+                is_selected = review.id in selected_ids
+                row["status"] = "rejected" if is_selected else "deferred"
+                row["reason"] = "validated_change_not_applied" if is_selected else "not_selected_for_application"
+            else:
+                row["status"] = "deferred"
+                if review.disposition != "same_claim_counter_takes_priority":
+                    row["contract_warning"] = "ineligible_review_has_change"
+        self.last_proposal_results = results
+        statuses = {row["status"] for row in results}
+        self.last_application_summary = {
+            "prompt_contract_version": EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION,
+            "itemwise_review": True, "review_status": "completed",
+            "status": "no_proposal" if not results else next(iter(statuses)) if len(statuses) == 1 else "mixed",
+            "proposal_count": len(results), "proposal_results_count": len(results),
+            "omitted_proposal_results_count": 0,
+            **{f"{status}_count": sum(row["status"] == status for row in results)
+               for status in ("applied", "deferred", "rejected")},
+        }
+
+    def _reviewed_changes(
+        self, data: dict, persona: PersonaProfile, ctx, now: str, *,
+        accepted_event_signatures: dict[str, str] | None = None,
+    ) -> tuple[dict, list[PersonEvidenceReview]]:
         """Validate 2.0 before mutating either ledger; relation truth is still reviewable.
 
         An exact quote proves provenance, not speaker ownership or semantic
@@ -945,12 +1125,10 @@ class PersonaHypothesisUpdater:
             raise ValueError("review_or_change_bound_exceeded")
         fields = {
             "id", "hypothesis_id", "claim_quote", "scope_quote", "applicability", "relation",
-            "evidence_basis", "event_kind", "prior_event_id", "evidence", "event_evidence",
+            "evidence_basis", "evidence", "event_evidence",
             "reason", "event_summary",
         }
         known = {h.id: h for h in persona.person_hypotheses}
-        known_events = {review.event_id for review in persona.evidence_review_ledger}
-        known_events.update(e.event_id for h in persona.person_hypotheses for e in h.evidence if e.event_id)
         # Identity signatures use quoted event context, never an invented model
         # summary. A same signature cannot become a new event by changing its id.
         signatures = {
@@ -959,6 +1137,20 @@ class PersonaHypothesisUpdater:
         }
         signatures.update({e.event_signature: e.event_id for h in persona.person_hypotheses
                            for e in h.evidence if e.event_signature and e.event_id})
+        # Only the immutable pre-transaction ledger can make a correction an
+        # already-seen event. A support review earlier in THIS batch has not
+        # earned evidence and must not consume a later counter's eligibility.
+        prior_event_ids = {row.event_id for row in persona.evidence_review_ledger}
+        prior_event_ids.update(e.event_id for h in persona.person_hypotheses
+                               for e in h.evidence if e.event_id)
+        signatures.update(accepted_event_signatures or {})
+        # Original source identity, independent of which substring a review
+        # chooses. Requoting another part of the same turn is not a new event.
+        source_events = {
+            (row.session_id, quote.turn_index): row.event_id
+            for row in persona.evidence_review_ledger for quote in row.event_evidence
+        }
+        known_event_ids = set(signatures.values())
         reviews: list[PersonEvidenceReview] = []
         by_local_id = {}
         for raw in raw_reviews:
@@ -981,46 +1173,73 @@ class PersonaHypothesisUpdater:
                 raise ValueError("invalid_review_relation")
             if raw["evidence_basis"] not in {"stated_preference", "observed_response", "repeated_pattern", "context_only"}:
                 raise ValueError("invalid_evidence_basis")
-            if raw["event_kind"] not in {"new_event", "same_event", "retrospective", "unknown"}:
-                raise ValueError("invalid_event_kind")
-            prior_event = raw["prior_event_id"]
-            if prior_event is not None and (not isinstance(prior_event, str) or prior_event not in known_events):
-                raise ValueError("unknown_prior_event_reference")
-            if raw["event_kind"] == "same_event" and prior_event is None:
-                raise ValueError("same_event_requires_known_reference")
-            if raw["event_kind"] == "new_event" and prior_event is not None:
-                raise ValueError("new_event_cannot_reference_old_event")
             if any(not isinstance(raw[k], str) or not raw[k].strip() or len(raw[k]) > 240 for k in ("reason", "event_summary")):
                 raise ValueError("invalid_bounded_review_explanation")
             evidence = _review_quotes(raw["evidence"], ctx)
             event_evidence = _review_quotes(raw["event_evidence"], ctx)
             signature = _event_signature([q.quote for q in event_evidence])
-            matched_event = signatures.get(signature)
-            if prior_event is not None and matched_event is not None and prior_event != matched_event:
-                raise ValueError("event_reference_disagrees_with_known_quote_signature")
-            event_id = prior_event or matched_event or "evt_" + hashlib.sha256(
-                (persona.user_id + ":" + signature).encode("utf-8")
+            # Full original turns also deduplicate changed excerpts when the
+            # exact source is replayed in another session. This is provenance
+            # identity, never a semantic guess that two stories mean the same.
+            source_signature = _event_signature([
+                ctx.turns[q.turn_index].user for q in event_evidence
+            ])
+            source_event_id = "evt_" + hashlib.sha256(
+                (persona.user_id + ":" + source_signature).encode("utf-8")
             ).hexdigest()[:24]
-            disposition = "eligible_not_applied"
+            matched_event = signatures.get(signature) or next((
+                source_events[(ctx.session_id, q.turn_index)] for q in event_evidence
+                if (ctx.session_id, q.turn_index) in source_events
+            ), None)
+            matched_event = matched_event or next((
+                signatures[f"source:{ctx.session_id}:{q.turn_index}"] for q in event_evidence
+                if f"source:{ctx.session_id}:{q.turn_index}" in signatures
+            ), None)
+            if matched_event is None and source_event_id in known_event_ids:
+                matched_event = source_event_id
+            event_id = matched_event or source_event_id
+            # A novel narrated quotation does not establish event time. A
+            # current interaction instead has actual preceding delivered text
+            # in the original conversation and a quote-grounded semantic review
+            # of the user's response. No online emotion/strategy label is used.
+            event_kind = "same_event" if matched_event is not None else "new_event"
+            disposition = "event_identity_unknown_no_update"
             if raw["applicability"] != "within_scope":
                 disposition = "outside_scope_no_update" if raw["applicability"] == "outside_scope" else "unknown_scope_no_update"
             elif raw["relation"] not in {"support", "counter"} or raw["evidence_basis"] == "context_only":
                 disposition = "context_only_no_update"
-            elif raw["event_kind"] == "unknown":
-                disposition = "event_identity_unknown_no_update"
-            elif raw["event_kind"] == "same_event" or prior_event is not None or matched_event is not None:
+            elif (raw["relation"] == "counter" and hid in known
+                  and _counter_quotes_already_recorded(persona, known[hid], evidence)):
+                disposition = "same_event_no_fresh_evidence"
+            elif matched_event is not None and not (
+                raw["relation"] == "counter" and (
+                    matched_event not in prior_event_ids
+                    or hid in known and _has_new_same_event_counter(
+                        persona, known[hid], matched_event, ctx, evidence
+                    )
+                )
+            ):
                 disposition = "same_event_no_fresh_evidence"
             elif raw["relation"] == "counter" and hid is None:
                 raise ValueError("counter_requires_existing_hypothesis")
+            elif raw["relation"] == "counter":
+                # Refuting an existing inference does not require proving when
+                # the narrated past event happened. Scope, exact old identity,
+                # current original quotes and lineage still bind the correction.
+                disposition = "eligible_not_applied"
+            elif _current_interaction_evidence(ctx, raw["evidence_basis"], evidence, event_evidence):
+                disposition = "eligible_not_applied"
             prior_support = known[hid].supporting_events() if hid in known else set()
-            independent_events = len(prior_support | {event_id})
+            independent_events = len(prior_support | (
+                {event_id} if disposition == "eligible_not_applied" and raw["relation"] == "support" else set()
+            ))
             review = PersonEvidenceReview(
                 id="rev_" + hashlib.sha256((ctx.session_id + ":" + local_id).encode("utf-8")).hexdigest()[:24],
                 at=now, session_id=ctx.session_id, hypothesis_id=hid,
                 claim_quote=raw["claim_quote"], scope_quote=raw["scope_quote"],
                 applicability=raw["applicability"], relation=raw["relation"],
-                evidence_basis=raw["evidence_basis"], event_kind=raw["event_kind"],
-                event_id=event_id, prior_event_id=prior_event or matched_event,
+                evidence_basis=raw["evidence_basis"], event_kind=event_kind,
+                event_id=event_id, prior_event_id=matched_event,
                 event_signature=signature,
                 evidence=evidence, event_evidence=event_evidence,
                 reason=raw["reason"], event_summary=raw["event_summary"], disposition=disposition,
@@ -1033,8 +1252,17 @@ class PersonaHypothesisUpdater:
             )
             reviews.append(review)
             by_local_id[local_id] = review
+            signatures[signature] = event_id
+            known_event_ids.add(event_id)
+            source_events.update({(ctx.session_id, q.turn_index): event_id for q in event_evidence})
         counter_targets = {r.hypothesis_id for r in reviews
                            if r.relation == "counter" and r.disposition == "eligible_not_applied"}
+        for review in reviews:
+            if (review.hypothesis_id in counter_targets and review.relation == "support"
+                    and review.event_id not in prior_event_ids
+                    and review.disposition in {"eligible_not_applied", "same_event_no_fresh_evidence"}):
+                review.disposition = "same_claim_counter_takes_priority"
+                review.independent_event_count = len(known[review.hypothesis_id].supporting_events())
         prepared = []
         change_fields = {
             "review_id", "id", "framework", "dimension", "claim", "scope", "scope_tags", "relation",
@@ -1088,6 +1316,11 @@ class PersonaHypothesisUpdater:
                     raise ValueError("change_existing_claim_identity_mismatch")
             if not self._valid_change_shape(item):
                 raise ValueError("invalid_reviewed_change_shape")
+            if (review.relation == "counter" and review.disposition == "eligible_not_applied"
+                    and (_counter_quotes_already_recorded(persona, known[review.hypothesis_id], quotes)
+                         or review.event_id in prior_event_ids and not _has_new_same_event_counter(
+                             persona, known[review.hypothesis_id], review.event_id, ctx, quotes))):
+                review.disposition = "same_event_no_fresh_evidence"
             if review.disposition != "eligible_not_applied":
                 continue
             if review.hypothesis_id in counter_targets and review.relation == "support":
@@ -1304,12 +1537,24 @@ class PersonaHypothesisUpdater:
             scope_tags,
             relation,
         )
+        if self.evidence_review_protocol and hypothesis is not None and relation in {"counter", "retire"}:
+            try:
+                current_quotes = _review_quotes(change.get("evidence"), ctx)
+            except (TypeError, ValueError):
+                return
+            if _counter_quotes_already_recorded(persona, hypothesis, current_quotes):
+                return
         if self.evidence_review_protocol and hypothesis is not None and any(
             item.event_id == change.get("_review_event_id") for item in hypothesis.evidence
         ):
-            # Same event is not another independent vote, even if a caller
-            # bypasses the normal reviewed-change preparation path.
-            return
+            # Reusing support is forbidden. A new quoted correction may debit
+            # this claim/event once; independently recheck the actual change's
+            # quotes rather than trusting the review's private prepared flags.
+            if relation not in {"counter", "retire"}:
+                return
+            if not _has_new_same_event_counter(persona, hypothesis,
+                                               change.get("_review_event_id"), ctx, current_quotes):
+                return
         before = belief_state(hypothesis)
         if hypothesis is None:
             if relation in {"counter", "retire"}:
@@ -1595,11 +1840,93 @@ class PersonaHypothesisUpdater:
         )
 
 def _event_signature(quotes: list[str]) -> str:
-    return hashlib.sha256(json.dumps(sorted(set(quotes)), ensure_ascii=False).encode("utf-8")).hexdigest()
+    normalised = {" ".join(quote.split()) for quote in quotes}
+    return hashlib.sha256(json.dumps(sorted(normalised), ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _counter_quotes_already_recorded(persona, hypothesis, quotes) -> bool:
+    """Changing the event anchor cannot turn the same correction into a debit."""
+    review_ids = {row.review_id for row in hypothesis.evidence
+                  if row.relation == "counter" and row.review_id}
+    prior_quotes = {
+        " ".join(quote.quote.split()) for review in persona.evidence_review_ledger
+        if review.id in review_ids and review.disposition == "applied"
+        for quote in review.evidence
+    }
+    return bool(prior_quotes) and all(
+        any(" ".join(quote.quote.split()) in prior for prior in prior_quotes) for quote in quotes
+    )
+
+
+def _has_new_same_event_counter(persona, hypothesis, event_id, ctx, quotes) -> bool:
+    """A quoted correction may revise this claim/event once, never add support.
+
+    The reviewer supplies counter meaning. Code verifies the old accepted
+    source and a new current quotation; changing an interpretation, label or
+    excerpt of the same original utterance alone supplies no new evidence.
+    """
+    old = [row for row in hypothesis.evidence if row.event_id == event_id]
+    if not any(row.relation == "support" for row in old) or any(row.relation == "counter" for row in old):
+        return False
+    review_ids = {row.review_id for row in old if row.review_id}
+    prior_quotes = {
+        " ".join(quote.quote.split()) for review in persona.evidence_review_ledger
+        if review.id in review_ids and review.event_id == event_id and review.disposition == "applied"
+        for quote in [*review.evidence, *review.event_evidence]
+    }
+    if not prior_quotes:
+        return False
+    for quote in quotes:
+        source_signature = _event_signature([ctx.turns[quote.turn_index].user])
+        original_source_id = "evt_" + hashlib.sha256(
+            (persona.user_id + ":" + source_signature).encode("utf-8")
+        ).hexdigest()[:24]
+        normalised = " ".join(quote.quote.split())
+        if original_source_id != event_id and not any(normalised in prior for prior in prior_quotes):
+            return True
+    return False
+
+
+def _current_interaction_evidence(ctx, basis, evidence, event_evidence) -> bool:
+    """Check original delivery/response provenance, not meaning or chronology.
+
+    The offline reviewer owns whether the quote actually responds to the
+    preceding Aria turn and supports the claim. Code only verifies that such
+    a delivered turn and the quoted response exist in the original conversation.
+    Narrated patterns/preferences cannot acquire freshness from a new timestamp.
+    Privacy-excluded turns cannot be used even as the preceding interaction.
+    """
+    if basis != "observed_response":
+        return False
+    if ctx.working_memory.get("_offline_source_completeness", "complete") != "complete":
+        return False
+    response_turns = {q.turn_index for q in evidence}
+    if not {q.turn_index for q in event_evidence} <= response_turns:
+        return False
+    excluded = _sensitive_memory_excluded_turns(ctx)
+    deliveries = ctx.working_memory.get("_person_response_deliveries")
+    if not isinstance(deliveries, dict):
+        return False
+    return all(
+        index > 0 and index - 1 not in excluded and ctx.turns[index - 1].agent.strip()
+        and deliveries.get(str(index - 1)) == hashlib.sha256(
+            ctx.turns[index - 1].agent.encode("utf-8")
+        ).hexdigest()
+        for index in response_turns
+    )
 
 
 def _reject_nonfinite_json(value: str):
     raise ValueError("nonfinite_json_number")
+
+
+def _unique_review_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate_reflection_key")
+        value[key] = item
+    return value
 
 
 def _review_quotes(rows: Any, ctx) -> list[EvidenceReviewQuote]:

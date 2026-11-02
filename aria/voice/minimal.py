@@ -9,6 +9,7 @@ from copy import deepcopy
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from http.cookies import SimpleCookie
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -36,6 +37,7 @@ from ..engine.minimal_care_context import build_care_context
 from ..engine.policy.llm import OpenRouterLLMClient
 from ..engine.policy.minimal_calls import MinimalCallGuard, validate_limits
 from ..engine.policy.product_calls import ProductCallGuard
+from ..engine.policy.release_prompt import CompactPromptBudgetExceeded
 from ..engine.model.persona import PersonaProfile
 from ..engine.cognitive import cognitive_action, cognitive_owner_view, stage_cognitive_readiness
 from ..engine.perception.external_emotion import parse_external_emotion, external_emotion_payload
@@ -57,6 +59,7 @@ _POST_BODY_LIMIT = 16384
 _POST_BODY_TIMEOUT_SECONDS = 3.0
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _USER = "fictional-chen"
+_DEFAULT_VERSION = object()
 _CARE_QUERY = re.compile(
     r"提醒|通知|授权|撤回|延后|推迟|取消|确认|回执|护理|"
     r"(?:现在|目前|当前|什么).{0,6}状态|告诉.{0,6}(?:她|他|家人|女儿|儿子)"
@@ -67,18 +70,52 @@ def _stamp():
     return datetime.now(timezone.utc).isoformat()
 
 
-class MinimalWebApp(TextWebApp):
+from .settled_validation import SettledValidationAppMixin
+from .settled_reflection import SettledReflectionAppMixin
+from .held_input import HeldInputAppMixin
+
+
+class MinimalWebApp(HeldInputAppMixin,SettledReflectionAppMixin,SettledValidationAppMixin,TextWebApp):
     """One local fictional run; its directory must not be a real profile store."""
+    _settled_owner = _USER
 
     def __init__(self, data_dir: str | Path, *, clients=None,
                  session_idle_seconds=1200, care_service=None, sharing_service=None,
                  model_max_requests=None, model_stop_cost_usd=None,
-                 model_reservation_policy=None, model_call_guard=None):
+                 model_reservation_policy=None, model_call_guard=None,
+                 safety_delivery_version=_DEFAULT_VERSION,
+                 safety_response_instruction_version=_DEFAULT_VERSION,
+                 premodel_safety_version=_DEFAULT_VERSION):
         self.clients = clients or create_minimal_clients()
+        from ..release import engine_options
+        defaults = engine_options() if self.clients.release_profile in ("release_v1", "release_v2", "release_max_v1", "release_deepseek_v1") else {}
+        safety_delivery_version = defaults.get("safety_delivery_version", "legacy") if safety_delivery_version is _DEFAULT_VERSION else safety_delivery_version
+        safety_response_instruction_version = defaults.get("safety_response_instruction_version", "legacy") if safety_response_instruction_version is _DEFAULT_VERSION else safety_response_instruction_version
+        premodel_safety_version = defaults.get("premodel_safety_version", "legacy") if premodel_safety_version is _DEFAULT_VERSION else premodel_safety_version
+        from ..engine.risk.premodel_task import validate_premodel_safety_version
+        self.premodel_safety_version = validate_premodel_safety_version(premodel_safety_version)
+        from ..engine.risk.safety_delivery import validate_delivery_version
+        self.safety_delivery_version = validate_delivery_version(safety_delivery_version)
+        from ..engine.policy.safety_instruction import SafetyResponseInstruction
+        self._safety_response_instruction = SafetyResponseInstruction(safety_response_instruction_version)
+        if self.premodel_safety_version != "legacy":
+            from ..engine.risk.premodel_task import validate_premodel_configuration
+            validate_premodel_configuration(self.premodel_safety_version, self.safety_delivery_version,
+                self.safety_response_instruction_version, "online_turn_decision_v4_evidence")
+        if self.safety_delivery_version != "legacy":
+            from ..engine.policy import PolicyEngine
+            from ..engine.policy.online_decision import EVIDENCE_DECISION_VERSIONS, ONLINE_DECISION_VERSION_EVIDENCE
+            if PolicyEngine(fast_llm=self.clients.online).online_decision_version not in EVIDENCE_DECISION_VERSIONS:
+                raise ValueError("conditional_safety_delivery_requires_online_v4")
+        if self.safety_response_instruction_version != "legacy":
+            from ..engine.policy import PolicyEngine
+            self._safety_response_instruction.validate(
+                PolicyEngine(fast_llm=self.clients.online).online_decision_version)
         self.call_guard = None
         self._owns_call_guard = model_call_guard is None
         network_clients = [client for client in (
-            self.clients.online, self.clients.memory, self.clients.reflection,
+            self.clients.online, self.clients.memory, self.clients.reflection, self.clients.safety_review,
+            self.clients.confirm_judge,
         ) if isinstance(client, OpenRouterLLMClient)]
         if network_clients and model_call_guard is None:
             validate_limits(model_max_requests, model_stop_cost_usd)
@@ -96,6 +133,7 @@ class MinimalWebApp(TextWebApp):
         self._auto_review_quota.validate_requests({row["request_id"]: row["started_on"]
             for row in self._run["auto_review"]["events"] if row["started_on"] is not None})
         self._storage_failed = False
+        self._profile_write_conflict = False
         if care_service is not None and (care_service.external or care_service.allow_external):
             raise ValueError("最小虚构Web只允许本地护理通知；真实外发服务须独立配置与验收。")
         if sharing_service is not None:
@@ -114,7 +152,11 @@ class MinimalWebApp(TextWebApp):
                         raise ValueError("显式限额与共享调用账本不一致。")
                 if model_reservation_policy is not None and validate_reservation_policy(model_reservation_policy) != model_call_guard.policy:
                     raise ValueError("显式费用预留策略与共享调用账本不一致。")
-            guard = model_call_guard or ProductCallGuard(
+            guard_type=ProductCallGuard
+            if self.clients.release_profile in ("release_max_v1", "release_deepseek_v1"):
+                from ..engine.policy.max_release.guard import MaxReleaseCallGuard
+                guard_type=MaxReleaseCallGuard
+            guard = model_call_guard or guard_type(
                 ledger_path, max_requests=model_max_requests,
                 max_observed_cost_usd=model_stop_cost_usd,
                 reservation_policy=model_reservation_policy)
@@ -155,6 +197,12 @@ class MinimalWebApp(TextWebApp):
                 checkpoint_turns=1,
                 session_idle_seconds=session_idle_seconds,
                 demo_token=secrets.token_urlsafe(24),
+                **({"safety_delivery_version": self.safety_delivery_version}
+                   if self.safety_delivery_version != "legacy" else {}),
+                **({"safety_response_instruction_version": self.safety_response_instruction_version}
+                   if self.safety_response_instruction_version != "legacy" else {}),
+                **({"premodel_safety_version": self.premodel_safety_version}
+                   if self.premodel_safety_version != "legacy" else {}),
             )
         except BaseException:
             if self.call_guard and self._owns_call_guard:
@@ -167,6 +215,7 @@ class MinimalWebApp(TextWebApp):
         # Local demo token is not caregiver authentication.
         self.allowed_hosts = {"127.0.0.1", "localhost", "::1"}
         self._review_thread = None
+        self._waiting_submission = None
         self._review_usage_snapshot = None
         self._auto_review_dispatching = None
         self._closing = False
@@ -176,7 +225,13 @@ class MinimalWebApp(TextWebApp):
         if not self.run_path.exists():
             return {"version": 1, "mode": self.mode, "run_id": uuid.uuid4().hex,
                     "sessions": [], "turns": [], "reviews": [], "preference_reviews": [],
-                    "auto_review": default_auto_review()}
+                    "auto_review": default_auto_review(),
+                    **({"safety_delivery_version": self.safety_delivery_version}
+                       if self.safety_delivery_version != "legacy" else {}),
+                    **({"safety_response_instruction_version": self.safety_response_instruction_version}
+                       if self.safety_response_instruction_version != "legacy" else {}),
+                    **({"premodel_safety_version": self.premodel_safety_version}
+                       if self.premodel_safety_version != "legacy" else {})}
         value = json.loads(decrypt_if_needed(
             self.run_path.read_text(encoding="utf-8"), self.run_dir, who="minimal-run"))
         if (not isinstance(value, dict) or value.get("version") != 1
@@ -184,6 +239,12 @@ class MinimalWebApp(TextWebApp):
                 or any(not isinstance(value.get(key), list)
                        for key in ("sessions", "turns", "reviews"))):
             raise ValueError("minimal run is invalid; original files were retained")
+        if value.get("safety_delivery_version", "legacy") != self.safety_delivery_version:
+            raise ValueError("minimal_run_safety_delivery_version_mismatch")
+        if value.get("safety_response_instruction_version", "legacy") != self.safety_response_instruction_version:
+            raise ValueError("minimal_run_safety_response_instruction_version_mismatch")
+        if value.get("premodel_safety_version", "legacy") != self.premodel_safety_version:
+            raise ValueError("minimal_run_premodel_safety_version_mismatch")
         # Older runs have no local-rule preference review history.
         if "preference_reviews" not in value:
             value["preference_reviews"] = []
@@ -198,28 +259,41 @@ class MinimalWebApp(TextWebApp):
     def _save_run(self):
         tmp = self.run_path.with_suffix(".json.tmp")
         try:
+            self._held_before_run_save()
             tmp.write_text(encrypt_if_keyed(json.dumps(
                 self._run, ensure_ascii=False, indent=2), self.run_dir), encoding="utf-8")
             replace_with_retry(tmp, self.run_path)
+            self._held_after_run_save()
         except Exception:
             self._storage_failed = True
             self._halt_models()
             raise RuntimeError("minimal_run_store_failed") from None
 
     def _halt_models(self):
+        self._halt_models_with_mode(hard=False)
+
+    def _halt_held_models(self):
+        # Integrity failures must not be softened by an experiment subclass's
+        # ordinary model-output recovery override.
+        self._halt_models_with_mode(hard=True)
+
+    def _halt_models_with_mode(self, *, hard):
         if self.call_guard:
             if self._review_is_running() and threading.current_thread() is not self._review_thread:
                 # Set the inherited dispatch stop immediately, without waiting
                 # for the worker's ledger lock while holding the owner lock.
                 self.call_guard._stop_requested.set()
-                threading.Thread(target=self._halt_models_when_free, daemon=True).start()
+                threading.Thread(target=self._halt_models_when_free, kwargs={"hard": hard}, daemon=True).start()
                 return
-            self._halt_models_when_free()
+            self._halt_models_when_free(hard=hard)
 
-    def _halt_models_when_free(self):
+    def _halt_models_when_free(self, *, hard=False):
         if self.call_guard:
             try:
-                self.call_guard.halt()
+                if hard and hasattr(self.call_guard, "hard_stop_held"):
+                    self.call_guard.hard_stop_held()
+                else:
+                    self.call_guard.halt()
             except Exception:
                 # Its own fail-closed flag and durable pending record remain.
                 pass
@@ -229,8 +303,13 @@ class MinimalWebApp(TextWebApp):
 
     def _model_usage(self):
         if self._review_is_running() and self.call_guard:
-            return {**deepcopy(self._review_usage_snapshot),
-                    "snapshot_status": "observed_before_background", "offline_call_inflight": True}
+            state = {**deepcopy(self._review_usage_snapshot),
+                     "snapshot_status": "observed_before_background", "offline_call_inflight": True}
+            # The fees remain an explicitly old display snapshot. A newly
+            # signalled stop is immediate and cannot be masked by that snapshot.
+            if self.call_guard._stop_requested.is_set():
+                state.update(stopped=True, stop_reason=state.get("stop_reason") or "stop_requested")
+            return state
         return self.call_guard.snapshot() if self.call_guard else {"configured": False}
 
     def _model_scope(self, kind, operation_id, session_id):
@@ -262,7 +341,13 @@ class MinimalWebApp(TextWebApp):
     def _engine_for_persona(self, persona):
         return create_minimal_engine(get_scene(self.scene_id), persona,
                                      clients=self.clients, store=self.store,
-                                     delivery_block=self.delivery_block)
+                                     delivery_block=self.delivery_block,
+                                     **({"safety_delivery_version": self.safety_delivery_version}
+                                        if self.safety_delivery_version != "legacy" else {}),
+                                     **({"safety_response_instruction_version": self.safety_response_instruction_version}
+                                        if self.safety_response_instruction_version != "legacy" else {}),
+                                     **({"premodel_safety_version": self.premodel_safety_version}
+                                        if self.premodel_safety_version != "legacy" else {}))
 
     def _seed_persona(self, user_id):
         # No biography, psychological interpretation, synthetic observations,
@@ -271,7 +356,11 @@ class MinimalWebApp(TextWebApp):
 
     def _profile(self):
         pair = self._sessions.get(_USER)
-        return pair[0].persona if pair else self.store.load(_USER)
+        persona = pair[0].persona if pair else self.store.load(_USER)
+        if persona is not None and getattr(self.clients.online, "online_decision_version", None) in ("online_turn_decision_v6_semantic", "online_turn_decision_v7"):
+            from ..engine.memory.preference_status import adopt_ui_result
+            adopt_ui_result(persona, getattr(self, "_preference_last_ui_result", None))
+        return persona
 
     def _understanding(self, persona):
         if persona is None:
@@ -321,6 +410,10 @@ class MinimalWebApp(TextWebApp):
             return {
                 "ok": True, "mode": self.mode, "run_id": self._run["run_id"],
                 "model_calls_enabled": self.clients.model_calls_enabled,
+                **({"preserve_input_text": True}
+                   if self.safety_delivery_version in ("source_response_v4", "minimal_response_v1") else {}),
+                **({"premodel_safety_version": self.premodel_safety_version}
+                   if self.premodel_safety_version != "legacy" else {}),
                 "model_usage": self._model_usage(),
                 "offline_review_running": self._review_is_running(),
                 "auto_review": auto_review_view(self._run["auto_review"],
@@ -329,6 +422,7 @@ class MinimalWebApp(TextWebApp):
                 "session_id": active["session_id"] if active else None,
                 "session_number": active["number"] if active else len(sessions),
                 "sessions": sessions, "turns": deepcopy(self._run["turns"]),
+                "waiting_input": deepcopy(self._run.get("waiting_input")),
                 "reviews": deepcopy(self._run["reviews"]),
                 "preference_reviews": deepcopy(self._run["preference_reviews"]),
                 "preference_invitation": (preference_invitation_view(persona, self._sessions[_USER][1])
@@ -338,6 +432,10 @@ class MinimalWebApp(TextWebApp):
                 "offline": OfflineSessionQueue(persona).status() if persona else {"pending_count": 0},
                 "storage_failed": self._storage_failed,
                 "requires_review": self._unresolved(),
+                "settled_validation_failure_ids": sorted(self._safe_settled_validation_ids()),
+                "settled_reflection_failure_ids": sorted(self._safe_settled_reflection_ids()),
+                "held_new_input": self._held_view(),
+                "held_new_input_failure_ids": self._safe_held_turn_ids(),
                 "notice": ("本地流程示意：回复为占位；未执行模型、事实抽取或人物反思。"
                            if self.mode == "local_preview" else
                            "真实生成：在线、手动会后整理以及明确开启的自动会后整理会调用云模型；输入为虚构角色扮演。"),
@@ -431,11 +529,23 @@ class MinimalWebApp(TextWebApp):
         return {"ok": ok, **({"error": error} if error else {}), **extra, "state": self.state()}
 
     def _unresolved(self):
+        waiting = self._run.get("waiting_input")
+        if (waiting and waiting.get("status") in {"waiting", "admitted"}
+                and waiting is not self._waiting_submission
+                and not any(row.get("turn_id") == waiting.get("turn_id") for row in self._run["turns"])):
+            return True
+        try:
+            settled = self._settled_validation_ids()
+            settled |= self._held_accepted_turn_ids()
+            reflections = self._resolved_reflection_ids()
+        except Exception:
+            return True
         auto_uncertain = auto_review_view(self._run["auto_review"],
             running=self._review_is_running(), dispatching=self._auto_review_dispatching)["requires_review"]
         return self._storage_failed or auto_uncertain or any(row["status"] == "pending" or row.get("requires_review")
             or (row["status"] == "running" and not self._review_is_running())
-            for row in [*self._run["turns"], *self._run["reviews"], *self._run["preference_reviews"]])
+            for row in [*self._run["turns"], *self._run["reviews"], *self._run["preference_reviews"]]
+            if row.get("turn_id") not in settled and row.get("request_id") not in reflections)
 
     def auto_review_action(self, enabled, daily_limit=1, *, request_id=None,
                            confirmed=False, read_only=False, actor=_USER):
@@ -595,17 +705,28 @@ class MinimalWebApp(TextWebApp):
             if persona is None:
                 return self._result(False, "没有已保存的相处说明。")
             candidate = persona.model_copy(deep=True)
+            pair = self._sessions.get(_USER)
+            error = None
             try:
                 transition_preference(candidate, preference_id, action, allow_rule_preview=self.mode == "local_preview")
             except (ValueError, KeyError):
-                return self._result(False, "这条说明已变化或操作不适用，请刷新后查看。")
-            try:
-                self.store.save(candidate)
-            except Exception:
-                self._storage_failed = True
-                self._halt_models()
-                return self._result(False, "相处说明保存失败，未显示为生效；请先核查本地存储。")
-            pair = self._sessions.get(_USER)
+                error = "这条说明已变化或操作不适用，请刷新后查看。"
+            else:
+                try:
+                    self.store.save(candidate)
+                except Exception:
+                    self._storage_failed = True
+                    self._halt_models()
+                    error = "相处说明保存失败，未显示为生效；请先核查本地存储。"
+            if getattr(self.clients.online, "online_decision_version", None) in ("online_turn_decision_v6_semantic", "online_turn_decision_v7"):
+                from ..engine.memory.preference_status import record_preference_ui_result
+                observed = candidate if error is None else persona
+                record_preference_ui_result(observed, persona, preference_id, action, persisted=error is None,
+                                            rejected=error is not None and not self._storage_failed,
+                                            ctx=pair[1] if pair else None)
+                self._preference_last_ui_result = deepcopy(observed._preference_ui_result)
+            if error is not None:
+                return self._result(False, error)
             if pair is not None:
                 pair[0]._accept_offline_profile(candidate)
             return self._result()
@@ -742,11 +863,146 @@ class MinimalWebApp(TextWebApp):
                 self._save_run()
             return self._result()
 
-    def submit(self, text, turn_id, session_id, *, external_emotion=None):
+    def load_fictional_context(self, execution_input, session_id, *, fictional=False,
+                               read_only=False, actor=_USER):
+        """Explicit in-process evaluation input; deliberately has no HTTP route."""
         with self._user_lock(_USER):
-            if self.call_guard and self._review_is_running():
-                return self._result(False, "会后模型正在处理，输入尚未发送或保存；请稍后再发送。",
-                                    error_code="offline_call_inflight", transient=True, request_sent=False)
+            if fictional is not True or read_only is not False or actor != _USER:
+                return self._result(False, "虚构评测上下文仅限明确授权的本地本人入口。")
+            persona = self._profile()
+            if (self._closing or self._unresolved() or self._storage_failed
+                    or self._run["auto_review"]["enabled"] or len(self._run["sessions"]) != 1
+                    or self._run["turns"] or self._run["reviews"]
+                    or persona is None or persona.profile_origin != "fictional_roleplay"
+                    or persona.episodic_memory or persona.person_hypotheses or persona.stated_preferences):
+                return self._result(False, "虚构评测上下文必须使用全新、未预填的虚构体验。")
+            try:
+                bound = self._bind_fictional_context(_USER, session_id, execution_input)
+            except ValueError as exc:
+                return self._result(False, str(exc))
+            self._run["sessions"][0]["fictional_input"] = bound
+            try:
+                self._save_run()
+            except Exception:
+                self._storage_failed = True
+                self._halt_models()
+                return self._result(False, "虚构评测上下文保存失败，未授权提交。")
+            return self._result(fictional_input=deepcopy(bound))
+
+    def submit(self, text, turn_id, session_id, *, external_emotion=None,
+               on_safety_prelude=None, on_waiting_input=None):
+        with self.call_guard.online_interest() if self.call_guard else nullcontext():
+            return self._submit_scheduled(text, turn_id, session_id,
+                external_emotion=external_emotion, on_safety_prelude=on_safety_prelude,
+                on_waiting_input=on_waiting_input)
+
+    def _submit_scheduled(self, text, turn_id, session_id, *, external_emotion=None,
+                          on_safety_prelude=None, on_waiting_input=None):
+        guard = self.call_guard
+        options = dict(external_emotion=external_emotion, on_safety_prelude=on_safety_prelude)
+        if guard is None:
+            return self._submit_with_held_input(text, turn_id, session_id, **options)
+        waiting = None
+        with self._user_lock(_USER):
+            old_wait = self._run.get("waiting_input")
+            if old_wait and old_wait.get("status") == "waiting":
+                same = (old_wait.get("text"), old_wait.get("turn_id"), old_wait.get("session_id"),
+                        old_wait.get("external_emotion")) == (text, turn_id, session_id, external_emotion)
+                active = old_wait is self._waiting_submission
+                return self._result(False, "这句话已保存并正在等待当前请求结束。" if same and active else
+                    "已有一句话的等待状态需要核查；不会自动重新发送。", duplicate=same,
+                    accepted=same and active, request_sent=False, waiting_for_model=active)
+            if self._review_is_running():
+                try:
+                    parse_external_emotion(external_emotion)
+                except ValueError:
+                    return self._result(False, "外部情绪读数格式无效，未启动模型。", request_sent=False)
+                view = self.state()
+                if (not isinstance(turn_id, str) or not _ID.fullmatch(turn_id)
+                        or not isinstance(text, str) or not text.strip() or len(text) > 500
+                        or self._closing or self._unresolved() or self._models_stopped()
+                        or not session_id or session_id != view["session_id"]
+                        or any(row["turn_id"] == turn_id for row in self._run["turns"])):
+                    return self._result(False, "当前输入、会话或调用状态不能接受新请求；未发送模型。", request_sent=False)
+                waiting = {"turn_id": turn_id, "session_id": session_id, "text": text,
+                    "session_number": view["session_number"],
+                    "turn_index": len(self._sessions[_USER][1].turns),
+                    "external_emotion": deepcopy(external_emotion), "status": "waiting",
+                    "created_at": _stamp(), "run_id": self._run["run_id"], "request_sent": False}
+                # The existing deterministic backstop must be emitted before
+                # waiting for a background HTTP request, never after it.
+                waiting_transport = on_waiting_input if callable(on_waiting_input) else on_safety_prelude
+                if callable(waiting_transport) and self.premodel_safety_version != "legacy":
+                    engine, ctx = self._session(_USER)
+                    event = engine.pending_safety_prelude(ctx, self._text_utterance(text))
+                    if event is not None:
+                        waiting["protection_prelude"] = {**event, "status": "saved",
+                            "saved_at": _stamp(), "model_generated": False}
+                self._run["waiting_input"] = waiting
+                self._waiting_submission = waiting
+                self._save_run()
+                expected = deepcopy(waiting)
+                if callable(waiting_transport):
+                    try:
+                        if waiting_transport({"type": "input_waiting", "turn_id": turn_id,
+                                "session_id": session_id, "state": self.state()}) is not True:
+                            raise ValueError("waiting_input_transport_not_confirmed")
+                        if self._run.get("waiting_input") is not waiting or waiting != expected:
+                            raise ValueError("waiting_input_identity_changed")
+                        if "protection_prelude" in waiting:
+                            waiting["protection_prelude"].update(status="transport_returned",
+                                transport_returned_at=_stamp())
+                            self._save_run()
+                            expected = deepcopy(waiting)
+                    except Exception:
+                        self._cancel_waiting_input(waiting, "waiting_delivery_failed")
+                        self._waiting_submission = None
+                        return self._result(False, "等待状态未送达，这句话未发送模型。", request_sent=False)
+        # No owner lock is held while the already-started physical request
+        # finishes. The same accepted turn takes priority over reflection.
+        try:
+            with guard.dispatch_slot(online=True):
+                settle=getattr(guard,'wait_for_offline_failure_settlement',None)
+                if callable(settle):settle()
+                with self._user_lock(_USER):
+                    if waiting is not None:
+                        if (self._run.get("run_id") != expected["run_id"]
+                                or self._run.get("waiting_input") is not waiting):
+                            return self._result(False, "等待期间体验资料已改变，这句话未发送模型。", request_sent=False)
+                        valid = (waiting == expected and not self._closing and not self._unresolved()
+                            and not self._storage_failed and not guard.snapshot()["stopped"]
+                            and self.state()["session_id"] == session_id)
+                        if not valid:
+                            self._cancel_waiting_input(waiting, "waiting_state_changed")
+                            return self._result(False, "等待期间会话、权限或调用状态已改变，这句话未发送模型。", request_sent=False)
+                        # Persist the admission before entering the original
+                        # held/validation transaction. Its own pending turn,
+                        # provenance and fee checks remain unchanged.
+                        waiting["status"] = "admitted"
+                        waiting.pop("request_sent", None)  # The ordinary turn now owns send status.
+                        self._save_run()
+                    result = self._submit_with_held_input(text, turn_id, session_id, **options)
+                    if waiting is not None and not any(row["turn_id"] == turn_id for row in self._run["turns"]):
+                        self._cancel_waiting_input(waiting, "waiting_input_rejected")
+                        result.update(request_sent=False, state=self.state())
+                    return result
+        finally:
+            if waiting is not None:
+                with self._user_lock(_USER):
+                    if self._waiting_submission is waiting:
+                        self._waiting_submission = None
+
+    def _cancel_waiting_input(self, waiting, code):
+        waiting.update(status="cancelled", error_code=code, request_sent=False)
+        if self._run.get("waiting_input") is waiting:
+            if not any(row["turn_id"] == waiting["turn_id"] for row in self._run["turns"]):
+                self._run["turns"].append({**deepcopy(waiting), "status": "failed", "response": "",
+                    "source": "local_request_rejected", "requires_review": False,
+                    "error": "等待期间状态已改变或等待消息未送达，这句话未发送模型。"})
+            self._save_run()
+
+    def _submit_original(self, text, turn_id, session_id, *, external_emotion=None, on_safety_prelude=None):
+        with self._user_lock(_USER):
             try:
                 external_emotion = parse_external_emotion(external_emotion)
             except ValueError:
@@ -760,7 +1016,8 @@ class MinimalWebApp(TextWebApp):
                 if (old["text"] != text or old["session_id"] != session_id
                         or old.get("external_emotion") != external_payload):
                     return self._result(False, "轮次标识已用于不同输入，未再次执行。")
-                return self._result(old["status"] == "completed", old.get("error"), duplicate=True)
+                return self._result(old["status"] == "completed", old.get("error"), duplicate=True,
+                                    **{key: old[key] for key in ("error_code", "request_sent") if key in old})
             if self._unresolved():
                 return self._result(False, "请求或保存结果不明，不能自动重发或继续调用。")
             if self._models_stopped():
@@ -771,6 +1028,13 @@ class MinimalWebApp(TextWebApp):
             engine, ctx = self._session(_USER)
             if ctx.session_id != session_id:
                 return self._result(False, "会话已过期，请重新开始。")
+            session = next(row for row in self._run["sessions"] if row["session_id"] == session_id)
+            stimulus = session.get("fictional_input")
+            if stimulus is not None and (ctx.turns
+                    or ctx.working_memory.get("_fictional_web_input") != stimulus
+                    or text != stimulus["messages"][-1]["content"]):
+                return self._result(False, "虚构评测上下文仅允许原样提交绑定的当前一句一次。",
+                                    error_code="fictional_context_mismatch", request_sent=False)
             if is_simulated(external_emotion):
                 capability = getattr(engine, "external_emotion_experiment", None)
                 if capability is None:
@@ -794,6 +1058,82 @@ class MinimalWebApp(TextWebApp):
             # Persist the stable attempt before any model or business operation.
             self._save_run()
             started = time.perf_counter()
+            prelude_failed = False
+            run_identity = self._run["run_id"]
+            attempts_before = (self.call_guard.snapshot().get("calls_used")
+                               if self.call_guard else None)
+
+            def deliver_prelude(event):
+                # This is a trusted in-process capability, never a request-body
+                # permission. Persist before transport; persist its return before
+                # allowing the engine to start the one model request.
+                nonlocal prelude_failed
+                saved_prelude = None
+                try:
+                    expected = {"version", "premodel_safety_version", "user_id", "session_id",
+                                "scene_id", "turn_index", "utterance_sha256", "protection",
+                                "protection_sha256"}
+                    utterance = self._text_utterance(text)
+                    if (self.premodel_safety_version not in ("task_response_v1", "task_response_v2", "task_response_v3", "task_response_v4")
+                            or type(event) is not dict or set(event) != expected
+                            or event.get("version") != "safety_prelude_v1"
+                            or event.get("premodel_safety_version") != self.premodel_safety_version
+                            or (event.get("user_id"), event.get("session_id"), event.get("scene_id"))
+                               != (_USER, session_id, ctx.scene_id)
+                            or type(event.get("turn_index")) is not int
+                            or event["turn_index"] != row["turn_index"]
+                            or event.get("utterance_sha256") != hashlib.sha256(utterance.encode()).hexdigest()
+                            or type(event.get("protection")) is not str
+                            or not 0 < len(event["protection"]) <= 4096
+                            or event.get("protection_sha256") != hashlib.sha256(event["protection"].encode()).hexdigest()
+                            or "protection_prelude" in row):
+                        raise ValueError("invalid_current_safety_prelude")
+                    waiting = self._run.get("waiting_input") or {}
+                    early = waiting.get("protection_prelude")
+                    if (early is not None and waiting.get("turn_id") == turn_id
+                            and waiting.get("session_id") == session_id):
+                        if (waiting.get("status") != "admitted" or early.get("status") != "transport_returned"
+                                or {key: early.get(key) for key in expected} != event):
+                            raise ValueError("waiting_safety_prelude_changed")
+                        row["protection_prelude"] = deepcopy(early)
+                        self._save_run()
+                        return True  # Already transported before the wait.
+                    row["protection_prelude"] = {**deepcopy(event), "status": "saved",
+                                                "saved_at": _stamp(), "model_generated": False}
+                    saved_prelude = deepcopy(row["protection_prelude"])
+                    self._save_run()
+                    saved_bytes = self.run_path.read_bytes()
+                    saved_row = json.dumps(row, sort_keys=True, ensure_ascii=False, allow_nan=False)
+                    frame = {"type": "safety_prelude", "turn_id": turn_id,
+                             "session_id": session_id, "state": self.state()}
+                    if on_safety_prelude(deepcopy(frame)) is not True:
+                        raise ValueError("safety_prelude_transport_not_confirmed")
+                    if (self._run.get("run_id") != run_identity
+                            or not any(item is row for item in self._run["turns"])
+                            or json.dumps(row, sort_keys=True, ensure_ascii=False, allow_nan=False) != saved_row
+                            or self.run_path.read_bytes() != saved_bytes
+                            or (row.get("turn_id"), row.get("session_id"), row.get("text"), row.get("status"))
+                               != (turn_id, session_id, text, "pending")
+                            or self._sessions.get(_USER, (None, None))[1] is not ctx
+                            or self._storage_failed or row.get("requires_review")
+                            or self.premodel_safety_version not in ("task_response_v1", "task_response_v2", "task_response_v3", "task_response_v4")
+                            or self.premodel_safety_version != saved_prelude["premodel_safety_version"]
+                            or self._models_stopped()):
+                        raise ValueError("safety_prelude_identity_or_state_changed")
+                    row["protection_prelude"].update(status="transport_returned",
+                                                     transport_returned_at=_stamp())
+                    self._save_run()
+                    return True
+                except Exception:
+                    prelude_failed = True
+                    row["requires_review"] = True
+                    if saved_prelude is not None:
+                        row["protection_prelude"] = saved_prelude
+                    if "protection_prelude" in row:
+                        row["protection_prelude"]["status"] = "transport_or_save_unknown"
+                    self._halt_models()
+                    raise
+
             try:
                 ctx.working_memory.pop("prompt_evidence_snapshot", None)
                 # Only the explicitly model-disabled preview can expose local
@@ -801,13 +1141,27 @@ class MinimalWebApp(TextWebApp):
                 ctx.working_memory["_local_preference_preview"] = self.mode == "local_preview"
                 if "care_context" in row:
                     ctx.working_memory["minimal_care_context"] = deepcopy(row["care_context"])
+                local_budget_error = None
                 with self._model_scope("turn", turn_id, session_id):
-                    result = super().text_turn(_USER, text, turn_id=turn_id, external_emotion=external_emotion)
-                    if (isinstance(self.call_guard, ProductCallGuard) and
+                    prelude_options = ({"safety_prelude": deliver_prelude}
+                        if self.premodel_safety_version in ("task_response_v1", "task_response_v2", "task_response_v3", "task_response_v4") and callable(on_safety_prelude) else {})
+                    try:
+                        result = super().text_turn(_USER, text, turn_id=turn_id,
+                                                  external_emotion=external_emotion, **prelude_options)
+                    except CompactPromptBudgetExceeded as error:
+                        # The scope deliberately halts on any escaping error.
+                        # Defer this one typed construction failure until its
+                        # zero-attempt classification below; never clear a halt.
+                        local_budget_error = error
+                    if (local_budget_error is None and isinstance(self.call_guard, ProductCallGuard) and
                             (ctx.working_memory.get("model_route") or {}).get("reply", {}).get("source") == "deterministic_fallback"):
                         self.call_guard.note_output_failure()
+                if local_budget_error is not None:
+                    raise local_budget_error
                 if not result["ok"]:
                     raise RuntimeError("turn_failed")
+                if prelude_failed:
+                    raise RuntimeError("safety_prelude_not_confirmed")
                 route = (ctx.working_memory.get("model_route") or {}).get("reply", {})
                 failed = route.get("source") == "deterministic_fallback"
                 from ..engine.policy.delivery_provenance import delivery_protection
@@ -817,6 +1171,10 @@ class MinimalWebApp(TextWebApp):
                 local_rejection = (self.call_guard.snapshot().get("last_request_rejection", {})
                                    if product_fallback else {})
                 local_rejected = local_rejection.get("operation_id") == turn_id
+                if failed and not product_fallback and self._held_run_guard_ready:
+                    # The guard validates accepted holds against the persisted
+                    # pending turn. Stop before changing that turn in memory.
+                    self._halt_models()
                 row.update(status="failed" if failed else "completed",
                            response=(result["response"] if product_fallback and not hard_stop else "") if failed else result["response"],
                            source=("local_request_rejected" if local_rejected else
@@ -841,15 +1199,57 @@ class MinimalWebApp(TextWebApp):
                                         "模型调用受费用、限额或完整性保护停止；请核查记录，不能用恢复按钮解除。" if hard_stop else
                                         "本轮使用系统兜底回复，不是模型生成；可继续下一轮，不重发本轮内容。")
                     else:
-                        self._halt_models()
+                        if not self._held_run_guard_ready:
+                            self._halt_models()
                         row["requires_review"] = True
                         row["error"] = "模型调用或返回失败，本轮没有可用的模型回复；已停止后续调用，需先核查结果与费用。"
+            except CompactPromptBudgetExceeded as error:
+                # A typed construction error is recoverable only when the
+                # durable product ledger proves this turn sent no request.
+                current = self.call_guard.snapshot() if self.call_guard else {}
+                local_only = (type(error) is CompactPromptBudgetExceeded
+                    and ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v7"
+                    and type(attempts_before) is int and current.get("calls_used") == attempts_before
+                    and not current.get("stopped") and current.get("unknown_cost_requests") == 0
+                    and not self._storage_failed and not prelude_failed)
+                if local_only:
+                    row.update(status="failed", response="", source="local_request_rejected",
+                        requires_review=False, request_sent=False,
+                        error_code="compact_online_system_byte_limit_exceeded",
+                        error="本轮必要上下文超过发送上限，未向模型发送请求；可继续下一轮，本轮不会自动重发。",
+                        elapsed_ms=round((time.perf_counter() - started) * 1000))
+                else:
+                    self._halt_models()
+                    row["error"] = "生成或保存未完成，结果可能不明；已停止自动重试。"
             except Exception:
                 self._halt_models()
                 # The model might already have run. Keep the durable attempt pending;
                 # a read or restart must not retry it under a new ID.
                 row["error"] = "生成或保存未完成，结果可能不明；已停止自动重试。"
             finally:
+                premodel = ctx.working_memory.get("premodel_task")
+                if (self.premodel_safety_version != "legacy" and type(premodel) is dict
+                        and premodel.get("turn_index") == row["turn_index"]
+                        and premodel.get("session_id") == session_id):
+                    row["premodel_task"] = deepcopy(premodel)
+                # A render audit is not proof of successful visible delivery.
+                # Keep only this turn's hash/enum metadata, never a stale turn.
+                safety_delivery = ctx.working_memory.get("safety_delivery")
+                if (self.safety_delivery_version != "legacy" and type(safety_delivery) is dict
+                        and safety_delivery.get("turn_index") == row["turn_index"]
+                        and safety_delivery.get("session_id") == session_id
+                        and safety_delivery.get("user_id") == _USER):
+                    row["safety_delivery_render"] = deepcopy(safety_delivery)
+                safety_review = ctx.working_memory.get("safety_review")
+                if (type(safety_review) is dict and safety_review.get("turn_index") == row["turn_index"]
+                        and ctx.session_id == session_id and ctx.user_id == _USER):
+                    row["safety_review"] = deepcopy(safety_review)
+                instruction = ctx.working_memory.get("safety_response_instruction")
+                if (self.safety_response_instruction_version != "legacy" and type(instruction) is dict
+                        and instruction.get("turn_index") == row["turn_index"]
+                        and instruction.get("session_id") == session_id
+                        and instruction.get("user_id") == _USER):
+                    row["safety_response_instruction"] = deepcopy(instruction)
                 # Freeze what this turn's builder selected, including failures.
                 # Never reconstruct old input from a later profile revision.
                 evidence = ctx.working_memory.get("prompt_evidence_snapshot")
@@ -873,12 +1273,17 @@ class MinimalWebApp(TextWebApp):
                 # Never reuse a snapshot in the next chat or offline reasoning.
                 ctx.working_memory.pop("minimal_care_context", None)
             self._save_run()
-            return self._result(row["status"] == "completed", row.get("error"))
+            return self._result(row["status"] == "completed", row.get("error"),
+                                **{key: row[key] for key in ("error_code", "request_sent") if key in row})
 
     def end(self, user_id=_USER, *, process_offline=None):
         # Seal first. Only the separately confirmed automatic option may start
         # a first background review; process shutdown suppresses that option.
         with self._user_lock(_USER):
+            if self._profile_write_conflict:
+                return {"ok": False,
+                    "error": "本地资料与当前会话来源不一致，原记录保持；核查前不会用旧会话覆盖保存。",
+                    "active_session_retained": _USER in self._sessions}
             if _USER not in self._sessions:
                 persona = self.store.load(_USER)
                 pending = persona.pending_session if persona else None
@@ -975,6 +1380,9 @@ class MinimalWebApp(TextWebApp):
             return self._result(final["status"] == "completed", final.get("error"))
 
     def _run_review(self, request_id, run_id, session_id, persona):
+        return self._run_review_with_settled_reflection(request_id,run_id,session_id,persona)
+
+    def _run_review_original(self, request_id, run_id, session_id, persona):
         stage_store = _OfflineStageStore(self, run_id, session_id, persona)
         values = {}
         halt_requested = False
@@ -1039,12 +1447,15 @@ class MinimalWebApp(TextWebApp):
                 if event is not None:
                     event.update(status="pending", reason="result_requires_review")
 
-    def forget_run(self):
+    def _forget_run_original(self):
         with self._user_lock(_USER):
+            held_markers=self._begin_held_forget()
             self.sharing.forget()
             self.care.forget_elder(_USER)
             # Delete durable files first. A failed deletion retains the RAM copy.
             self.store.delete(_USER)
+            self._forget_settled_validation_metadata()
+            self._forget_settled_reflection_metadata()
             for path in (self.run_path, self.run_path.with_suffix(".json.tmp")):
                 path.unlink(missing_ok=True)
             self._sessions.clear()
@@ -1054,7 +1465,9 @@ class MinimalWebApp(TextWebApp):
                 self._run["model_allowance"] = {"ledger_id": self.call_guard.ledger_id,
                                                 "policy_sha256": self.call_guard.policy_sha256}
             self._storage_failed = False
-            return self._result()
+            self._profile_write_conflict = False
+            self._complete_held_forget(held_markers)
+            return None
 
     def close(self):
         # Preserve failures in RAM until the owner explicitly retries sealing.
@@ -1090,11 +1503,21 @@ class _OfflineStageStore:
 
     def save(self, proposed):
         with self.app._user_lock(_USER):
-            current = self.app._profile()
             try:
-                if (self.app._run["run_id"] != self.run_id or current is None
+                if (self.app._run["run_id"] != self.run_id
                         or self.app._closing or self.app._storage_failed):
                     raise OfflineReviewCancelled("offline_run_removed")
+                current = self.app.store.load(_USER)
+                pair = self.app._sessions.get(_USER)
+                if (current is None or pair is not None
+                        and pair[0].persona.model_dump(mode="json") != current.model_dump(mode="json")):
+                    # An owner API updates its checkpoint and active cache in
+                    # one owner-locked operation. A different durable value is
+                    # not this worker's state to overwrite or bless as consent.
+                    self.app._profile_write_conflict = True
+                    self.app._storage_failed = True
+                    self.app._halt_held_models()
+                    raise OfflineReviewCancelled("offline_owner_profile_changed")
                 merged = merge_offline_stage(self.before, proposed, current, self.session_id)
             except OfflineReviewCancelled:
                 self.cancelled = True
@@ -1109,6 +1532,8 @@ class _OfflineStageStore:
             # current owner withdrawals and the reconciled live profile.
             for field in type(proposed).model_fields:
                 setattr(proposed, field, deepcopy(getattr(merged, field)))
+            from ..engine.memory.preference_status import copy_preference_provenance
+            copy_preference_provenance(proposed, merged)
             self.before = merged.model_copy(deep=True)
 
 
@@ -1187,6 +1612,37 @@ def make_minimal_handler(app):
             self.end_headers()
             self.wfile.write(payload)
 
+        def _stream_text(self, body):
+            # Existing localhost/token/body checks run before this method.
+            # HTTP/1.0 close delimits the stream; every frame is complete JSON.
+            self.close_connection = True
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self._security_headers()
+            self.send_header("Connection", "close")
+            self.end_headers()
+
+            def write_frame(frame):
+                self.wfile.write((json.dumps(frame, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8"))
+                self.wfile.flush()
+                # This records only transport return, never user reading.
+                return True
+
+            try:
+                result = app.submit(body.get("text"), body.get("turn_id"), body.get("session_id"),
+                                    external_emotion=body.get("external_emotion"),
+                                    on_safety_prelude=write_frame, on_waiting_input=write_frame)
+            except Exception:
+                try:
+                    result = app._result(False, "本地处理或保存未完成；已发送的保护内容保留，请刷新核查，不要重发。")
+                except Exception:
+                    result = {"ok": False, "error": "本地保存状态不可读取，请核查原记录；不要重发。"}
+            try:
+                write_frame({"type": "result", "turn_id": body.get("turn_id"),
+                             "session_id": body.get("session_id"), "result": result})
+            except (OSError, ValueError):
+                pass  # A disconnected client must not restart the saved turn.
+
         def do_GET(self):  # noqa: N802
             route = urlparse(self.path).path
             if not self._request_allowed(api=route.startswith("/api/")):
@@ -1244,6 +1700,9 @@ def make_minimal_handler(app):
                 "/api/minimal/resume-models": lambda body: app.resume_models(
                     body.get("request_id"), body.get("pause_id"), confirmed=body.get("confirmed"),
                     read_only=body.get("replay", False), actor=body.get("actor", _USER)),
+                "/api/minimal/continue-new-input": lambda body: app.continue_new_input(
+                    body.get("request_id"),body.get("failure_id"),body.get("session_id"),
+                    confirmed=body.get("confirmed"),read_only=body.get("replay",False),actor=body.get("actor",_USER)),
                 "/api/minimal/preference": lambda body: app.preference_action(
                     body.get("action"), body.get("id"), read_only=body.get("replay", False)),
                 "/api/minimal/preference-invitation": lambda body: app.preference_invitation(
@@ -1275,7 +1734,7 @@ def make_minimal_handler(app):
                 except OSError:
                     pass  # The client may already have closed its connection.
                 return
-            if route not in actions and route not in {"/api/care/login", "/api/care/logout"}:
+            if route not in actions and route not in {"/api/care/login", "/api/care/logout", "/api/minimal/text-stream"}:
                 self.send_error(404)
                 return
             if not self._request_allowed(api=True):
@@ -1288,6 +1747,12 @@ def make_minimal_handler(app):
                 self._json({"ok": False, "error": "请求格式或大小无效。"}, 400)
                 return
             try:
+                if route == "/api/minimal/text-stream":
+                    if app.premodel_safety_version not in ("task_response_v1", "task_response_v2", "task_response_v3", "task_response_v4"):
+                        self._json({"ok": False, "error": "当前运行未启用分阶段回应。"}, 409)
+                        return
+                    self._stream_text(body)
+                    return
                 if route == "/api/care/login":
                     token = app.care.login(body.get("username"), body.get("password"))
                     self._care_json({"ok": True}, token=token)

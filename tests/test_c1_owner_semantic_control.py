@@ -85,7 +85,12 @@ def test_schema_and_prompt_bound_current_semantics_without_enable_share_power():
     assert "C1本人权限语义" in messages[0]["content"]
 
 
-def test_empty_personality_ledger_accepts_only_third_literal_same_event_in_c1():
+@pytest.mark.parametrize("signal,expected_counting", [
+    ("explicit_change", [False, False, True]),
+    (None, [False, False, False]),
+    ("context", [False, False, False]),
+])
+def test_empty_personality_ledger_accepts_only_third_qualified_literal_same_event_in_c1(signal, expected_counting):
     p = enabled(); words = "早饭后的报纸放在哪里了？"
     ctx = EngineContext(user_id=p.user_id, scene_id="companion_elder")
     from aria.engine.cognitive import capture_cognitive_turn
@@ -93,8 +98,9 @@ def test_empty_personality_ledger_accepts_only_third_literal_same_event_in_c1():
         capture_cognitive_turn(ctx, p, words, now=T0 + timedelta(days=1, minutes=index))
         ctx.add_turn(words, "回应")
     rows = extract_cognitive_rows([{"domain": "repetition", "turn_index": index,
-             "evidence_quote": words, "event_kind": "same_event"} for index in range(3)], p, ctx)
-    assert [row.counting for row in rows] == [False, False, True]
+             "evidence_quote": words, "event_kind": "same_event",
+             **({"signal": signal} if signal is not None else {})} for index in range(3)], p, ctx)
+    assert [row.counting for row in rows] == expected_counting
     assert len({row.event_id for row in rows}) == 1 and not p.evidence_review_ledger
     assert all(row.event_id.startswith("cog_event_") for row in rows)
     assert "已知同一事件出处" not in cognitive_extraction_prompt(p, ctx)[1]

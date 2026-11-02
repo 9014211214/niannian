@@ -1,0 +1,12 @@
+{
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"response\":\"先留在现在的位置。假如还无人求助，请拨打120。不要自行站起来。我可以陪你等救援。\",\"response_segments\":[{\"text\":\"先留在现在的位置。\",\"kind\":\"conversation\",\"source_quote\":\"\",\"action\":\"none\",\"target\":\"\",\"state_ref\":\"\"},{\"text\":\"假如还无人求助，请拨打120。\",\"kind\":\"conversation\",\"source_quote\":\"\",\"action\":\"none\",\"target\":\"\",\"state_ref\":\"\"},{\"text\":\"不要自行站起来。\",\"kind\":\"conversation\",\"source_quote\":\"\",\"action\":\"none\",\"target\":\"\",\"state_ref\":\"\"},{\"text\":\"我可以陪你等救援。\",\"kind\":\"conversation\",\"source_quote\":\"\",\"action\":\"none\",\"target\":\"\",\"state_ref\":\"\"}]}"
+      }
+    }
+  ]
+}

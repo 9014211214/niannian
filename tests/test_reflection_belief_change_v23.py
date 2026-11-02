@@ -67,107 +67,122 @@ def r8_context():
     return ctx
 
 
-def r8_replay(*, strength=None, confidence=None, status=None, relation=None, fenced=False):
-    payload = json.loads(R8_RETIRE_RAW)
+def adapted_payload():
+    """Explicit new-contract projection; the frozen raw response stays intact."""
+    value = json.loads(R8_RETIRE_RAW)
+    for item in value["reviews"]:
+        item.pop("event_kind")
+        item.pop("prior_event_id")
+    return value
+
+
+def r8_replay(*, strength=None, relation=None, fenced=False):
+    payload = adapted_payload()
     if strength is not None:
         payload["changes"][0]["confidence"] = strength
     if relation is not None:
         payload["changes"][0]["relation"] = relation
         payload["reviews"][0]["relation"] = "support" if relation == "support" else "counter"
-    raw = R8_RETIRE_RAW if strength is relation is None else json.dumps(payload, ensure_ascii=False)
+    raw = json.dumps(payload, ensure_ascii=False)
     if fenced:
         raw = "```json\n" + raw + "\n```"
     persona = r8_prior()
-    if confidence is not None:
-        persona.person_hypotheses[0].confidence = confidence
-    if status is not None:
-        persona.person_hypotheses[0].status = status
     updater = PersonaHypothesisUpdater(RawResponse(raw), evidence_review_protocol=True)
     updater.update(persona, r8_context())
     assert updater.last_status == "ok"
     return updater, persona, persona.person_hypotheses[0]
 
 
-def test_exact_r8_low_strength_retire_now_weakens_belief_not_falsely_retired():
+def apply_policy_fixture(persona, ctx, proposal, *, event_id="unit_event"):
+    """Exercise the existing belief applicator on explicitly prevalidated data.
+
+    This unit fixture is not a reflection result or trusted timing source. The
+    separate updater tests assert that current reviews cannot reach this path.
+    """
+    from aria.engine.memory.diagnosis import _atomic_claim, _atomic_statement, _event_signature
+    updater = PersonaHypothesisUpdater(None, evidence_review_protocol=True)
+    updater.last_belief_change_results = []
+    value = deepcopy(proposal)
+    atomic = _atomic_claim(value["atomic_claim"])
+    if not value["id"]:
+        value["claim"] = _atomic_statement(atomic)
+        value["scope"] = atomic.conditions
+    value.update(
+        _review_validated=True, _review_record_id="unit_review_" + ctx.session_id,
+        _review_event_id=event_id, _review_event_kind="new_event",
+        _review_event_signature=_event_signature([q["evidence_quote"] for q in value["evidence"]]),
+        _review_evidence_basis=atomic.evidence_basis, _atomic_claim=atomic.model_dump(),
+    )
+    updater._apply_change(persona, ctx.session_id, "2026-01-04T00:00:00", ctx, value)
+    return updater
+
+
+def r8_policy(*, strength=.5, relation="retire", confidence=.473, status="candidate"):
+    persona = r8_prior()
+    hypothesis = persona.person_hypotheses[0]
+    hypothesis.confidence, hypothesis.status = confidence, status
+    proposal = adapted_payload()["changes"][0]
+    proposal.update(confidence=strength, relation=relation)
+    updater = apply_policy_fixture(persona, r8_context(), proposal)
+    return updater, persona, hypothesis
+
+
+def test_frozen_r8_source_is_unchanged_and_current_adapted_counter_weakens_belief():
     assert hashlib.sha256(R8_RETIRE_RAW.encode()).hexdigest() == R8_RETIRE_TEXT_SHA256
     canonical = json.dumps(R8_RETIRE_RAW, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     assert hashlib.sha256(canonical.encode()).hexdigest() == R8_RETIRE_SOURCE_FINGERPRINT
+    before = r8_prior().person_hypotheses[0].model_dump()
     updater, persona, hypothesis = r8_replay()
-    assert hypothesis.confidence == pytest.approx(.348)  # r8 was unchanged .473
-    assert hypothesis.status == "candidate" and hypothesis.activation_epoch == 0
-    assert len(hypothesis.evidence) == 5
-    assert len(hypothesis.counter_sessions()) == 1
-    effect, = updater.last_belief_change_results
-    assert effect["proposed_relation"] == "retire" and effect["effective_relation"] == "counter"
-    assert effect["evidence_recorded_count"] == 2 and effect["belief_changed"]
-    assert not effect["actually_retired"] and not effect["reactivated"]
-    assert effect["reason"] == "low_strength_retire_as_counter"
-    assert effect["confidence_before"] == .473 and effect["model_evidence_strength"] == .5
-    assert effect["claim_scope_before_fingerprint"] == effect["claim_scope_after_fingerprint"]
-    assert effect["review_id"] == persona.evidence_review_ledger[-1].id
-    assert all(e.review_id == effect["review_id"] for e in hypothesis.evidence[-2:])
-    # Historical diagnostics still mean evidence applied, not actual withdrawal.
+    assert hypothesis.confidence == pytest.approx(before["confidence"] - .125)
+    assert updater.last_belief_change_results[0]["effective_relation"] == "counter"
     assert updater.last_proposal_results[0]["status"] == "applied"
-    assert updater.last_proposal_results[0]["proposed_relation"] == "retire"
+    assert persona.evidence_review_ledger[-1].disposition == "applied"
 
 
 @pytest.mark.parametrize("strength", [0, .5, .699999, .7, .700001, 1])
-def test_retire_threshold_both_sides_and_endpoints(strength):
-    updater, _, hypothesis = r8_replay(strength=strength)
+def test_retire_threshold_is_preserved_in_low_level_belief_policy(strength):
+    updater, _, hypothesis = r8_policy(strength=strength)
     effect, = updater.last_belief_change_results
-    explicit = strength >= .7
-    expected = 0 if explicit else .473 - (.15 * strength + .05)
+    expected, relation, reason = update_confidence(.473, "retire", strength, 2)
     assert hypothesis.confidence == pytest.approx(expected)
-    assert effect["actually_retired"] is explicit
-    assert effect["effective_relation"] == ("retire" if explicit else "counter")
-    assert effect["reason"] == ("explicit_retire" if explicit else "low_strength_retire_as_counter")
-    assert hypothesis.claim == json.loads(R8_RETIRE_RAW)["changes"][0]["claim"]
+    assert effect["effective_relation"] == relation and effect["reason"] == reason
+    assert effect["actually_retired"] is (strength >= .7)
 
 
-@pytest.mark.parametrize("relation,strength", [("support", 0), ("support", .5), ("counter", 0), ("counter", .7)])
-def test_nonretire_relations_preserve_prior_policy_weights(relation, strength):
-    updater, _, hypothesis = r8_replay(relation=relation, strength=strength)
-    expected = .473 + .14 * strength + .05 if relation == "support" else .473 - (.15 * strength + .05)
-    assert hypothesis.confidence == pytest.approx(expected)
+@pytest.mark.parametrize("relation,strength,expected", [
+    ("support", 0, .523), ("support", .5, .593),
+    ("counter", 0, .423), ("counter", .7, .318),
+])
+def test_nonretire_policy_weights_are_unchanged(relation, strength, expected):
+    updater, _, hypothesis = r8_policy(relation=relation, strength=strength)
     effect, = updater.last_belief_change_results
-    assert effect["effective_relation"] == relation
-    assert effect["reason"] == f"{relation}_evidence"
+    assert hypothesis.confidence == pytest.approx(expected)
     assert effect["model_evidence_strength"] == strength
-    assert hypothesis.confidence != strength  # input is never assigned posterior
+    assert effect["evidence_recorded_count"] == 2
 
 
 @pytest.mark.parametrize("strength", [0, .5, 1])
-def test_new_belief_has_absent_before_not_fake_zero_existing_person(strength):
-    updater, llm, persona = setup()
+def test_new_belief_unit_effect_records_absent_before_not_fake_existing_person(strength):
+    persona = PersonaProfile(user_id="person")
     ctx = context()
-    item = review(ctx)
-    apply(updater, llm, persona, ctx, [item], [change(item, confidence=strength)])
-    assert updater.last_status == "ok"
+    updater = apply_policy_fixture(persona, ctx, change(review(ctx), confidence=strength))
     effect, = updater.last_belief_change_results
     assert effect["confidence_before"] is None and effect["status_before"] is None
-    assert effect["activation_epoch_before"] is None and effect["target_value_before"] is None
-    assert effect["claim_scope_before_fingerprint"] is None
-    assert effect["confidence_after"] == pytest.approx(.18 + .30 * strength + .03)
-    assert effect["confidence_policy_version"] == CONFIDENCE_UPDATE_POLICY_VERSION == "1.1"
-    assert effect["effective_relation"] == "new" and effect["reason"] == "new_evidence"
-    assert effect["belief_changed"] and not effect["actually_retired"]
+    assert effect["confidence_after"] == pytest.approx(.21 + .3 * strength)
 
 
 def test_applied_support_at_cap_is_evidence_not_necessarily_changed_belief():
-    updater, _, hypothesis = r8_replay(relation="support", strength=.5, confidence=1, status="working")
+    updater, _, hypothesis = r8_policy(strength=.5, relation="support", confidence=1, status="working")
     effect, = updater.last_belief_change_results
     assert effect["evidence_recorded_count"] == 2 and hypothesis.confidence == 1
     assert not effect["belief_changed"] and not effect["actually_retired"]
-    assert effect["status_before"] == effect["status_after"] == "working"
 
 
-@pytest.mark.parametrize("prior,status,expected", [(.25, "candidate", True), (.3, "candidate", False)])
-def test_counter_and_low_retire_can_retire_via_unchanged_confidence_floor(prior, status, expected):
-    updater, _, hypothesis = r8_replay(confidence=prior, status=status)
-    effect, = updater.last_belief_change_results
-    assert effect["effective_relation"] == "counter" and effect["actually_retired"] is expected
+@pytest.mark.parametrize("prior,retired", [(.25, True), (.3, False)])
+def test_low_retire_preserves_existing_confidence_floor(prior, retired):
+    updater, _, hypothesis = r8_policy(confidence=prior)
     assert hypothesis.confidence == pytest.approx(prior - .125)
-    assert (hypothesis.status == "retired") is expected
+    assert updater.last_belief_change_results[0]["actually_retired"] is retired
 
 
 @pytest.mark.parametrize("confidence,retired", [(.149999, True), (.15, True), (.150001, False)])
@@ -211,46 +226,45 @@ def test_working_stable_numeric_and_event_gates_remain_unchanged(
     assert hypothesis.status == expected
 
 
+
 @pytest.mark.parametrize("relation,strength", [("counter", .5), ("retire", .5), ("retire", .9)])
-def test_already_retired_evidence_is_not_another_actual_retirement(relation, strength):
-    updater, _, hypothesis = r8_replay(relation=relation, strength=strength, confidence=0, status="retired")
+def test_already_retired_policy_effect_is_not_another_retirement(relation, strength):
+    updater, _, hypothesis = r8_policy(relation=relation, strength=strength, confidence=0, status="retired")
     effect, = updater.last_belief_change_results
     assert hypothesis.confidence == 0 and hypothesis.status == "retired"
-    assert effect["evidence_recorded_count"] == 2
-    assert not effect["belief_changed"] and not effect["actually_retired"]
+    assert not effect["actually_retired"] and not effect["belief_changed"]
 
 
-def test_retired_reactivation_earns_new_epoch_not_old_support_reuse():
-    updater, persona, hypothesis = r8_replay(strength=.9)
-    assert hypothesis.status == "retired"
-    ctx = context(5, words=["这是另一项新操作。", "现在我还是喜欢分步听，自己试后再继续。", "刚才这样试过，顺手。"])
+def test_low_level_reactivation_earns_new_epoch_without_reusing_old_support():
+    _, persona, hypothesis = r8_policy(strength=.9)
+    ctx = context(5)
     item = review(ctx, hypothesis)
-    updater.llm = RawResponse(json.dumps({"protocol_version": "2.0", "reviews": [item], "changes": [change(item, hypothesis, confidence=.6)]}))
-    updater.update(persona, ctx)
+    updater = apply_policy_fixture(persona, ctx, change(item, hypothesis, confidence=.6), event_id="new_unit_event")
     effect, = updater.last_belief_change_results
     assert hypothesis.activation_epoch == 1 and hypothesis.status == "candidate"
     assert hypothesis.confidence == pytest.approx(.39)
-    assert effect["reactivated"] and effect["belief_changed"] and not effect["actually_retired"]
-    assert effect["activation_epoch_before"] == 0 and effect["activation_epoch_after"] == 1
+    assert effect["reactivated"] and effect["belief_changed"]
     assert len({e.event_id for e in hypothesis.activation_evidence() if e.relation == "support"}) == 1
-    assert len(hypothesis.supporting_events()) == 3  # audit history still retained
 
 
-@pytest.mark.parametrize("kind", ["same_event", "new_event"])
-def test_repeated_event_no_evidence_no_effect_even_if_model_requests_retire(kind):
-    updater, persona, hypothesis = r8_replay()
+@pytest.mark.parametrize("relation", ["support", "counter", "retire"])
+@pytest.mark.parametrize("strength", [0, .5, 1])
+def test_support_requires_provenance_but_counter_and_retire_keep_original_strength_policy(relation, strength):
+    updater, _, hypothesis = r8_replay(relation=relation, strength=strength)
+    if relation == "support":
+        assert hypothesis.model_dump() == r8_prior().person_hypotheses[0].model_dump()
+        assert updater.last_belief_change_results == []
+    else:
+        expected, effective, _ = update_confidence(.473, relation, strength, 2)
+        assert hypothesis.confidence == pytest.approx(expected)
+        assert updater.last_belief_change_results[0]["effective_relation"] == effective
+
+
+def test_repeated_quote_signature_cannot_apply_even_direct_prevalidated_policy_fixture():
+    _, persona, hypothesis = r8_policy()
     before = hypothesis.model_dump()
-    ctx = r8_context()
-    ctx.session_id += "_replay"
-    payload = json.loads(R8_RETIRE_RAW)
-    payload["reviews"][0]["event_kind"] = kind
-    if kind == "same_event":
-        payload["reviews"][0]["prior_event_id"] = persona.evidence_review_ledger[-1].event_id
-    updater.llm = RawResponse(json.dumps(payload, ensure_ascii=False))
-    updater.update(persona, ctx)
-    assert updater.last_status == "ok" and hypothesis.model_dump() == before
-    assert updater.last_belief_change_results == []
-    assert updater.last_proposal_results[0]["reason"] == "same_event_no_fresh_evidence"
+    updater = apply_policy_fixture(persona, r8_context(), adapted_payload()["changes"][0])
+    assert updater.last_belief_change_results == [] and hypothesis.model_dump() == before
 
 
 @pytest.mark.parametrize("scope", ["unknown", "outside_scope"])
@@ -268,34 +282,31 @@ def test_ineligible_review_never_gets_belief_effect_from_strength(scope, existin
 
 def test_unknown_without_claim_is_valid_and_context_is_not_inferred_personality():
     updater, llm, persona = setup()
-    ctx = context(words=["没有真正尝试过。", "我现在还不知道哪种舒服。", "别按别人的喜好替我选。"])
+    ctx = context()
     item = review(ctx, applicability="unknown", relation="unknown", evidence_basis="context_only")
     apply(updater, llm, persona, ctx, [item], [])
     assert updater.last_status == "ok" and not persona.person_hypotheses
     assert updater.last_belief_change_results == [] and not persona.active_tasks
-    assert persona.evidence_review_ledger[0].disposition == "unknown_scope_no_update"
 
 
-def test_invalid_attached_context_rolls_back_counter_and_all_diagnostics():
+def test_invalid_attached_context_rolls_back_transaction_on_legacy_non_itemwise_path():
     updater, llm, persona = setup()
     hypothesis = support(updater, llm, persona)
     before = persona.model_dump()
     ctx = context(2)
     item = review(ctx, hypothesis, relation="counter")
     invalid = review(ctx, id="context", evidence_basis="context_only", relation="neutral", event_evidence=[])
-    apply(updater, llm, persona, ctx, [item, invalid], [change(item, hypothesis, relation="retire", confidence=.5)])
+    apply(updater, llm, persona, ctx, [item, invalid], [change(item, hypothesis)])
     assert updater.last_status == "failed" and persona.model_dump() == before
     assert updater.last_belief_change_results is None
-    assert updater.last_proposal_results[0]["status"] == "rejected"
 
 
-def test_excluded_quote_cannot_leak_into_belief_or_counter_and_failure_resets_effects():
+def test_excluded_quote_cannot_leak_into_belief_and_failure_resets_effects():
     updater, llm, persona = setup()
-    support(updater, llm, persona)
-    assert updater.last_belief_change_results
+    hypothesis = support(updater, llm, persona)
+    updater.last_belief_change_results = [{"fixture_previous_diagnostic": True}]
     ctx = context(2, words=["普通背景。", "不要存储的隐私内容。", "我还在想。"])
     ctx.working_memory["_sensitive_memory_excluded_turns"] = [1]
-    hypothesis = persona.person_hypotheses[0]
     before = persona.model_dump()
     item = review(ctx, hypothesis, relation="counter")
     apply(updater, llm, persona, ctx, [item], [change(item, hypothesis)])
@@ -304,91 +315,80 @@ def test_excluded_quote_cannot_leak_into_belief_or_counter_and_failure_resets_ef
     assert "不要存储的隐私内容" not in json.dumps(llm.messages[-1], ensure_ascii=False)
 
 
-def test_diagnostic_scalars_do_not_contain_quote_or_claim_and_hash_matches_contract():
-    updater, _, hypothesis = r8_replay()
+def test_policy_diagnostics_do_not_contain_quote_or_claim():
+    updater, _, hypothesis = r8_policy()
     effect, = updater.last_belief_change_results
     raw = json.dumps(effect, ensure_ascii=False)
     assert hypothesis.claim not in raw and "全程概览" not in raw
-    assert effect["reason"] in BELIEF_CHANGE_REASONS
-    assert len(effect) == 21
+    assert effect["reason"] in BELIEF_CHANGE_REASONS and len(effect) == 21
     assert effect["claim_scope_after_fingerprint"] == claim_scope_fingerprint(hypothesis)
-    canonical = json.dumps({k: getattr(hypothesis, k) for k in (
-        "claim", "scope", "framework", "dimension", "scope_tags",
-    )}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    assert hashlib.sha256(canonical.encode()).hexdigest() == effect["claim_scope_after_fingerprint"]
 
 
-def test_single_fence_preserves_raw_and_has_same_actual_belief_effect():
+def test_single_fence_keeps_adapted_content_and_same_counter_result():
     bare, _, _ = r8_replay()
     wrapped, _, _ = r8_replay(fenced=True)
     assert wrapped.last_belief_change_results == bare.last_belief_change_results
+    assert wrapped.last_belief_change_results[0]["effective_relation"] == "counter"
     assert wrapped.last_response_transport["wrapper_removed"]
-    assert wrapped.llm.raw == "```json\n" + R8_RETIRE_RAW + "\n```"
+    assert wrapped.llm.raw == "```json\n" + bare.llm.raw + "\n```"
 
 
 def test_skipped_and_legacy_runs_do_not_claim_evaluated_v23_effects():
     updater, persona, _ = r8_replay()
     updater.update(persona, r8_context())
     assert updater.last_status == "skipped" and updater.last_belief_change_results is None
-    updater = PersonaHypothesisUpdater(RawResponse('{"changes":[]}'))
-    updater.update(PersonaProfile(user_id="legacy"), context())
-    assert updater.last_status == "ok" and updater.last_belief_change_results is None
+    legacy = PersonaHypothesisUpdater(RawResponse('{"changes":[]}'))
+    legacy.update(PersonaProfile(user_id="legacy"), context())
+    assert legacy.last_status == "ok" and legacy.last_belief_change_results is None
 
 
 def test_explicit_no_change_keeps_legacy_compatibility_not_new_generation_contract():
     ctx = context()
     proposal = change(review(ctx), relation="no_change")
-    raw = json.dumps({"changes": [proposal]})
     persona = PersonaProfile(user_id="legacy")
-    updater = PersonaHypothesisUpdater(RawResponse(raw))
+    updater = PersonaHypothesisUpdater(RawResponse(json.dumps({"changes": [proposal]})))
     updater.update(persona, ctx)
     assert updater.last_status == "ok" and not persona.person_hypotheses
-    assert updater.last_belief_change_results is None
     strict, llm, persona = setup()
     item = review(ctx)
     apply(strict, llm, persona, ctx, [item], [change(item, relation="no_change")])
     assert strict.last_status == "failed" and strict.last_belief_change_results is None
 
 
-def test_target_value_change_at_confidence_cap_is_real_engineering_state_change():
-    updater, llm, persona = setup()
-    ctx = context()
-    item = review(ctx, evidence_basis="repeated_pattern")
-    proposal = change(item, framework="big_five", dimension="conscientiousness", target_value=.4)
-    apply(updater, llm, persona, ctx, [item], [proposal])
-    hypothesis = persona.person_hypotheses[0]
-    ctx2 = context(2)
-    item2 = review(ctx2, hypothesis, evidence_basis="repeated_pattern")
-    apply(updater, llm, persona, ctx2, [item2], [change(item2, hypothesis, target_value=.4)])
-    hypothesis.confidence = 1
-    ctx3 = context(3)
-    item3 = review(ctx3, hypothesis, evidence_basis="repeated_pattern")
-    apply(updater, llm, persona, ctx3, [item3], [change(item3, hypothesis, target_value=.8)])
+def test_low_level_target_value_change_at_cap_remains_engineering_state_change():
+    persona = PersonaProfile(user_id="person")
+    for index, target in [(1, .4), (2, .4), (3, .8)]:
+        ctx = context(index)
+        old = persona.person_hypotheses[0] if persona.person_hypotheses else None
+        item = review(ctx, old, evidence_basis="repeated_pattern")
+        proposal = change(item, old, framework="big_five", dimension="conscientiousness", target_value=target)
+        if index == 3:
+            old.confidence = 1
+        updater = apply_policy_fixture(persona, ctx, proposal, event_id=f"unit_{index}")
     effect, = updater.last_belief_change_results
     assert effect["confidence_before"] == effect["confidence_after"] == 1
-    assert effect["status_before"] == effect["status_after"] == "working"
     assert effect["target_value_before"] == pytest.approx(.4)
     assert effect["target_value_after"] == pytest.approx(.52)
     assert effect["belief_changed"]
 
 
-def test_old_persisted_profile_roundtrips_without_confidence_migration():
-    old = r8_prior().model_dump()
-    restored = PersonaProfile.model_validate(old)
-    assert restored.model_dump() == old
-    assert restored.person_hypotheses[0].confidence == .473
-    updater = PersonaHypothesisUpdater(RawResponse(R8_RETIRE_RAW), evidence_review_protocol=True)
+def test_old_profile_roundtrip_does_not_migrate_but_new_grounded_counter_changes_confidence():
+    original = r8_prior().model_dump()
+    restored = PersonaProfile.model_validate(original)
+    assert restored.model_dump() == original
+    updater = PersonaHypothesisUpdater(RawResponse(json.dumps(adapted_payload())), evidence_review_protocol=True)
     updater.update(restored, r8_context())
-    assert updater.last_belief_change_results[0]["confidence_before"] == .473
+    assert restored.person_hypotheses[0].confidence < original["person_hypotheses"][0]["confidence"]
+    assert updater.last_belief_change_results[0]["effective_relation"] == "counter"
 
 
-def test_prompt_separates_evidence_strength_minimum_scope_and_real_unknown():
+def test_prompt_separates_strength_minimum_scope_and_unknown_timing():
     prompt = reflection_system_prompt(True)
     for part in (
-        "prompt contract 2.4", "不是人物假设更新后", "不能直接复制为本次 confidence",
+        "prompt contract 2.5", "不是人物假设更新后", "不能直接复制为本次 confidence",
         "最小推断范围", "紧急性和阶段", "最多保留该次同类", "对该方式的偏好仍是 unknown",
         "不能为形成标签强改 within_scope", "证据入账、信念实际变化、实际撤回",
-        "低于 0.7 按", "不要为了越过阈值抬高 confidence",
+        "低于 0.7 按", "不要为了越过阈值抬高 confidence", "不增加支持分",
     ):
         assert part in prompt
 

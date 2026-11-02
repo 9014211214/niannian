@@ -26,9 +26,14 @@ ASSETS = (
     "assets/voice/minimal.html", "assets/voice/care.html",
     "bench/cases/refocus_e1_v1.yaml", "bench/datasets/cped_v1.yaml",
     "scenes/companion_elder/elder_kb.yaml",
+    "bench/cases/fixed_safety_v1/manifest.json",
+    "bench/cases/fixed_safety_v1/inputs.json",
+    "bench/cases/fixed_safety_v1/references.json",
+    "bench/cases/fixed_safety_v1/protocol.json",
 )
 LICENSE_FILES = {"LICENSE", "Apache-2.0.txt", "THIRD_PARTY_NOTICES.md"}
 SOURCE_ENTRY_FILES = {
+    "docs/FIXED_SAFETY_REGRESSION.md",
     "docs/E1BR_RESULTS_2026_10_05.md",
     "scripts/run_e1b_main_continuation.py", "scripts/e1b_main_continuation.py",
     "scripts/run_e1br.py", "scripts/e1br_qualification.py", "scripts/e1br_assessment.py",
@@ -134,6 +139,22 @@ def inspect_distribution(path: Path) -> dict:
     return {"artifact": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), **result}
 
 
+
+def probe_fixed_safety_suite(installed: Path) -> dict:
+    """Read the actual installed runner and fixed assets; never execute models."""
+    from importlib.resources import files
+    from aria.bench import safety_regression
+
+    if not Path(safety_regression.__file__).resolve().is_relative_to(installed):
+        raise InstallCheckError("safety_runner_not_from_installed_package")
+    suite = Path(str(files("aria").joinpath("bench/cases/fixed_safety_v1"))).resolve()
+    if not suite.is_relative_to(installed):
+        raise InstallCheckError("safety_suite_not_from_installed_package")
+    manifest, cases = safety_regression.load_suite(suite)
+    return {"safety_runner_installed_origin": True, "fixed_safety_cases": len(cases),
+            "fixed_safety_cells": len(manifest["cells"]), "fixed_safety_version": manifest["version"]}
+
+
 def probe() -> dict:
     """Exercise the installed package through actual loopback HTTP and storage."""
     import http.client
@@ -159,6 +180,7 @@ def probe() -> dict:
 
     _env.load_local_env = forbidden
     urllib.request.urlopen = forbidden
+    safety_suite = probe_fixed_safety_suite(installed)
     current = [datetime(2026, 10, 1, 7, 0, tzinfo=timezone.utc)]
     with tempfile.TemporaryDirectory(dir=Path.cwd(), prefix="preview-") as scratch:
         directory = Path(scratch)
@@ -234,6 +256,7 @@ def probe() -> dict:
             serving.join(timeout=5)
             server.server_close()
     return {"version": aria.__version__, "installed_origin": True, "assets": len(ASSETS),
+            **safety_suite,
             "loopback_pages": 2, "preview_sessions": 3, "care_scope_and_revocation": True,
             "readonly_replay_basis": True, "model_requests": 0, "dotenv_reads": 0}
 

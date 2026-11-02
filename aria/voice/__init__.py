@@ -1,1 +1,1 @@
-"""Local text Web and companion stage. No media-service adapters are bundled."""
+"""Local text Web, plus an explicitly enabled optional ASR input adapter."""

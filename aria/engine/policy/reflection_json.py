@@ -28,7 +28,7 @@ _WIRE_KEYWORDS = frozenset({
 _DIAGNOSTIC_FIELDS = frozenset({
     "protocol_version", "reviews", "changes", "id", "hypothesis_id", "claim_quote", "scope_quote",
     "applicability", "relation", "evidence_basis", "event_kind", "prior_event_id", "evidence",
-    "event_evidence", "reason", "event_summary", "turn_index", "evidence_quote", "review_id",
+    "event_evidence", "reason", "event_summary", "turn_index", "evidence_quote", "review_id", "review_index",
     "framework", "dimension", "claim", "scope", "scope_tags", "lineage", "mechanism_relation",
     "scope_relation", "atomic_claim", "aspect", "conditions", "tendency", "outcome", "target_value",
     "confidence", "_StatedPreference", "_ObservedResponse", "_RepeatedPattern", "unknown_field",
@@ -187,8 +187,14 @@ def reflection_wire_schema() -> dict:
 
 
 def reflection_request_format(version: str = "json_schema") -> dict:
-    if version not in {"json_schema", "json_schema_v1", "json_schema_v2"}:
+    if version not in {"json_schema", "json_schema_v1", "json_schema_v2", "json_schema_v3", "json_schema_v4"}:
         raise ValueError("invalid_reflection_return_format")
+    if version == "json_schema_v3":
+        from .reflection_compact import compact_reflection_request_format
+        return compact_reflection_request_format()
+    if version == "json_schema_v4":
+        from .reflection_compact import indexed_compact_reflection_request_format
+        return indexed_compact_reflection_request_format()
     schema = (_project_wire_keywords(reflection_response_schema())
               if version == "json_schema_v1" else reflection_wire_schema())
     return {"type": "json_schema", "json_schema": {
@@ -262,7 +268,7 @@ def reflection_product_step(messages) -> str:
     return "format_correction"
 
 
-def reflection_body_observation(data: dict) -> dict:
+def reflection_body_observation(data: dict, *, itemwise_review=False, reasoning_allowed=False) -> dict:
     """Content-free, receipt-bound permission for a single format correction."""
     from ..memory.diagnosis import _unwrap_review_response
     result = {"channel_valid": False, "correction_issues": []}
@@ -281,37 +287,57 @@ def reflection_body_observation(data: dict) -> dict:
     usage = data.get("usage")
     details = usage.get("completion_tokens_details") if type(usage) is dict else None
     if type(details) is dict and details.get("reasoning_tokens") is not None and (
-            type(details["reasoning_tokens"]) is not int or details["reasoning_tokens"] != 0):
+            type(details["reasoning_tokens"]) is not int or details["reasoning_tokens"] < 0
+            or not reasoning_allowed and details["reasoning_tokens"] != 0):
         return result
     result["channel_valid"] = True
     body = message["content"]
     try:
         body, _ = _unwrap_review_response(body)
-        parse_reflection_json(body)
+        parse_reflection_json(body, itemwise_review=itemwise_review)
     except (ValueError, TypeError, RecursionError) as error:
         result["correction_issues"] = reflection_correction_issues(error, body)
     return result
 
 
-def validate_reflection_request(client, messages) -> None:
+def validate_reflection_request(client, messages, *, wire=False) -> None:
     from ..._openrouter import DEFAULT_REFLECTION_MODEL
     from ..memory.diagnosis import reflection_system_prompt
 
+    if (client.reflection_return_format in {"json_schema_v3", "json_schema_v4"}
+            and getattr(client, "reflection_structured_route", None) is None):
+        raise ValueError("unsupported_reflection_json_route")
+    if getattr(client, "reflection_structured_route", None) is not None:
+        from .reflection_structured import validate_reflection_structured_client
+        validate_reflection_structured_client(client)
+
+    route = getattr(client, "offline_reasoning_route", None)
+    if route is not None:
+        from .offline_reasoning import validate_offline_reasoning_client
+        validate_offline_reasoning_client(client)
     if (client.role != "reflection" or not client.bounded_transport
-            or client.model != DEFAULT_REFLECTION_MODEL
+            or (client.model != DEFAULT_REFLECTION_MODEL and route is None
+                and getattr(client, "reflection_structured_route", None) is None)
             or client.max_retries != 0 or client.fallback_models):
         raise ValueError("unsupported_reflection_json_route")
     if client.reflection_return_format == "body_json":
         reflection_product_step(messages)
         return
+    expected_system = reflection_system_prompt(True)
+    if client.reflection_return_format == "json_schema_v3" and wire:
+        from .reflection_compact import compact_reflection_system_prompt
+        expected_system = compact_reflection_system_prompt()
+    if client.reflection_return_format == "json_schema_v4" and wire:
+        from .reflection_compact import indexed_compact_reflection_system_prompt
+        expected_system = indexed_compact_reflection_system_prompt()
     if (type(messages) is not list or len(messages) != 2
-            or messages[0] != {"role": "system", "content": reflection_system_prompt(True)}
+            or messages[0] != {"role": "system", "content": expected_system}
             or type(messages[1]) is not dict or set(messages[1]) != {"role", "content"}
             or messages[1]["role"] != "user" or type(messages[1]["content"]) is not str):
         raise ValueError("reflection_json_requires_evidence_review_contract")
 
 
-def parse_reflection_json(raw: str) -> str:
+def parse_reflection_json(raw: str, *, itemwise_review: bool = False) -> str:
     """Validate the full original shape and return unchanged JSON content."""
     def unique(pairs):
         result = {}
@@ -327,5 +353,9 @@ def parse_reflection_json(raw: str) -> str:
     if type(raw) is not str:
         raise ValueError("reflection_text_required")
     parsed = json.loads(raw, object_pairs_hook=unique, parse_constant=nonfinite)
-    validate_reflection_response_shape(parsed)
+    if itemwise_review:
+        from ..memory.reflection_contract import validate_reflection_response_envelope
+        validate_reflection_response_envelope(parsed)
+    else:
+        validate_reflection_response_shape(parsed)
     return raw.strip()

@@ -17,7 +17,7 @@ def test_policy14_scope_is_exactly_public_aggregate_and_preparation_documents():
     }
     assert all(release._allowed(p) for p in release.V14_POLICY_FILES)
     assert all(not release._allowed(p, policy) for p in release.V14_POLICY_FILES
-               for policy in release.SUPPORTED_POLICIES - {release.V14_POLICY_VERSION, release.POLICY_VERSION})
+               for policy in release.SUPPORTED_POLICIES - {release.V14_POLICY_VERSION, release.V15_POLICY_VERSION, release.V16_POLICY_VERSION, release.POLICY_VERSION})
     for name in ("artifacts/local/tasks/cases.json", "artifacts/local/first-labels.json",
                  "docs/private_answers.md", ".env", "data/persona.json", "docs/media/demo.mp4"):
         assert not release._allowed(name)
@@ -25,7 +25,7 @@ def test_policy14_scope_is_exactly_public_aggregate_and_preparation_documents():
 
 def test_v13_original_scope_remains_verifiable(tmp_path):
     root=tmp_path/'source'
-    for name in release.REQUIRED_FILES:
+    for name in release._required_files(release.POLICY_VERSION):
         path=root/name
         path.parent.mkdir(parents=True,exist_ok=True)
         path.write_text('# authored software fixture\n',encoding='utf-8')
@@ -34,6 +34,8 @@ def test_v13_original_scope_remains_verifiable(tmp_path):
     with zipfile.ZipFile(target) as z:
         data={n:z.read(n) for n in z.namelist()}
     manifest=json.loads(data['RELEASE_MANIFEST.json'])
+    data={n:raw for n,raw in data.items() if n not in release.V16_REQUIRED_FILES | release.V17_POLICY_FILES}
+    manifest['files']=[row for row in manifest['files'] if row['path'] in data]
     manifest['policy_version']=release.V13_POLICY_VERSION
     data['RELEASE_MANIFEST.json']=json.dumps(manifest,ensure_ascii=False,indent=2).encode()+b'\n'
     data['RELEASE_SCOPE.md']=release.V13_SCOPE_TEXT.encode()

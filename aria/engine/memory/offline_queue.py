@@ -10,12 +10,15 @@ it is not a promise of permanent exactly-once processing across deleted history.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 from threading import RLock
 from typing import Callable
 
 from ..context import EngineContext
 from ..model.persona import (
     OfflineSessionAuditRecord, OfflineSessionRecord, PersonaProfile, SessionTurnSnapshot,
+    PreferenceScopeSelection,
+    MemoryPrefixAudit, ReflectionItemAudit,
 )
 from ..perception.signals import is_simulated
 from ..perception.external_emotion import validate_experiment_context
@@ -122,6 +125,9 @@ class OfflineSessionQueue:
             "attempts": job.attempts, "state": job.state, "active_stage": job.active_stage,
             "expired": expires is None or expires <= now,
             "last_error_code": _safe_code(job.last_error_code) if job.last_error_code else None,
+            "preference_scope": job.preference_scope.model_dump() if job.preference_scope else None,
+            **({"memory_result": job.memory_result.model_dump()} if job.memory_result else {}),
+            **({"reflection_result": job.reflection_result.model_dump()} if job.reflection_result else {}),
         }
 
     def status(self) -> dict:
@@ -162,6 +168,8 @@ class OfflineSessionQueue:
             turn_count=len(job.turns), excluded_turn_count=len(job.excluded_turn_indices),
             memory_completed=job.memory_completed, reflection_completed=job.reflection_completed,
             attempts=job.attempts, gap=outcome != "completed", error_code=error_code,
+            preference_scope=job.preference_scope,
+            memory_result=job.memory_result, reflection_result=job.reflection_result,
         ))
         persona.offline_session_audit = persona.offline_session_audit[-OFFLINE_AUDIT_LIMIT:]
 
@@ -194,6 +202,13 @@ class OfflineSessionQueue:
         return self._result("pruned", expired_jobs=len(expired))
 
     def enqueue(self, ctx, memory_completed=False, reflection_completed=False, source_completeness="complete") -> dict:
+        # Origin comes only from the runtime's protocol selection, never text
+        # or a model field. Old/recovered contexts without it remain legacy.
+        from ..policy.online_decision import ONLINE_DECISION_VERSIONS
+        online_version = ctx.working_memory.get("_online_decision_version")
+        if online_version is not None and (type(online_version) is not str
+                                           or online_version not in ONLINE_DECISION_VERSIONS):
+            return self._result("rejected", "offline_online_protocol_invalid")
         external_input = (ctx.working_memory.get("perception_input") or {}).get("external_emotion")
         experiment_profile = self.persona.profile_origin.startswith("synthetic_emotion_experiment:")
         if (ctx.external_emotion_experiment is not None or experiment_profile
@@ -221,8 +236,17 @@ class OfflineSessionQueue:
                 type(index) is not int or not 0 <= index < len(ctx.turns) for index in excluded)):
             return self._result("rejected", "offline_exclusion_mask_invalid")
         excluded = sorted(set(excluded))
+        deliveries = ctx.working_memory.get("_person_response_deliveries", {})
+        deliveries = {
+            str(index): deliveries[str(index)] for index, turn in enumerate(ctx.turns)
+            if isinstance(deliveries, dict) and deliveries.get(str(index)) == hashlib.sha256(
+                turn.agent.encode("utf-8")
+            ).hexdigest() and turn.agent.strip() and index not in excluded
+        }
         sealed_turns = [SessionTurnSnapshot(user="" if index in excluded else turn.user,
-                                            agent="" if index in excluded else turn.agent)
+                                            agent="" if index in excluded else turn.agent,
+                                            person_response_sha256=(
+                                                deliveries.get(str(index)) if index not in excluded else None))
                         for index, turn in enumerate(ctx.turns)]
         result = self.prune()
         if result["error_code"]:
@@ -231,7 +255,8 @@ class OfflineSessionQueue:
         existing = next((job for job in candidate.offline_sessions if job.session_id == ctx.session_id), None)
         if existing:
             if (existing.scene_id != ctx.scene_id or existing.turns != sealed_turns
-                    or existing.excluded_turn_indices != excluded or existing.source_completeness != source_completeness):
+                    or existing.excluded_turn_indices != excluded or existing.source_completeness != source_completeness
+                    or existing.origin_online_decision_version != online_version):
                 return self._result("rejected", "offline_session_already_sealed", session_id=ctx.session_id)
             self._clear_matching_checkpoint(candidate, ctx.session_id)
             if candidate.pending_session != self.persona.pending_session and not self._commit(candidate):
@@ -248,6 +273,13 @@ class OfflineSessionQueue:
             return self._result("rejected", "offline_session_expired", session_id=ctx.session_id)
         if len(candidate.offline_sessions) >= OFFLINE_QUEUE_CAPACITY:
             return self._result("rejected", "offline_queue_full", session_id=ctx.session_id)
+        try:
+            memory_result = (MemoryPrefixAudit.model_validate(ctx.working_memory["_memory_prefix_recovery"])
+                             if memory_completed and "_memory_prefix_recovery" in ctx.working_memory else None)
+            reflection_result = (ReflectionItemAudit.model_validate(ctx.working_memory["_reflection_itemwise_audit"])
+                                 if reflection_completed and "_reflection_itemwise_audit" in ctx.working_memory else None)
+        except ValueError:
+            return self._result("rejected", "offline_stage_audit_invalid", session_id=ctx.session_id)
         now = self._clock()
         candidate.offline_sessions.append(OfflineSessionRecord(
             session_id=ctx.session_id, scene_id=ctx.scene_id, created_at=_stamp(now),
@@ -256,9 +288,11 @@ class OfflineSessionQueue:
             cognitive_session_at=(ctx.working_memory.get("_cognitive_session_at")
                                   if candidate.cognitive_health_consent.has_text_monitoring_consent() else None),
             excluded_turn_indices=excluded, source_completeness=source_completeness,
+            origin_online_decision_version=online_version,
             memory_completed=memory_completed, reflection_completed=reflection_completed,
             memory_privacy_review_completed=(memory_completed
                 and ctx.working_memory.get("_memory_privacy_review_completed") is True),
+            memory_result=memory_result, reflection_result=reflection_result,
             state="pending" if source_completeness == "complete" else "needs_review",
         ))
         self._clear_matching_checkpoint(candidate, ctx.session_id)
@@ -272,12 +306,21 @@ class OfflineSessionQueue:
         for turn in job.turns:
             ctx.add_turn(turn.user, turn.agent)
         ctx.working_memory.update({
+            "_person_response_deliveries": {
+                str(index): turn.person_response_sha256 for index, turn in enumerate(job.turns)
+                if turn.person_response_sha256 == hashlib.sha256(turn.agent.encode("utf-8")).hexdigest()
+                and turn.agent.strip() and index not in job.excluded_turn_indices
+            },
             "_offline_recovery": True, "_offline_recovery_mode": "text_only",
             "_offline_source_completeness": job.source_completeness,
             "_sensitive_memory_excluded_turns": list(job.excluded_turn_indices),
             "_memory_consolidated": job.memory_completed, "_reflection_completed": job.reflection_completed,
             "_memory_privacy_review_completed": job.memory_privacy_review_completed,
         })
+        if job.memory_result is not None:
+            ctx.working_memory["_memory_prefix_recovery"] = job.memory_result.model_dump()
+        if job.origin_online_decision_version is not None:
+            ctx.working_memory["_online_decision_version"] = job.origin_online_decision_version
         if persona.cognitive_health_consent.has_text_monitoring_consent():
             ctx.working_memory.update({
                 "_cognitive_source_turns": [row.model_dump() for row in job.cognitive_turns],
@@ -351,9 +394,20 @@ class OfflineSessionQueue:
                 copy_persona.offline_session_audit = []
                 copy_persona.pending_session = None
                 error = None
+                scope_selection = None
+                stage_audit = None
                 try:
                     with OFFLINE_SESSION_LOCK:
                         result = handler(copy_persona, ctx)
+                        if stage == "memory" and "_preference_scope_selection" in ctx.working_memory:
+                            scope_selection = PreferenceScopeSelection.model_validate(
+                                ctx.working_memory["_preference_scope_selection"])
+                        audit_key, audit_type = (
+                            ("_memory_prefix_recovery", MemoryPrefixAudit) if stage == "memory"
+                            else ("_reflection_itemwise_audit", ReflectionItemAudit)
+                        )
+                        if audit_key in ctx.working_memory:
+                            stage_audit = audit_type.model_validate(ctx.working_memory[audit_key])
                         if (not isinstance(result, tuple) or len(result) != 3
                                 or not isinstance(result[0], PersonaProfile)
                                 or result[0].user_id != self.persona.user_id
@@ -375,6 +429,10 @@ class OfflineSessionQueue:
                 if error:
                     candidate = self.persona.model_copy(deep=True)
                     active = candidate.offline_sessions[0]
+                    if stage_audit is not None:
+                        setattr(active, stage + "_result", stage_audit)
+                    if stage == "memory":
+                        active.preference_scope = scope_selection
                     active.state = "exhausted" if active.attempts >= OFFLINE_MAX_ATTEMPTS else "pending"
                     active.last_error_code, active.active_stage = error, stage
                     if not self._commit(candidate):
@@ -388,6 +446,10 @@ class OfflineSessionQueue:
                     # Reflection failure preserves previously committed memory.
                     candidate = self.persona.model_copy(deep=True)
                     active = candidate.offline_sessions[0]
+                    if stage_audit is not None:
+                        setattr(active, stage + "_result", stage_audit)
+                    if stage == "memory":
+                        active.preference_scope = scope_selection
                     self._finish(candidate, active, self._clock(), outcome=stage + "_failed",
                                  error_code=_safe_code(result[2]))
                     if not self._commit(candidate):
@@ -397,7 +459,10 @@ class OfflineSessionQueue:
                     break
                 candidate = self._merge_result(result[0], stage=stage)
                 active = candidate.offline_sessions[0]
+                if stage_audit is not None:
+                    setattr(active, stage + "_result", stage_audit)
                 if stage == "memory":
+                    active.preference_scope = scope_selection
                     # The semantic privacy decision and extracted memory share
                     # the same durable commit. Reflection reconstructs the
                     # original conversation using this persisted exclusion map.

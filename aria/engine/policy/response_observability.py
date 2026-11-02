@@ -22,7 +22,8 @@ import urllib.error
 VERSION = "1.0"
 INTERRUPTED_VERSION = "1.1"
 LEGACY_HTTP_ERROR_VERSION = "1.2"
-HTTP_ERROR_VERSION = "1.3"
+NATIVE_HTTP_ERROR_VERSION = "1.3"
+HTTP_ERROR_VERSION = "1.5"
 RESPONSE_ERROR_VERSION = "1.4"
 MAX_ERROR_BODY_BYTES = 16 * 1024
 MAX_PROVIDER_RAW_BYTES = 4096
@@ -80,6 +81,9 @@ _ROUTER_ERROR_TYPES = {
     "invalid_image", "image_too_large", "image_too_small", "unsupported_image_format", "image_not_found",
     "image_download_failed", "server", "timeout", "unmapped",
 }
+_LIMIT_SOURCES = frozenset({"openrouter_in_flight_budget", "openrouter_credits",
+    "openrouter_key_limit", "openrouter_guardrail_budget", "openrouter_workspace_budget"})
+_LIMIT_FIELDS = {"limit_source_status", "limit_source", "limit_source_path"}
 _ROUTER_ERROR_FIELDS = {"router_error_type", "router_error_type_status", "router_error_type_source"}
 _READ_KINDS = {
     "incomplete_read", "remote_disconnected", "timeout", "url_timeout", "url_error",
@@ -631,6 +635,24 @@ def _reject_json_constant(value):
     raise ValueError("invalid_json_constant")
 
 
+def _router_limit_metadata(data: Any, result: dict) -> None:
+    """Finite router fields only; neither proves non-execution nor settled cost."""
+    metadata = data.get("error", {}).get("metadata") if type(data) is dict and type(data.get("error")) is dict else None
+    for source, target, allowed, path in (
+        ("limit_source", "limit_source", _LIMIT_SOURCES, "error.metadata.limit_source"),
+        ("error_type", "router_error_type", _ROUTER_ERROR_TYPES, "error.metadata.error_type"),
+    ):
+        status = "absent"
+        if type(metadata) is dict and source in metadata:
+            value = metadata[source]
+            status = ("null" if value is None else "wrong_type" if type(value) is not str
+                      else "recognized" if value in allowed else "unrecognized")
+            if status == "recognized":
+                result[target] = value
+                result["limit_source_path" if source == "limit_source" else "router_error_type_source"] = path
+        result[target + "_status"] = status
+
+
 def _native_provider_error(data: Any, result: dict) -> None:
     """Finite native codes, never raw messages, guessed quotas, fees or retries."""
     result.update(provider_raw_status="not_inspected", provider_native_code_status="not_inspected")
@@ -764,6 +786,7 @@ def observe_http_error(exc: urllib.error.HTTPError, *, observed_at: float | int 
             result["body_close_failed"] = True
     _metadata(data, headers, result)
     _native_provider_error(data, result)
+    _router_limit_metadata(data, result)
     if (recovery_evidence is not None and type(recovery_evidence) is dict
             and exc.code == 429 and result["body_status"] == "parsed" and not result.get("body_close_failed")
             and type(data) is dict and set(data) <= {"error", "id", "request_id", "usage"}
@@ -790,13 +813,16 @@ def validate_observation(value: Any) -> None:
         invalid()
     interrupted = value.get("version") == INTERRUPTED_VERSION and value.get("envelope_kind") == "interrupted"
     response_error = value.get("version") == RESPONSE_ERROR_VERSION and value.get("envelope_kind") == "response_error"
-    extended_error = value.get("version") in (LEGACY_HTTP_ERROR_VERSION, HTTP_ERROR_VERSION) and value.get("envelope_kind") == "http_error"
-    native_error = extended_error and value["version"] == HTTP_ERROR_VERSION
+    extended_error = value.get("version") in (LEGACY_HTTP_ERROR_VERSION, NATIVE_HTTP_ERROR_VERSION, HTTP_ERROR_VERSION) and value.get("envelope_kind") == "http_error"
+    native_error = extended_error and value["version"] in (NATIVE_HTTP_ERROR_VERSION, HTTP_ERROR_VERSION)
+    router_error = extended_error and value["version"] == HTTP_ERROR_VERSION
     fields = _FIELDS | _INTERRUPTED_FIELDS if interrupted or extended_error else set(_FIELDS)
     if extended_error:
         fields |= _RETRY_AFTER_FIELDS
     if native_error:
         fields |= _NATIVE_FIELDS
+    if router_error:
+        fields |= _LIMIT_FIELDS | _ROUTER_ERROR_FIELDS
     if response_error:
         fields |= {"error_field_status"} | _ROUTER_ERROR_FIELDS
     kinds = {"interrupted"} if interrupted else {"response_error"} if response_error else {"success", "http_error"}
@@ -877,6 +903,20 @@ def validate_observation(value: Any) -> None:
                 invalid()
         if retry_fields != expected_fields:
             invalid()
+    if router_error:
+        for target, allowed, path_field, path in (
+            ("limit_source", _LIMIT_SOURCES, "limit_source_path", "error.metadata.limit_source"),
+            ("router_error_type", _ROUTER_ERROR_TYPES, "router_error_type_source", "error.metadata.error_type"),
+        ):
+            status = value.get(target + "_status")
+            if type(status) is not str or status not in {"absent", "null", "wrong_type", "recognized", "unrecognized"}:
+                invalid()
+            recognized = status == "recognized"
+            if ((target in value) is not recognized or (path_field in value) is not recognized
+                    or status != "absent" and (value.get("provider_metadata_present") is not True or value["body_status"] != "parsed")):
+                invalid()
+            if recognized and (type(value[target]) is not str or value[target] not in allowed or value[path_field] != path):
+                invalid()
     if native_error:
         status, raw_status = value.get("provider_native_code_status"), value.get("provider_raw_status")
         if type(status) is not str or status not in _NATIVE_STATUSES or type(raw_status) is not str or raw_status not in _RAW_STATUSES:

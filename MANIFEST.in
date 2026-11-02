@@ -1,6 +1,7 @@
 include .env.example
 include README.md README.zh.md LICENSE CONTRIBUTING.md SECURITY.md THIRD_PARTY_NOTICES.md AGENTS.md
 include scripts/build_minimal_release.py
+include scripts/run_story.py scripts/run_safety_set.py scripts/capture_utf8_process.py
 include scripts/check_release_install.py
 include scripts/codex_judge_local.py
 include scripts/verify_experiment_freeze.py
@@ -73,3 +74,14 @@ include scripts/e1br_memory_runtime.py scripts/e1br_memory_legacy.py scripts/e1b
 
 include scripts/e1br_prewrite_checkpoint.py scripts/e1br_prewrite_runtime.py
 include scripts/run_e1br_prewrite_continuation.py
+
+# Reviewed fixed fictional safety suite; no runtime outputs.
+include aria/bench/cases/fixed_safety_v1/manifest.json
+include aria/bench/cases/fixed_safety_v1/inputs.json
+include aria/bench/cases/fixed_safety_v1/references.json
+include aria/bench/cases/fixed_safety_v1/protocol.json
+include aria/bench/cases/fixed_safety_v1/protocol_v2.json
+
+# Offline CI smoke and authored regression fixtures.
+include scripts/smoke_demo.py scripts/smoke_fixture.py
+include tests/fixtures/fs013-first-visible.json tests/fixtures/online-v7-empty-first-visible.json tests/fixtures/online-v7-mismatch-first-visible.json

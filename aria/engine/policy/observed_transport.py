@@ -8,11 +8,14 @@ events mean unobserved, not proof that no traffic or charge occurred.
 from __future__ import annotations
 
 import http.client
+import io
 import math
+import re
 import time
 import urllib.request
 
 from .transport_failure import transport_failure, validate_transport_failure, preparation_rebuild_eligible
+from .response_body import DeadlineRawReader, ResponseDeadline, ResponseFramingError
 
 
 VERSION = "connection_trace_v1"
@@ -145,13 +148,16 @@ class PreparationRecovery:
 
 
 class TransportTrace:
-    def __init__(self, *, diagnostics=False, preparation_recovery=None):
+    def __init__(self, *, diagnostics=False, preparation_recovery=None, response_deadline=None):
         if type(diagnostics) is not bool:
             raise ValueError("invalid_transport_diagnostics")
         self.diagnostics = diagnostics
         if preparation_recovery is not None and (not diagnostics or type(preparation_recovery) is not PreparationRecovery):
             raise ValueError("invalid_preparation_recovery")
         self.preparation_recovery = preparation_recovery
+        if response_deadline is not None and (not diagnostics or type(response_deadline) is not ResponseDeadline):
+            raise ValueError("invalid_response_deadline")
+        self.response_deadline = response_deadline
         self._preparations = []
         self._events = set()
 
@@ -177,8 +183,21 @@ class _ObservedSocket:
     def sendall(self, data, *args, **kwargs):
         if self._trace.preparation_recovery is not None:
             self._trace.preparation_recovery.before_application(self._socket)
+        if self._trace.response_deadline is not None:
+            self._socket.settimeout(self._trace.response_deadline.remaining())
         self._trace._mark("application_write_attempted")
         return self._socket.sendall(data, *args, **kwargs)
+
+    def makefile(self, *args, **kwargs):
+        deadline = self._trace.response_deadline
+        if deadline is None:
+            return self._socket.makefile(*args, **kwargs)
+        # HTTPResponse asks for a binary input file. Keep ordinary buffering,
+        # but update the timeout before every underlying read, not each line.
+        if args != ("rb",) or kwargs:
+            raise ValueError("unexpected_response_file_mode")
+        raw = self._socket.makefile("rb", buffering=0)
+        return io.BufferedReader(DeadlineRawReader(raw, self._socket, deadline))
 
     def __getattr__(self, name):
         return getattr(self._socket, name)
@@ -193,6 +212,8 @@ class _ObservedConnection:
 
     def connect(self):
         recovery = self._trace.preparation_recovery
+        if self._trace.response_deadline is not None:
+            self.timeout = self._trace.response_deadline.remaining()
         preparation = None
         if recovery is not None:
             self.timeout, number = recovery.before_preparation()
@@ -205,6 +226,8 @@ class _ObservedConnection:
         # is not observed until this completes, so CONNECT is never a POST.
         try:
             super().connect()
+            if self._trace.response_deadline is not None:
+                self._trace.response_deadline.remaining()
         except BaseException as error:
             if preparation is not None:
                 preparation["events"]["connection_preparation_failed_before_request"] = True
@@ -259,6 +282,62 @@ class _ObservedConnection:
         result = super().getresponse(*args, **kwargs)
         self._trace._mark("response_headers_returned")
         return result
+
+
+class _ObservedHTTPResponse(http.client.HTTPResponse):
+    """Strict chunk boundaries for the explicitly bounded diagnostic route."""
+    def __init__(self, sock, *args, **kwargs):
+        self._strict_framing = (isinstance(sock, _ObservedSocket)
+            and sock._trace.response_deadline is not None)
+        super().__init__(sock, *args, **kwargs)
+
+    def _read_next_chunk_size(self):
+        if not self._strict_framing:
+            return super()._read_next_chunk_size()
+        line = self.fp.readline(http.client._MAXLINE + 1)
+        if len(line) > http.client._MAXLINE:
+            raise ResponseFramingError("chunk_line_limit")
+        if not line.endswith(b"\r\n"):
+            raise http.client.IncompleteRead(b"")
+        size = line[:-2].split(b";", 1)[0]
+        if not re.fullmatch(rb"[0-9A-Fa-f]+", size):
+            raise ResponseFramingError("invalid_chunk_size")
+        return int(size, 16)
+
+    def _get_chunk_left(self):
+        if not self._strict_framing:
+            return super()._get_chunk_left()
+        remaining = self.chunk_left
+        if not remaining:
+            if remaining is not None and self._safe_read(2) != b"\r\n":
+                raise ResponseFramingError("invalid_chunk_terminator")
+            remaining = self._read_next_chunk_size()
+            if remaining == 0:
+                self._read_and_discard_trailer()
+                self._close_conn()
+                remaining = None
+            self.chunk_left = remaining
+        return remaining
+
+    def _read_and_discard_trailer(self):
+        if not self._strict_framing:
+            return super()._read_and_discard_trailer()
+        total = 0
+        for _ in range(http.client._MAXHEADERS):
+            line = self.fp.readline(http.client._MAXLINE + 1)
+            total += len(line)
+            if len(line) > http.client._MAXLINE or total > http.client._MAXLINE:
+                raise ResponseFramingError("trailer_limit")
+            if not line.endswith(b"\r\n"):
+                raise http.client.IncompleteRead(b"")
+            if line == b"\r\n":
+                return
+            if b":" not in line:
+                raise ResponseFramingError("invalid_trailer")
+        raise ResponseFramingError("trailer_count_limit")
+
+
+_ObservedConnection.response_class = _ObservedHTTPResponse
 
 
 class _ObservedHTTPConnection(_ObservedConnection, http.client.HTTPConnection):

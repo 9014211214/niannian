@@ -3,13 +3,15 @@
 Physical request receipts retain their original accounting. Logical operations
 and explicit owner recoveries are append-only events; three failed operations,
 not three transport attempts, pause the product. Unknown charges, uncertain
-storage, and budget limits cannot be resumed through this interface.
+storage, and budget limits cannot be resumed through this interface. An explicit
+fresh-ledger contract can wait after strict no-content 429s while retaining
+unknown-charge holds; it never changes the historical default contract.
 The inherited default transport rejects HTTP redirects, and product recovery
 does not retry these failures or release their unknown-charge reservations.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from decimal import Decimal
 import hashlib
 import json
@@ -19,13 +21,34 @@ import uuid
 from .minimal_calls import MinimalCallStopped, _ID, _stamp
 from .reserved_calls import ReservedCallGuard
 from .response_observability import observe_http_error, validate_error_envelope_audit
+from .rate_limit import retry_wait_plan, perform_retry_wait
+import math
 
 _VERSION = "product_call_recovery_v1"
+_HOLD_VERSION = "product_call_recovery_v2_unknown_429_hold"
+_HOLD_SCHEMA = "unknown_429_hold_recovery_v1"
+
+
+def _hold_contract(value):
+    if value is None:
+        return None
+    if (type(value) is not dict or set(value) != {
+            "schema", "prior_unknown_429_count", "prior_evidence_sha256", "source_manifest_sha256"}
+            or value["schema"] != _HOLD_SCHEMA
+            or type(value["prior_unknown_429_count"]) is not int
+            or not 0 <= value["prior_unknown_429_count"] <= 6
+            or any(type(value[key]) is not str or len(value[key]) != 64
+                   or any(c not in "0123456789abcdef" for c in value[key])
+                   for key in ("prior_evidence_sha256", "source_manifest_sha256"))):
+        raise ValueError("invalid_unknown_429_recovery_contract")
+    return json.dumps(value, sort_keys=True, allow_nan=False)
+
 _OUTPUT_FAILURES = frozenset({
     "invalid_or_truncated_response", "invalid_response_message",
     "online_content_invalid_json", "online_content_duplicate_key", "online_content_non_finite",
     "online_content_not_object", "online_response_missing", "online_response_not_string",
     "online_response_empty", "online_decision_schema_invalid", "content_json_invalid",
+    "safety_review_schema_invalid",
 })
 _BUDGET_FAILURES = frozenset({"pre_send_budget_exceeded", "request_limit_reached",
                               "observed_cost_threshold_reached"})
@@ -59,27 +82,49 @@ class ProductCallGuard(ReservedCallGuard):
     Frozen experiments retain their originally selected guard and contract.
     """
 
-    allowed_roles = {"online_fast", "memory", "reflection"}
+    allowed_roles = {"online_fast", "memory", "reflection", "safety_review"}
 
-    def __init__(self, path, *, max_requests, max_observed_cost_usd, reservation_policy):
+    def __init__(self, path, *, max_requests, max_observed_cost_usd, reservation_policy,
+                 min_interval_seconds=0, observe_transport=False, transport_diagnostics=False,
+                 unknown_429_recovery=None, recovery_pre_send_check=None):
+        self._active_operation_tokens = set()
+        self._hold_contract_json = _hold_contract(unknown_429_recovery)
+        self._product_version = _HOLD_VERSION if self._hold_contract_json is not None else _VERSION
+        if ((self._hold_contract_json is not None) != callable(recovery_pre_send_check)
+                or self._hold_contract_json is None and recovery_pre_send_check is not None):
+            raise ValueError("unknown_429_recovery_requires_source_check")
+        self._recovery_pre_send_check = self._recovery_pre_send_check_original = recovery_pre_send_check
         # Do not silently reinterpret a retained strict experiment/legacy ledger.
         # Even a known charge cannot authorize changing that ledger's contract.
         from pathlib import Path
         if Path(path).exists():
             with sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True) as db:
                 present = db.execute("SELECT name FROM sqlite_master WHERE name='product_recovery'").fetchone()
-                if not present and db.execute("SELECT COUNT(*) FROM attempts").fetchone()[0]:
+                if present:
+                    if db.execute("SELECT version FROM product_recovery WHERE id=1").fetchone() != (self._product_version,):
+                        raise ValueError("product_recovery_contract_changed")
+                    if self._hold_contract_json is not None and db.execute(
+                            "SELECT contract FROM product_hold_recovery WHERE id=1").fetchone() != (self._hold_contract_json,):
+                        raise ValueError("unknown_429_recovery_contract_changed")
+                elif self._hold_contract_json is not None or db.execute("SELECT COUNT(*) FROM attempts").fetchone()[0]:
                     raise ValueError("retained_product_recovery_contract_missing")
         super().__init__(path, max_requests=max_requests, max_observed_cost_usd=max_observed_cost_usd,
-                         reservation_policy=reservation_policy)
+                         reservation_policy=reservation_policy, min_interval_seconds=min_interval_seconds,
+                         observe_transport=observe_transport, transport_diagnostics=transport_diagnostics)
         try:
             with self._lock, self._transaction():
                 self._db.execute("CREATE TABLE IF NOT EXISTS product_recovery "
                                  "(id INTEGER PRIMARY KEY CHECK(id=1), version TEXT NOT NULL)")
-                self._db.execute("INSERT OR IGNORE INTO product_recovery VALUES(1,?)", (_VERSION,))
+                self._db.execute("INSERT OR IGNORE INTO product_recovery VALUES(1,?)", (self._product_version,))
+                if self._hold_contract_json is not None:
+                    self._db.execute("CREATE TABLE IF NOT EXISTS product_hold_recovery "
+                                     "(id INTEGER PRIMARY KEY CHECK(id=1), contract TEXT NOT NULL)")
+                    self._db.execute("INSERT OR IGNORE INTO product_hold_recovery VALUES(1,?)", (self._hold_contract_json,))
                 self._db.execute("CREATE TABLE IF NOT EXISTS product_events "
                                  "(sequence INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT NOT NULL)")
-                if self._db.execute("SELECT version FROM product_recovery WHERE id=1").fetchone() != (_VERSION,):
+                self._db.execute("CREATE TABLE IF NOT EXISTS product_retry_waits "
+                                 "(sequence INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT NOT NULL)")
+                if self._db.execute("SELECT version FROM product_recovery WHERE id=1").fetchone() != (self._product_version,):
                     raise ValueError("product_recovery_contract_changed")
         except BaseException:
             self._db.close()
@@ -90,7 +135,10 @@ class ProductCallGuard(ReservedCallGuard):
                          (json.dumps({"at": _stamp(), **event}, sort_keys=True, allow_nan=False),))
 
     def _events(self):
-        if self._db.execute("SELECT version FROM product_recovery WHERE id=1").fetchone() != (_VERSION,):
+        if self._hold_contract_json is not None and self._db.execute(
+                "SELECT contract FROM product_hold_recovery WHERE id=1").fetchone() != (self._hold_contract_json,):
+            raise ValueError("unknown_429_recovery_contract_changed")
+        if self._db.execute("SELECT version FROM product_recovery WHERE id=1").fetchone() != (self._product_version,):
             raise ValueError("product_recovery_contract_changed")
         return [json.loads(row[0]) for row in self._db.execute("SELECT event FROM product_events ORDER BY sequence")]
 
@@ -126,7 +174,7 @@ class ProductCallGuard(ReservedCallGuard):
                                    "request_sha256", "wire_bytes", "input_token_plan_bound"}
                         or event["token"] not in operations or event["token"] in rejections
                         or operations[event["token"]]["finished"]
-                        or event["role"] not in {"online_fast", "memory", "reflection", "unrecognized"}
+                        or event["role"] not in {"online_fast", "memory", "reflection", "safety_review", "unrecognized"}
                         or event["reason"] not in _LOCAL_REJECTIONS
                         or event["category"] != _LOCAL_REJECTIONS[event["reason"]]
                         or type(event["request_sha256"]) is not str or len(event["request_sha256"]) != 64
@@ -162,10 +210,14 @@ class ProductCallGuard(ReservedCallGuard):
                 raise ValueError("invalid_product_event")
         return operations, resumes, streak, pause, hard
 
-    @staticmethod
-    def _retryable(row):
+    def _unknown_429(self, row):
+        return (self._hold_contract_json is not None and "cost" not in row.get("usage", {})
+                and row.get("http_status") == 429 and self._retryable(row))
+
+    def _retryable(self, row):
         if (row.get("status") != "failed" or row.get("failure_phase") != "http_status"
-                or "cost" not in row.get("usage", {})
+                or ("cost" not in row.get("usage", {}) and not (
+                    self._hold_contract_json is not None and row.get("http_status") == 429))
                 or not (row.get("http_status") == 429 or 500 <= (row.get("http_status") or 0) <= 599)):
             return False
         audit = row.get("product_no_content_audit")
@@ -174,13 +226,113 @@ class ProductCallGuard(ReservedCallGuard):
         validate_error_envelope_audit(audit)
         return (audit["source"] == "http_error_bytes" and audit["http_status"] == row["http_status"]
                 and not audit["rejection_reasons"]
-                and Decimal(str(row["usage"]["cost"])) <= Decimal(row["reservation"]["reserved_cost_usd"]))
+                and ("cost" in row["usage"] or (
+                    audit["body_status"] == "parsed" and audit["object"] and audit["error_object"]))
+                and ("cost" not in row["usage"] or
+                     Decimal(str(row["usage"]["cost"])) <= Decimal(row["reservation"]["reserved_cost_usd"])))
+
+    def _wait_plan(self, row):
+        return retry_wait_plan(row["observation"], retry_index=row["product_transport_attempt"] - 1,
+                               unknown_429_hold=self._unknown_429(row))
+
+    def _check_recovery_source(self):
+        if self._hold_contract_json is not None:
+            if self._recovery_pre_send_check is not self._recovery_pre_send_check_original:
+                raise MinimalCallStopped("recovery_source_check_changed")
+            # This callback returns exactly True after checking the sealed
+            # sources and predecessor-ledger manifest. No truthy substitutes.
+            if self._recovery_pre_send_check() is not True:
+                raise MinimalCallStopped("recovery_source_check_failed")
+            if self._stop_requested.is_set():
+                raise MinimalCallStopped("request_stop_requested")
+
+    def _append_retry_wait(self, event):
+        self._db.execute("INSERT INTO product_retry_waits(event) VALUES(?)",
+            (json.dumps({"at": _stamp(), **event}, sort_keys=True, allow_nan=False),))
+
+    def _retry_wait_state(self, attempts):
+        rows = [json.loads(row[0]) for row in self._db.execute(
+            "SELECT event FROM product_retry_waits ORDER BY sequence")]
+        by_id = {row["request_id"]: row for row in attempts}
+        pending, seen = {}, set()
+        for event in rows:
+            if type(event) is not dict or type(event.get("at")) is not str:
+                raise ValueError("invalid_product_retry_wait")
+            parent = by_id.get(event.get("parent_request_id"))
+            if parent is None or not self._retryable(parent):
+                raise ValueError("invalid_product_retry_wait_parent")
+            if event.get("event") == "planned":
+                if (set(event) != {"at", "event", "parent_request_id", "request_sha256", "plan"}
+                        or parent["request_id"] in seen or event["request_sha256"] != parent["request_sha256"]
+                        or json.dumps(event["plan"], sort_keys=True, allow_nan=False) != json.dumps(
+                            self._wait_plan(parent),
+                            sort_keys=True, allow_nan=False)):
+                    raise ValueError("invalid_product_retry_wait_plan")
+                seen.add(parent["request_id"])
+                pending[parent["request_id"]] = event["plan"]
+            elif event.get("event") == "completed":
+                plan = pending.get(parent["request_id"])
+                if (set(event) != {"at", "event", "parent_request_id", "wait_ms"}
+                        or plan is None or plan["decision"] != "wait"
+                        or type(event["wait_ms"]) not in (int, float) or not math.isfinite(event["wait_ms"])
+                        or event["wait_ms"] < plan["seconds"] * 1000):
+                    raise ValueError("invalid_product_retry_wait_completion")
+                del pending[parent["request_id"]]
+            else:
+                raise ValueError("invalid_product_retry_wait_event")
+        active = (getattr(self, "_active_product_retry_wait", None) if self._hold_contract_json is not None
+                  else getattr(self._local, "active_retry_wait", None))
+        unresolved = any(key != active or plan["decision"] == "blocked" for key, plan in pending.items())
+        return rows, unresolved
+
+    def _wait_for_product_retry(self, row):
+        parent = row["request_id"]
+        plan = self._wait_plan(row)
+        try:
+            with self._lock, self._transaction():
+                self._append_retry_wait({"event": "planned", "parent_request_id": parent,
+                    "request_sha256": row["request_sha256"], "plan": plan})
+            if plan["decision"] == "blocked":
+                raise MinimalCallStopped("product_retry_wait_unavailable")
+            self._local.active_retry_wait = parent
+            if self._hold_contract_json is not None:
+                self._active_product_retry_wait = parent
+            waited = perform_retry_wait(plan, monotonic=self._pacing_clock, sleep=self._pacing_sleep,
+                cancelled=self._stop_requested.is_set)
+            # The next physical claim repeats scope/configuration/fee checks.
+            # Completion is not a reservation, receipt, or send authorization.
+            with self._lock, self._transaction():
+                self._check_recovery_source()
+                state = self._snapshot()
+                if state["stopped"]:
+                    raise MinimalCallStopped(state["stop_reason"])
+                self._append_retry_wait({"event": "completed", "parent_request_id": parent,
+                    "wait_ms": waited})
+        except BaseException as error:
+            # Preserve the unresolved started operation as well if persisting
+            # the wait failed. A restart cannot turn storage failure into permission.
+            self._local.rejection_save_failed = True
+            if not isinstance(error, Exception):
+                raise
+            raise MinimalCallStopped("product_retry_wait_failed") from None
+        finally:
+            self._local.active_retry_wait = None
+            self._active_product_retry_wait = None
 
     def _snapshot(self):
         state = super()._snapshot()
         events = self._events()
         operations, _resumes, streak, pause, hard = self._event_state(events)
+        waits, wait_unresolved = self._retry_wait_state(state["attempts"])
         reason = state["stop_reason"]
+        unknown_429 = [row for row in state["attempts"] if self._unknown_429(row)]
+        prior_unknown = (json.loads(self._hold_contract_json)["prior_unknown_429_count"]
+                         if self._hold_contract_json is not None else 0)
+        if reason == "provider_cost_unknown" and self._hold_contract_json is not None:
+            if (all("cost" in row["usage"] or self._unknown_429(row) for row in state["attempts"])
+                    and all(row["status"] != "failed" or row.get("failure_code") in _OUTPUT_FAILURES
+                            or self._retryable(row) for row in state["attempts"])):
+                reason = None
         if reason == "request_failed":
             # Only the finite recoverable category stops being permanent. Route,
             # permission, billing, storage and unclassified errors remain hard.
@@ -188,21 +340,34 @@ class ProductCallGuard(ReservedCallGuard):
                    or self._retryable(row) for row in state["attempts"]):
                 reason = None
         if reason is None:
-            if state["calls_used"] >= self.max_requests:
+            if self._hold_contract_json is not None and prior_unknown + len(unknown_429) >= 6:
+                reason = "unknown_429_task_limit_reached"
+            elif any(row.get("product_transport_attempt") == 3 for row in unknown_429):
+                reason = "unknown_429_request_attempts_exhausted"
+            elif state["calls_used"] >= self.max_requests:
                 reason = "request_limit_reached"
             elif Decimal(state["known_cost_usd"] or "0") >= Decimal(self.threshold):
                 reason = "observed_cost_threshold_reached"
+            elif wait_unresolved:
+                reason = "unresolved_product_retry_wait"
             elif hard:
                 reason = hard
-            elif any(not row["finished"] and token != getattr(self._local, "operation_token", None)
+            elif any(not row["finished"] and token not in self._active_operation_tokens
                      for token, row in operations.items()):
                 reason = "unresolved_product_operation"
             elif pause:
                 reason = "consecutive_failures"
         state.update(stopped=bool(reason), stop_reason=reason,
-                     recovery_contract=_VERSION, consecutive_failures=streak,
+                     recovery_contract=self._product_version, consecutive_failures=streak,
                      can_resume=reason == "consecutive_failures", pause_id=pause,
-                     max_extra_attempts_per_request=2, product_events=events)
+                     max_extra_attempts_per_request=2, product_events=events, product_retry_waits=waits)
+        if self._hold_contract_json is not None:
+            state["unknown_429_recovery"] = {
+                **json.loads(self._hold_contract_json), "local_unknown_429_count": len(unknown_429),
+                "task_unknown_429_count": prior_unknown + len(unknown_429), "max_task_unknown_429": 6,
+                "unknown_cost_holds_preserved": True, "minimum_local_cooldown_seconds": 900,
+                "maximum_wait_seconds": 3600,
+                "wait_in_progress": getattr(self, "_active_product_retry_wait", None) is not None}
         rejected = next((event for event in reversed(events) if event["event"] == "request_rejected"), None)
         if rejected is not None:
             state["last_request_rejection"] = {
@@ -213,11 +378,12 @@ class ProductCallGuard(ReservedCallGuard):
 
     @contextmanager
     def scope(self, kind, operation_id, session_id):
-        # Serialize a complete interaction locally, while a durable started
-        # event blocks another process between physical requests and saving.
-        with self._lock, super().scope(kind, operation_id, session_id):
+        # Same-instance operations may interleave at physical boundaries. Only
+        # tokens registered by this live guard can share its durable allowance;
+        # another instance/restart still sees an unresolved started event.
+        with super().scope(kind, operation_id, session_id):
             token = uuid.uuid4().hex
-            with self._transaction():
+            with self._lock, self._transaction():
                 state = self._snapshot()
                 if state["stopped"]:
                     raise MinimalCallStopped(state["stop_reason"])
@@ -225,6 +391,7 @@ class ProductCallGuard(ReservedCallGuard):
                     raise MinimalCallStopped("duplicate_model_operation")
                 self._append({"event": "started", "token": token, "kind": kind,
                               "operation_id": operation_id, "session_id": session_id})
+                self._active_operation_tokens.add(token)
             self._local.operation_token = token
             self._local.output_failed = False
             self._local.local_rejected = False
@@ -233,7 +400,8 @@ class ProductCallGuard(ReservedCallGuard):
             failed = True
             try:
                 yield
-                rows = [json.loads(row[0]) for row in self._db.execute("SELECT record FROM attempts ORDER BY sequence")]
+                with self._lock:
+                    rows = [json.loads(row[0]) for row in self._db.execute("SELECT record FROM attempts ORDER BY sequence")]
                 last = {r["role"]: r for r in rows if r["operation_id"] == operation_id}
                 failed = (self._local.output_failed or self._local.local_rejected
                           or any(r["status"] != "received" for r in last.values()))
@@ -241,12 +409,14 @@ class ProductCallGuard(ReservedCallGuard):
                 try:
                     if self._local.rejection_save_failed:
                         raise MinimalCallStopped("local_rejection_save_failed")
-                    with self._transaction():
+                    with self._lock, self._transaction():
                         self._append({"event": "finished", "token": token, "failed": failed})
                 except Exception:
                     self._broken = True
                     raise MinimalCallStopped("product_outcome_save_failed") from None
                 finally:
+                    with self._lock:
+                        self._active_operation_tokens.discard(token)
                     self._local.operation_token = None
 
     def note_output_failure(self):
@@ -366,6 +536,11 @@ class ProductCallGuard(ReservedCallGuard):
         # still be durable: otherwise an Engine fallback would misclassify a
         # configuration/identity/authority error as recoverable model output.
         try:
+            # _begin runs after the ordinary physical-start pacing wait too.
+            self._check_recovery_source()
+            if (getattr(self._local, "retry_parent", None) is not None
+                    and hashlib.sha256(request.data).hexdigest() != self._local.product_wire_sha):
+                raise MinimalCallStopped("model_request_configuration_changed")
             return super()._begin(client, request, **kwargs)
         except Exception as error:
             if isinstance(error, MinimalCallStopped) and str(error) in _BUDGET_FAILURES:
@@ -401,14 +576,17 @@ class ProductCallGuard(ReservedCallGuard):
             self._local.local_rejected = True
             raise MinimalCallStopped("local_request_rejected") from None
 
-    def request_json(self, client, request):
-        with self._lock:
+    def request_json(self, client, request, *, require_preference_control=False, require_task_projection=False):
+        if type(require_preference_control) is not bool or type(require_task_projection) is not bool:
+            raise MinimalCallStopped("model_request_configuration_changed")
+        options = {**({"require_preference_control": True} if require_preference_control else {}), **({"require_task_projection": True} if require_task_projection else {})}
+        with nullcontext():
             self._local.retry_parent = None
             self._local.product_wire_sha = hashlib.sha256(request.data).hexdigest()
             try:
                 for attempt in range(3):
                     try:
-                        return self._request_once(client, request)
+                        return self._request_once(client, request, **options)
                     except MinimalCallStopped as error:
                         if str(error) == "local_request_rejected":
                             client._update_diagnostic(error_type="local_request_rejected")
@@ -416,7 +594,7 @@ class ProductCallGuard(ReservedCallGuard):
                             if self._local.budget_rejected:
                                 raise
                             try:
-                                with self._transaction():
+                                with self._lock, self._transaction():
                                     self._append({"event": "budget_stopped", "reason": str(error),
                                                   "token": self._local.operation_token})
                             except Exception:
@@ -430,15 +608,19 @@ class ProductCallGuard(ReservedCallGuard):
                         rows = state.get("attempts", [])
                         last = rows[-1] if rows else None
                         scope = getattr(self._local, "scope", {})
-                        if (attempt == 2 or state["stopped"] or last is None
+                        no_retry_role = (client.role == "safety_review"
+                                         or getattr(client, "offline_reasoning_route", None) is not None)
+                        if no_retry_role and last is not None and self._unknown_429(last):
+                            # These roles retain their explicit zero-retry
+                            # contract. Do not let a later operation bypass the
+                            # required cooldown after their unsettled 429.
+                            self.halt()
+                        if (no_retry_role
+                                or attempt == 2 or state["stopped"] or last is None
                                 or last["operation_id"] != scope.get("operation_id")
                                 or last["role"] != client.role or not self._retryable(last)):
                             raise
-                        delay = last["observation"].get("retry_after_seconds", 1 + attempt)
-                        # An excessive/rejected delay is not silently shortened.
-                        if last["observation"].get("retry_after_status") == "rejected" or delay > 30:
-                            raise
-                        self._pacing_sleep(max(1 + attempt, delay))
+                        self._wait_for_product_retry(last)
                         self._local.retry_parent = last["request_id"]
             finally:
                 self._local.retry_parent = None

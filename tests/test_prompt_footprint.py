@@ -50,7 +50,7 @@ def test_fixture_measurements_are_reproducible_and_explicitly_scoped(monkeypatch
     assert first["model_calls"] == 0
     for row in first["input_measurements"]:
         assert sum(b["characters"] for b in row["system_blocks"]) == row["content_characters_by_role"]["system"]
-        assert row["prompt_version"] == ("1.18.0" if row["delivery_block"] == "mode_v1" else "1.19.0")
+        assert row["prompt_version"] == ("1.18.1" if row["delivery_block"] == "mode_v1" else "1.19.1")
 
 
 def test_non_text_messages_are_rejected_instead_of_undercounted():

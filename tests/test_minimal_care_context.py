@@ -1,11 +1,12 @@
 """Actual local care records projected without mutations or private fields."""
+from copy import deepcopy
 from datetime import timedelta
 import hashlib
 import json
 
 import pytest
 
-from aria.engine.minimal_care_context import build_care_context
+from aria.engine.minimal_care_context import build_care_context, compact_empty_care_context
 from tests.test_minimal_care import (
     ELDER, START, advance_visible_page, care, command, queue_without_dispatch, reminder, setup_rule,
 )
@@ -20,6 +21,20 @@ def test_unconfigured_is_distinct_from_configured_without_reminders(care):
     result = build_care_context(service, ELDER)
     assert result["status"] == "available" and result["counts"]["reminders"]["total"] == 0
     assert build_care_context(service, "not-assigned")["status"] == "not_configured"
+    for elder_id, status in ((ELDER, "available"), ("not-assigned", "not_configured")):
+        raw = build_care_context(service, elder_id)
+        before = deepcopy(raw)
+        view = compact_empty_care_context(raw)
+        assert raw == before and build_care_context(service, elder_id) == before
+        assert view["status"] == status
+        assert set(raw) - set(view) == {*raw["counts"], "scope_notice"}
+        assert {key: value for key, value in view.items() if key != "counts"} == {
+            key: value for key, value in raw.items() if key in view and key != "counts"}
+        assert {kind: view["counts"]["each"] for kind in view["counts"]["kinds"]} == raw["counts"]
+        assert len(json.dumps(view, ensure_ascii=False).encode("utf-8")) < len(
+            json.dumps(raw, ensure_ascii=False).encode("utf-8"))
+        view["counts"]["each"]["total"] = 1
+        assert raw == before
 
 
 def test_read_projects_actual_schedule_and_not_a_completed_action(care):
@@ -33,6 +48,7 @@ def test_read_projects_actual_schedule_and_not_a_completed_action(care):
     assert row["schedule"] == "once" and row["timezone"] == "Asia/Shanghai"
     assert row["next_due_at"] == "2026-09-20T07:30:00+00:00"
     assert not result["occurrences"] and result["counts"]["deliveries"]["total"] == 0
+    assert compact_empty_care_context(result) == result
 
 
 def test_snapshot_does_not_tick_deliver_or_change_database(care, tmp_path, monkeypatch):
@@ -204,3 +220,41 @@ def test_clock_and_snapshot_are_read_under_same_service_lock(care, monkeypatch):
     monkeypatch.setattr(service, "clock", checked_clock)
     assert build_care_context(service, ELDER)["status"] == "available"
     assert calls == [ELDER]
+
+
+@pytest.mark.parametrize("case", ["source", "status", "read_only", "nonempty",
+    "count_bool", "count_positive", "count_missing", "extra_count", "notice", "missing_list",
+    "status_type", "counts_type", "list_type"])
+def test_empty_prompt_view_never_hides_unknown_or_omitted_records(care, case):
+    service, _token, _clock = care
+    raw = build_care_context(service, ELDER)
+    if case == "source":
+        raw["source"] = "unknown"
+    elif case == "status":
+        raw["status"] = "unavailable"
+    elif case == "read_only":
+        raw["read_only"] = False
+    elif case == "nonempty":
+        raw["deliveries"] = [{"status": "unknown"}]
+    elif case == "count_bool":
+        raw["counts"]["consents"]["total"] = False
+    elif case == "count_positive":
+        raw["counts"]["consents"]["total"] = 1
+        raw["counts"]["consents"]["omitted"] = 1
+    elif case == "count_missing":
+        del raw["counts"]["tasks"]["omitted"]
+    elif case == "extra_count":
+        raw["counts"]["other"] = {"total": 0, "included": 0, "omitted": 0}
+    elif case == "notice":
+        raw["scope_notice"] = "未知范围。"
+    elif case == "missing_list":
+        del raw["occurrences"]
+    elif case == "status_type":
+        raw["status"] = []
+    elif case == "counts_type":
+        raw["counts"] = None
+    elif case == "list_type":
+        raw["tasks"] = None
+    before = deepcopy(raw)
+    assert compact_empty_care_context(raw) == before
+    assert raw == before

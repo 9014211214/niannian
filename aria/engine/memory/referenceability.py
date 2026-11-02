@@ -10,6 +10,7 @@ import re
 
 
 SOURCE_CONTEXT_VERSION = "owner_turn_context_v1"
+REVIEWED_FACT_CONTEXT = "owner_turn_fact_purpose_v2"
 
 # Keep the existing privacy floor shared by extraction and later consumers.
 _SENSITIVE = (
@@ -54,10 +55,78 @@ def reference_context_is_valid(
 ) -> bool:
     """Missing legacy context is retained, but cannot authorize active recall."""
     return bool(
-        version == SOURCE_CONTEXT_VERSION
+        version in (SOURCE_CONTEXT_VERSION, REVIEWED_FACT_CONTEXT)
         and isinstance(text, str) and text.strip()
         and isinstance(quote, str) and quote.strip() and quote in text
         and digest == source_context_sha256(text)
         and not must_not_reference(text)
         and not must_not_reference(quote)
     )
+
+
+def preference_source_turns(persona, proposals=(), *, retired_only=False) -> dict[tuple[str, int], set[str]]:
+    """Index owner evidence, including confirmations retained after withdrawal."""
+    from ..model.persona import PreferenceQuote
+
+    turns: dict[tuple[str, int], set[str]] = {}
+    for preference in (*persona.stated_preferences, *proposals):
+        if retired_only and preference.status not in ("withdrawn", "superseded"):
+            continue
+        evidence = [*preference.quotes, preference.confirmation,
+                    *(transition.quote for transition in preference.history)]
+        for quote in evidence:
+            if isinstance(quote, PreferenceQuote):
+                turns.setdefault((quote.session_id, quote.turn_index), set()).add(quote.text)
+    if not retired_only:
+        def add_reviewed_pair(session, index, quote, source):
+            control = source.preference_source_quote
+            if (session and type(index) is int and source.source_context_version == REVIEWED_FACT_CONTEXT
+                    and control and reference_context_is_valid(
+                        source.source_context, source.source_context_sha256, source.source_context_version, quote,
+                    ) and separate_fact_source(source.source_context, quote, control, {source.source_context})):
+                turns.setdefault((session, index), set()).add(control)
+
+        for episode in persona.episodic_memory:
+            add_reviewed_pair(episode.source_session_id, episode.source_turn_index, episode.source_quote, episode)
+        for row in persona.relationship_context:
+            for evidence in row.evidence:
+                if evidence.source == "user_conversation":
+                    for source in evidence.fact_sources:
+                        if source.turn_index in evidence.turn_indices:
+                            add_reviewed_pair(evidence.session_id, source.turn_index, source.quote, source)
+    return turns
+
+
+def retired_source_starts(persona) -> dict[str, int]:
+    """Earliest documented control turn in each source session of a retired instruction."""
+    starts = {}
+    for session, turn in preference_source_turns(persona, retired_only=True):
+        starts[session] = min(turn, starts.get(session, turn))
+    return starts
+
+
+def separate_fact_source(
+    context: str, fact: str, preference_part: str | None, evidence: set[str],
+) -> bool:
+    """A control-bearing turn can still contain a separately sourced life event."""
+    if not evidence:
+        return True
+    if not context or not fact:
+        return False
+    fact_start = context.find(fact)
+    if fact_start < 0 or fact_start != context.rfind(fact):
+        return False
+    fact_end = fact_start + len(fact)
+    for text in evidence:
+        # Older records sometimes identify the control span itself. A complete
+        # turn alone cannot distinguish its parts; current extraction supplies
+        # both literal spans in that case.
+        control = preference_part if text == context else text
+        if not control:
+            return False
+        control_start = context.find(control)
+        if control_start < 0 or control_start != context.rfind(control):
+            return False
+        if fact_start < control_start + len(control) and control_start < fact_end:
+            return False
+    return True

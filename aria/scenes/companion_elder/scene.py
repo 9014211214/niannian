@@ -54,15 +54,37 @@ class ElderCompanionScene(BaseScene):
     def guard_response(self, ctx, response: str) -> str:
         """全局医疗声明守卫；防止普通回合中模型自发越过医疗边界。"""
         cognitive_safe = guard_cognitive_health_reply(response)
-        safe = guard_general_medical_reply(cognitive_safe)
+        semantic = ctx is not None and ctx.working_memory.get("_online_decision_version") in ("online_turn_decision_v6_semantic", "online_turn_decision_v7")
+        if semantic:
+            from ...engine.policy.delivery_spans import project_exact_transform, publish_code_response
+            if cognitive_safe == " ".join(str(response or "").strip().split()):
+                cognitive_safe = response  # Retain exact layout/source positions.
+            else:
+                publish_code_response(ctx, cognitive_safe)
+        medical_version = ("local_refusal_v2" if ctx is not None
+                           and ctx.working_memory.get("_safety_delivery_version") in ("source_response_v4", "minimal_response_v1")
+                           else "legacy")
+        if ctx is not None and ctx.working_memory.get("_online_decision_version") in ("online_turn_decision_v5_bound", "online_turn_decision_v6_semantic", "online_turn_decision_v7"):
+            medical_version = "sentence_refusal_v3"
+        source_positions = [] if semantic else None
+        safe = (guard_general_medical_reply(cognitive_safe, version=medical_version, source_positions=source_positions)
+                if semantic else guard_general_medical_reply(cognitive_safe, version=medical_version))
+        if semantic:
+            if safe == cognitive_safe.strip():
+                safe = cognitive_safe
+                source_positions = list(range(len(cognitive_safe)))
+            project_exact_transform(ctx, cognitive_safe, safe, source_positions)
         if ctx is not None and ctx.working_memory.get("_cognitive_owner_enabled") and re.search(
             r"阿尔[茨兹]海默|阿兹海默|痴呆|认知障碍|(?:风险|认知|记忆).{0,8}(?:\d+分|概率|高风险|低风险)|\d+(?:\.\d+)?\s*%", safe
         ):
-            return "我不能通过聊天判断疾病或给出个人评估。反复出现的变化可能有多种原因，是否在下次体检时向医生提一句，由您决定；不愿意也可以。"
+            safe = "我不能通过聊天判断疾病或给出个人评估。反复出现的变化可能有多种原因，是否在下次体检时向医生提一句，由您决定；不愿意也可以。"
+            if semantic:
+                publish_code_response(ctx, safe)
+            return safe
         # All safety/receipt checks above keep their existing compact view.
         # Restore layout only when those checks did not replace content.
         if (ctx is not None
-                and ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v3"
+                and ctx.working_memory.get("_online_decision_version") in {"online_turn_decision_v3", "online_turn_decision_v4_evidence", "online_turn_decision_v5_bound", "online_turn_decision_v6_semantic", "online_turn_decision_v7"}
                 and safe == " ".join(str(response or "").strip().split())):
             return response
         return safe
@@ -105,7 +127,7 @@ class ElderCompanionScene(BaseScene):
         # All safety/receipt checks above keep their existing compact view.
         # Restore layout only when those checks did not replace content.
         if (ctx is not None
-                and ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v3"
+                and ctx.working_memory.get("_online_decision_version") in {"online_turn_decision_v3", "online_turn_decision_v4_evidence", "online_turn_decision_v5_bound", "online_turn_decision_v6_semantic", "online_turn_decision_v7"}
                 and safe == " ".join(str(response or "").strip().split())):
             return response
         return safe

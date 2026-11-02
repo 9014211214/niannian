@@ -1,6 +1,7 @@
 """Text-only session lifecycle and local HTTP infrastructure for the first release."""
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import secrets
@@ -30,7 +31,14 @@ class TextWebApp:
 
     def __init__(self, *, store: PersonaStore, clients=None,
                  session_idle_seconds=1200, checkpoint_turns=1,
-                 demo_token=None, delivery_block=None):
+                 demo_token=None, delivery_block=None, safety_delivery_version="legacy",
+                 safety_response_instruction_version="legacy", premodel_safety_version="legacy"):
+        from ..engine.risk.premodel_task import validate_premodel_safety_version
+        self.premodel_safety_version = validate_premodel_safety_version(premodel_safety_version)
+        from ..engine.risk.safety_delivery import validate_delivery_version
+        self.safety_delivery_version = validate_delivery_version(safety_delivery_version)
+        from ..engine.policy.safety_instruction import SafetyResponseInstruction
+        self._safety_response_instruction = SafetyResponseInstruction(safety_response_instruction_version)
         self.store = store
         self.clients = clients or create_minimal_clients()
         self.scene_id = "companion_elder"
@@ -45,13 +53,23 @@ class TextWebApp:
         self._user_locks: dict[str, threading.RLock] = {}
         self._offline_prune_cursor = None
 
+    @property
+    def safety_response_instruction_version(self):
+        return self._safety_response_instruction.version
+
     def _seed_persona(self, user_id):
         return PersonaProfile(user_id=user_id, profile_origin="blank")
 
     def _engine_for_persona(self, persona):
         return create_minimal_engine(get_scene(self.scene_id), persona,
                                      clients=self.clients, store=self.store,
-                                     delivery_block=self.delivery_block)
+                                     delivery_block=self.delivery_block,
+                                     **({"safety_delivery_version": self.safety_delivery_version}
+                                        if self.safety_delivery_version != "legacy" else {}),
+                                     **({"safety_response_instruction_version": self.safety_response_instruction_version}
+                                         if self.safety_response_instruction_version != "legacy" else {}),
+                                     **({"premodel_safety_version": self.premodel_safety_version}
+                                        if self.premodel_safety_version != "legacy" else {}))
 
     def _user_lock(self, user_id: str) -> threading.RLock:
         with self._lock:
@@ -85,6 +103,19 @@ class TextWebApp:
             if user_id not in self._sessions:
                 persona = self.store.load(user_id) or self._seed_persona(user_id)
                 engine = self._engine_for_persona(persona)
+                pending = persona.pending_session
+                if (pending is not None and not pending.offline_finalize_pending
+                        and pending.scene_id == self.scene_id and self._checkpoint_is_current(pending)
+                        and pending.premodel_safety_version != self.premodel_safety_version):
+                    raise ValueError("checkpoint_premodel_safety_version_mismatch")
+                if (pending is not None and not pending.offline_finalize_pending
+                        and pending.scene_id == self.scene_id and self._checkpoint_is_current(pending)
+                        and pending.safety_delivery_version != self.safety_delivery_version):
+                    raise ValueError("checkpoint_safety_delivery_version_mismatch")
+                if (pending is not None and not pending.offline_finalize_pending
+                        and pending.scene_id == self.scene_id and self._checkpoint_is_current(pending)
+                        and pending.safety_response_instruction_version != self.safety_response_instruction_version):
+                    raise ValueError("checkpoint_safety_response_instruction_version_mismatch")
                 # Migration/expiry only: opening a chat must never drain an
                 # older failed offline job or append new text to its session.
                 engine.prepare_offline_sessions()
@@ -127,6 +158,15 @@ class TextWebApp:
                         "complete" if complete else "legacy_tail_unknown_indices"
                     )
                     if complete:
+                        # Only source-qualified saved deliveries retain their
+                        # qualification. Sparse original indices must not be
+                        # renumbered after sensitive turns were excluded.
+                        ctx.working_memory["_person_response_deliveries"] = {
+                            str(index): item.person_response_sha256
+                            for index, item in zip(indices, pending.turns)
+                            if item.person_response_sha256 is not None
+                            and item.person_response_sha256 == hashlib.sha256(item.agent.encode()).hexdigest()
+                        }
                         kept_indices = set(indices)
                         ctx.working_memory["_sensitive_memory_excluded_turns"] = [
                             index for index in range(count) if index not in kept_indices
@@ -135,6 +175,9 @@ class TextWebApp:
                         ctx.turns
                     )
                     ctx.working_memory["_restored_checkpoint"] = True
+                    ctx.working_memory["_safety_delivery_version"] = pending.safety_delivery_version
+                    ctx.working_memory["_safety_response_instruction_version"] = pending.safety_response_instruction_version
+                    ctx.working_memory["_premodel_safety_version"] = pending.premodel_safety_version
                     if persona.cognitive_health_consent.has_text_monitoring_consent():
                         ctx.working_memory["_cognitive_source_turns"] = [
                             row.model_dump() for row in pending.cognitive_turns]
@@ -161,7 +204,53 @@ class TextWebApp:
             return self._sessions[user_id]
 
 
-    def text_turn(self, user_id, text, *, turn_id=None, external_emotion=None):
+    def _text_utterance(self, text):
+        """V4 preserves the submitted text; older versions retain their wire."""
+        if self.safety_delivery_version in ("source_response_v4", "minimal_response_v1"):
+            return text if isinstance(text, str) else ""
+        return " ".join((text or "").strip().split())
+
+    def _bind_fictional_context(self, user_id, session_id, execution_input):
+        """Python-only stimulus binding; never manufacture completed Turn rows."""
+        from copy import deepcopy
+        from ..engine.policy.fictional_context import (
+            bind_fictional_conversation_history, bind_fictional_scenario_date,
+        )
+        if (type(execution_input) is not dict
+                or set(execution_input) - {"messages", "setup", "context_material"}
+                or execution_input.get("context_material", []) != []):
+            raise ValueError("unsupported_fictional_execution_input")
+        messages, setup = execution_input.get("messages"), execution_input.get("setup", {})
+        if (type(messages) is not list or not 1 <= len(messages) <= 64
+                or any(type(m) is not dict or set(m) != {"role", "content"}
+                       or type(m["role"]) is not str or m["role"] not in {"user", "assistant"}
+                       or type(m["content"]) is not str
+                       for m in messages)
+                or messages[-1]["role"] != "user" or not messages[-1]["content"].strip()
+                or len(messages[-1]["content"]) > 500
+                or sum(len(m["content"]) for m in messages) > 60000):
+            raise ValueError("invalid_fictional_messages")
+        # The fixed Chinese product's locale is not a person preference.
+        if (type(setup) is not dict or set(setup) - {"today", "language"}
+                or setup.get("language", "zh-CN") != "zh-CN"):
+            raise ValueError("unsupported_fictional_setup")
+        pair = self._sessions.get(user_id)
+        if pair is None or pair[1].session_id != session_id or pair[1].turns:
+            raise ValueError("fictional_context_requires_fresh_active_session")
+        ctx = pair[1]
+        prior = ctx.working_memory.get("_fictional_web_input")
+        if prior is not None and prior != execution_input:
+            raise ValueError("fictional_context_already_bound")
+        # Validate all fields before touching the live context.
+        probe = EngineContext(user_id=ctx.user_id, session_id=ctx.session_id, scene_id=ctx.scene_id)
+        bind_fictional_conversation_history(probe, messages[:-1])
+        if "today" in setup:
+            bind_fictional_scenario_date(probe, setup["today"])
+        ctx.working_memory.update(probe.working_memory)
+        ctx.working_memory["_fictional_web_input"] = deepcopy(execution_input)
+        return deepcopy(execution_input)
+
+    def text_turn(self, user_id, text, *, turn_id=None, external_emotion=None, safety_prelude=None):
         """Only text becomes evidence; optional classifier data stays a soft hint."""
         reading = parse_external_emotion(external_emotion)
         if is_simulated(reading) and not isinstance(
@@ -169,14 +258,21 @@ class TextWebApp:
             SyntheticEmotionExperiment,
         ):
             raise ValueError("simulated_external_emotion_requires_isolated_experiment")
-        utterance = " ".join((text or "").strip().split())
-        if not utterance or len(utterance) > 500:
+        utterance = self._text_utterance(text)
+        if not utterance.strip() or len(utterance) > 500:
             return {"ok": False, "error": "请输入500字以内文字。"}
         with self._user_lock(user_id):
             engine, ctx = self._session(user_id)
+            if "_fictional_web_input" in ctx.working_memory:
+                # Preserve the final stimulus byte-for-byte too, including spaces.
+                utterance = text
             started = time.perf_counter()
-            response = (engine.process_turn(ctx, utterance) if reading is None else
-                        engine.process_turn(ctx, utterance, external_emotion=reading))
+            options = {}
+            if reading is not None:
+                options["external_emotion"] = reading
+            if safety_prelude is not None:
+                options["safety_prelude"] = safety_prelude
+            response = engine.process_turn(ctx, utterance, **options)
             with self._lock:
                 self._session_activity[user_id] = time.monotonic()
             self._maybe_checkpoint(engine, ctx)
@@ -370,7 +466,8 @@ class TextWebApp:
         return {
             "reasoning_architecture": {
                 "delivery_block": self.delivery_block,
-                "prompt_version": prompt_version_for(self.delivery_block),
+                "prompt_version": prompt_version_for(self.delivery_block,
+                    safety_response_instruction_version=self.safety_response_instruction_version),
                 "online_decision_schema": configured_online_decision_version(),
             },
             "data_practices": {

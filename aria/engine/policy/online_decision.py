@@ -34,7 +34,15 @@ ONLINE_DECISION_VERSION_V2 = "online_turn_decision_v2"
 # v3 keeps the v1 decision shape and adds a same-call semantic safety signal.
 # Historical v1/v2 schemas remain reproducible; minimal live clients select v3.
 ONLINE_DECISION_VERSION_SAFETY = "online_turn_decision_v3"
-ONLINE_DECISION_VERSIONS = (ONLINE_DECISION_VERSION, ONLINE_DECISION_VERSION_V2, ONLINE_DECISION_VERSION_SAFETY)
+ONLINE_DECISION_VERSION_EVIDENCE = "online_turn_decision_v4_evidence"
+ONLINE_DECISION_VERSION_BOUND = "online_turn_decision_v5_bound"
+ONLINE_DECISION_VERSION_SEMANTIC = "online_turn_decision_v6_semantic"
+ONLINE_DECISION_VERSION_V7 = "online_turn_decision_v7"
+SEMANTIC_DECISION_VERSIONS = (ONLINE_DECISION_VERSION_SEMANTIC, ONLINE_DECISION_VERSION_V7)
+BOUND_DECISION_VERSIONS = (ONLINE_DECISION_VERSION_BOUND, *SEMANTIC_DECISION_VERSIONS)
+EVIDENCE_DECISION_VERSIONS = (ONLINE_DECISION_VERSION_EVIDENCE, *BOUND_DECISION_VERSIONS)
+SAFETY_DECISION_VERSIONS = (ONLINE_DECISION_VERSION_SAFETY, *EVIDENCE_DECISION_VERSIONS)
+ONLINE_DECISION_VERSIONS = (ONLINE_DECISION_VERSION, ONLINE_DECISION_VERSION_V2, *SAFETY_DECISION_VERSIONS)
 SAFETY_CONCERNS = ("none", "self_harm", "medical_emergency", "fall", "unsafe_medication")
 ONLINE_DECISION_VERSION_ENV = "ARIA_ONLINE_DECISION_VERSION"
 DELIBERATION_VERSION = "turn_deliberation_v1"
@@ -219,8 +227,9 @@ def protocol_version(messages: list[dict]) -> str | None:
         content = item.get("content")
         if not isinstance(content, str):
             continue
+        declared = "|".join(re.escape(version) for version in ONLINE_DECISION_VERSIONS)
         versions.update(re.findall(
-            r"(?m)^协议版本[：:](online_turn_decision_v[123])(?:。|\s|$)", content))
+            r"(?m)^协议版本[：:](" + declared + r")(?:。|\s|$)", content))
     if len(versions) > 1:
         raise ValueError("conflicting_online_protocol_declarations")
     return next(iter(versions), None)
@@ -399,13 +408,17 @@ def _communication_plan_trace(
     }
 
 
-def online_decision_tool_spec(version: str = ONLINE_DECISION_VERSION) -> dict:
+def online_decision_tool_spec(version: str = ONLINE_DECISION_VERSION, *,
+                              require_preference_control: bool = False, require_task_projection: bool = False) -> dict:
     """强制单次 Function Call 的参数契约；返回后仍执行本地不信任校验。
 
     默认 v1 保持历史请求指纹不变；v2 把 response 放到最后并加入推演。
     """
     if version not in ONLINE_DECISION_VERSIONS:
         raise ValueError("unknown_online_decision_version")
+    if (type(require_preference_control) is not bool or type(require_task_projection) is not bool
+            or ((require_preference_control or require_task_projection) and version not in EVIDENCE_DECISION_VERSIONS)):
+        raise ValueError("invalid_online_request_requirement")
     signal = {
         "type": "object",
         "properties": {
@@ -475,7 +488,7 @@ def online_decision_tool_spec(version: str = ONLINE_DECISION_VERSION) -> dict:
         ],
         "additionalProperties": False,
     }
-    if version == ONLINE_DECISION_VERSION_SAFETY:
+    if version in SAFETY_DECISION_VERSIONS:
         parameters["properties"]["safety_concern"] = {"type": "string", "enum": list(SAFETY_CONCERNS)}
         parameters["required"].append("safety_concern")
         # Optional for retained v3 outputs; only current validated owner
@@ -499,6 +512,43 @@ def online_decision_tool_spec(version: str = ONLINE_DECISION_VERSION) -> dict:
             }, "required": ["version", "action", "invitation_id", "target_id", "target_sha256", "evidence_quote"],
             "additionalProperties": False,
         }
+    if version in EVIDENCE_DECISION_VERSIONS:
+        from ..risk.safety_evidence import evidence_schema
+        parameters["properties"]["safety_evidence"] = evidence_schema()
+        parameters["required"].append("safety_evidence")
+        if require_preference_control:
+            parameters["required"].append("preference_control")
+        if require_task_projection:
+            from ..risk.safety_task import task_projection_schema
+            parameters["properties"]["task_projection"] = task_projection_schema()
+            parameters["required"].append("task_projection")
+    if version in BOUND_DECISION_VERSIONS:
+        parameters["properties"]["preference_control"] = {
+            "type": "object", "properties": {"action": {
+                "type": "string", "enum": ["confirm", "decline", "defer", "unclear"]}},
+            "required": ["action"], "additionalProperties": False,
+        }
+        parameters["properties"]["applied_preference_ids"] = {
+            "type": "array", "items": {"type": "string"}, "maxItems": 4,
+        }
+        parameters["required"].append("applied_preference_ids")
+        parameters["properties"]["response_segments"] = {
+            "type": "array", "minItems": 1, "maxItems": 24, "items": {
+                "type": "object", "properties": {
+                    "text": {"type": "string", "minLength": 1},
+                    "claims_saved": {"type": "boolean"}},
+                "required": ["text", "claims_saved"], "additionalProperties": False}}
+        if require_preference_control:
+            parameters["required"].append("response_segments")
+    if version in SEMANTIC_DECISION_VERSIONS:
+        from .semantic_delivery import segment_schema
+        parameters["properties"]["response_segments"] = segment_schema(version)
+        if "response_segments" not in parameters["required"]:
+            parameters["required"].append("response_segments")
+    if version == ONLINE_DECISION_VERSION_V7:
+        parameters["properties"].pop("response")
+        parameters["properties"].pop("preference_control")
+        parameters["required"] = ["response_segments", "safety_concern"]
     if version == ONLINE_DECISION_VERSION_V2:
         properties = parameters["properties"]
         properties["deliberation"] = deliberation_schema()
@@ -563,10 +613,12 @@ def single_pass_messages(
         raise ValueError("unknown_online_decision_version")
     if format_style not in {"legacy", "schema_guided"}:
         raise ValueError("unknown_online_format_style")
+    if version == ONLINE_DECISION_VERSION_V7:
+        format_style = "schema_guided"
     copied = [dict(item) for item in messages]
     # v1 不写入任何新键（历史请求与上下文保持原样）；缺省即按 v1 解析。
     ctx.working_memory.pop("_online_decision_basis_ids", None)
-    if version in {ONLINE_DECISION_VERSION_V2, ONLINE_DECISION_VERSION_SAFETY}:
+    if version in {ONLINE_DECISION_VERSION_V2, *SAFETY_DECISION_VERSIONS}:
         ctx.working_memory["_online_decision_version"] = version
     else:
         ctx.working_memory.pop("_online_decision_version", None)
@@ -599,7 +651,10 @@ def single_pass_messages(
     ):
         outcome_lines.append(
             f"- {intervention_id}: 最近两个独立会话均为明确负面结果；"
-            "本轮不得再次推动该方向，也不要换一种问法继续试探。"
+            + ("默认不再推动或换问法试探；结合当前完整原话判断本人是否明确重新提出该需要，"
+               "若是则尊重当前意愿，仍遵守授权边界。历史冷却不证明当前意愿。"
+               if version == ONLINE_DECISION_VERSION_V7 else
+               "本轮不得再次推动该方向，也不要换一种问法继续试探。")
         )
     for intervention_id in (
         decision_basis.get("current_request_override_routes") or []
@@ -624,6 +679,28 @@ def single_pass_messages(
             "优先完成明确任务、尊重纠正和停止；不为展示该方向强制追问。"
         )
     base = str(copied[0].get("content") or "")
+    if ctx.working_memory.get("_safety_response_instruction_version") == "compact_response_v1":
+        from .release_prompt import bound_preference_requirement, decision_contract, validate_system_budget
+        priority = bound_preference_requirement(ctx)
+        if priority:
+            # Keep the exact qualified block once, after protocol and action
+            # guidance too. No user text is interpreted or rewritten here.
+            exact = "\n\n" + priority
+            if base.count(exact) != 1:
+                raise ValueError("bound_preference_prompt_changed")
+            base = base.replace(exact, "", 1)
+        copied[0]["content"] = base + "\n\n" + decision_contract(ctx, interventions, outcome_contract)
+        if priority:
+            copied[0]["content"] += "\n\n" + priority
+        if version == ONLINE_DECISION_VERSION_V7:
+            from .release_prompt import fit_v7_system_budget
+            return fit_v7_system_budget(copied, ctx)
+        validate_system_budget(copied)
+        return copied
+    if version in SEMANTIC_DECISION_VERSIONS:
+        from .semantic_delivery import segment_instruction
+        base += segment_instruction(ctx)
+        copied[0]["content"] = base
     # Production build_messages owns the shared contract. Standalone protocol
     # callers still receive it; never append a second competing observation rule.
     delivery_contract = (
@@ -651,7 +728,7 @@ def single_pass_messages(
         "\n不以‘没事就好’关闭持续变化，不把持续退出说成‘歇着挺好’，也不强迫参与。"
         "沟通方向 id 绝不是工具名。情绪/症状本身不授权。"
     )
-    if version == ONLINE_DECISION_VERSION_SAFETY:
+    if version in SAFETY_DECISION_VERSIONS:
         shared_tail += (
             "\n安全分流 safety_concern 必填：none/self_harm/medical_emergency/fall/unsafe_medication。"
             "按当前本人原话及必要近文理解语义，不要求特定关键词。self_harm包括当前自伤念头、"
@@ -662,6 +739,19 @@ def single_pass_messages(
             "不能仅凭相关词给非none。标签仅是安全分流候选，不是诊断、危险已被证实或通知授权。"
             "非none时由本地既有安全流程接管，不输出操作药物、执行工具或已联系他人的声称。"
         )
+    if version in EVIDENCE_DECISION_VERSIONS:
+        from ..risk.safety_evidence import EVIDENCE_PROMPT, EVIDENCE_PROMPT_V2
+        shared_tail = shared_tail.replace(
+            "按当前本人原话及必要近文理解语义", "按当前用户原话及必要近文理解当事人的语义")
+        shared_tail = shared_tail.replace("假设、第三人转述、已解决的过去事件", "假设、已解决的过去事件")
+        shared_tail += (EVIDENCE_PROMPT_V2
+                        if ctx.working_memory.get("_safety_response_instruction_version") == "conditional_response_v4"
+                        else EVIDENCE_PROMPT)
+        if version == ONLINE_DECISION_VERSION_V7:
+            shared_tail = shared_tail.replace(
+                "preference_control只用于页面已实际交付且本轮有效的待确认邀请；没有该邀请时省略整个字段，"
+                "不要为了填满可选结构生成空白确认，也不要声称已保存、启用、拒绝或通知。",
+                "不要自造确认或声称已保存、启用、拒绝或通知。")
     shared_tail += online_id_namespace_contract(version, interventions)
     if format_style == "schema_guided":
         # Replace only our newly constructed format wording, never quoted data.
@@ -679,7 +769,7 @@ def single_pass_messages(
             format_style=format_style,
         )
         return copied
-    if version == ONLINE_DECISION_VERSION_SAFETY:
+    if version in SAFETY_DECISION_VERSIONS:
         base += (
             "\nC1本人权限语义：本轮若本人明确要求停止留意其日常/记忆变化，"
             "cognitive_control用version=cognitive_permission_v1、action=disable_observation，"
@@ -716,10 +806,16 @@ def single_pass_messages(
         '"communication_plan":{"pace":"枚举值","support_order":"具体先后安排",'
         '"boundary":"沟通行动边界"},'
         + ('"safety_concern":"none/self_harm/medical_emergency/fall/unsafe_medication之一",'
-           if version == ONLINE_DECISION_VERSION_SAFETY else '')
+           if version in SAFETY_DECISION_VERSIONS else '')
         + '"uncertainty":0到1}。'))
         + shared_tail
     )
+    if version == ONLINE_DECISION_VERSION_V7:
+        copied[0]["content"] = copied[0]["content"].replace(
+            "safety_evidence必填", "safety_evidence可选").replace(
+            "response仍须", "分段正文仍须").replace(
+            "response字段", "response_segments的text").replace(
+            "标签置 response 末尾", "标签置最后一段text末尾")
     return copied
 
 
@@ -740,14 +836,21 @@ def _schema_field_meanings(action_response_contract: str, version: str) -> str:
         "\ncommunication_plan：pace取一个完整英文枚举；support_order是具体先后安排；"
         "boundary是沟通行动边界。uncertainty取0到1的数值。"
     )
-    if version == ONLINE_DECISION_VERSION_SAFETY:
-        text += "\nsafety_concern：当前本人安全关注的枚举标签，不是诊断或通知权限；无当前依据时为none。"
+    if version in SAFETY_DECISION_VERSIONS:
+        text += ("\nsafety_concern：当前当事人（本人或第三人）安全关注的枚举标签，不是诊断或通知权限；无当前依据时为none。"
+                 if version in EVIDENCE_DECISION_VERSIONS else
+                 "\nsafety_concern：当前本人安全关注的枚举标签，不是诊断或通知权限；无当前依据时为none。")
+    if version in EVIDENCE_DECISION_VERSIONS:
+        text += "\nsafety_evidence：当前用户消息的逐字出处、当事人、时间和紧迫性；不是诊断或权限。"
     if version == ONLINE_DECISION_VERSION_V2:
         text += (
             "\ndeliberation：person_read说明他此刻可能在意/想要什么；applied_basis仅用上面"
             "可引用依据中的id；options每项的intervention_id是可选干预id，"
             "predicted_reaction是他可能的反应。"
         )
+    if version == ONLINE_DECISION_VERSION_V7:
+        text = text.replace("短句仅指response字段", "正文只写在 response_segments 里").replace(
+            "\nresponse：", "\nresponse_segments的text：")
     return text
 
 
@@ -833,23 +936,55 @@ def apply_single_pass_decision(
 ) -> str:
     """解析并校验在线决策；内部协议损坏时绝不把原文暴露给用户。"""
     ctx.working_memory.pop("_benchmark_reply_trace", None)
+    dropped_fields = []
     try:
-        payload = _load_payload(raw)
+        if _active_version(ctx) == ONLINE_DECISION_VERSION_V7:
+            from .online_json import parse_v7_payload
+            payload, dropped_fields = parse_v7_payload(raw,
+                require_task_projection=ctx.working_memory.get("_safety_response_instruction_version") == "conditional_response_v2")
+        elif _active_version(ctx) in EVIDENCE_DECISION_VERSIONS:
+            from .online_json import parse_json_decision
+            # Every carrier must meet the same full candidate contract before
+            # state, permission or action handling can observe the payload.
+            from ..memory.preference_dialogue import current_preference_invitation
+            parse_json_decision(
+                raw, _active_version(ctx),
+                require_preference_control=(
+                    ctx.working_memory.get("_preference_request_binding") is not None
+                    if _active_version(ctx) in BOUND_DECISION_VERSIONS else
+                    current_preference_invitation(persona, ctx) is not None),
+                require_task_projection=ctx.working_memory.get("_safety_response_instruction_version") == "conditional_response_v2",
+            )
+            payload = _load_payload(raw)
+        else:
+            payload = _load_payload(raw)
+        if (_active_version(ctx) in BOUND_DECISION_VERSIONS
+                and "response_segments" in payload
+                and "".join(row["text"] for row in payload["response_segments"]) != payload["response"]):
+            raise ValueError("preference_response_segments_mismatch")
+        if _active_version(ctx) in SEMANTIC_DECISION_VERSIONS:
+            from .semantic_delivery import valid_segments
+            if not valid_segments(payload.get("response_segments"), _active_version(ctx)):
+                raise ValueError("semantic_response_segments_invalid")
     except Exception:
-        if _active_version(ctx) == ONLINE_DECISION_VERSION_SAFETY or _looks_like_internal_protocol(raw):
+        if _active_version(ctx) in SAFETY_DECISION_VERSIONS or _looks_like_internal_protocol(raw):
             _record_unstructured(ctx, status="invalid_protocol_response")
             return DETERMINISTIC_MODEL_FAILURE_REPLY
         response = str(raw).strip()
         _record_unstructured(ctx, status="unstructured_response")
         return response or DETERMINISTIC_MODEL_FAILURE_REPLY
 
-    response = str(payload.get("response") or "").strip()
-    if not response or _looks_like_internal_protocol(response):
+    response = str(payload.get("response") or "")
+    if (_active_version(ctx) != ONLINE_DECISION_VERSION_V7
+            and ctx.working_memory.get("_safety_response_instruction_version") != "compact_response_v1"):
+        response = response.strip()
+    if (not response.strip()
+            or (_active_version(ctx) != ONLINE_DECISION_VERSION_V7 and _looks_like_internal_protocol(response))):
         _record_unstructured(ctx, status="invalid_protocol_response")
         return DETERMINISTIC_MODEL_FAILURE_REPLY
 
     safety_concern = payload.get("safety_concern")
-    if _active_version(ctx) == ONLINE_DECISION_VERSION_SAFETY and safety_concern not in SAFETY_CONCERNS:
+    if _active_version(ctx) in SAFETY_DECISION_VERSIONS and safety_concern not in SAFETY_CONCERNS:
         _record_unstructured(ctx, status="invalid_protocol_response")
         return DETERMINISTIC_MODEL_FAILURE_REPLY
 
@@ -920,14 +1055,20 @@ def apply_single_pass_decision(
     # 其他表达守卫改写后丢失其中的完成态声明。
     ctx.working_memory["_delivery_response_candidate_for_turn"] = response
     pre_guard_response = response
-    response, delivery_guard = _guard_user_response(
-        response,
-        ctx,
-        utterance,
-        persona,
-        requested_intervention_id=requested_selected_id,
-        selection_lock_reason=selection_lock_reason,
-    )
+    if ctx.working_memory.get("_safety_response_instruction_version") == "compact_response_v1":
+        # Release delivery preserves the one actual body. Privacy, medical,
+        # authority and real-receipt boundaries run later in the engine/scene.
+        delivery_guard = {"activated": False, "violations": [], "action_removed": False,
+                          "policy": "minimal_response_v1"}
+    else:
+        response, delivery_guard = _guard_user_response(
+            response,
+            ctx,
+            utterance,
+            persona,
+            requested_intervention_id=requested_selected_id,
+            selection_lock_reason=selection_lock_reason,
+        )
     from .delivery_provenance import record_reply_stage
     # Preserve the exact parsed body hash before the existing edge trim.
     record_reply_stage(ctx, "response_normalization",
@@ -982,9 +1123,57 @@ def apply_single_pass_decision(
         "delivery_guard": delivery_guard,
         **plan_trace,
     }
-    if _active_version(ctx) == ONLINE_DECISION_VERSION_SAFETY:
+    if version == ONLINE_DECISION_VERSION_V7:
+        trace["dropped_fields"] = dropped_fields
+        trace["unverified_action_segment_indexes"] = payload.get("_unverified_action_segment_indexes", [])
+        trace["unverified_preference_segment_indexes"] = payload.get("_unverified_preference_segment_indexes", [])
+        trace["unverified_fact_segment_indexes"] = payload.get("_unverified_fact_segment_indexes", [])
+        if "uncertainty" not in payload:
+            trace["uncertainty"] = None
+    if version == ONLINE_DECISION_VERSION_BOUND:
+        # Retained v5 self-report, without retroactive qualification.
+        trace["applied_preference_ids"] = deepcopy(payload.get("applied_preference_ids", []))
+        trace["applied_preference_ids_semantically_verified"] = False
+        if "response_segments" in payload:
+            trace["response_segments"] = deepcopy(payload["response_segments"])
+    if version in SEMANTIC_DECISION_VERSIONS:
+        # Self-report is recorded separately; it does not prove compliance.
+        reported_ids = deepcopy(payload.get("applied_preference_ids", []))
+        snapshot = ctx.working_memory.get("prompt_evidence_snapshot", {})
+        projection = snapshot.get("stated_preferences_prompt_projection", [])
+        binding = snapshot.get("stated_preferences_prompt_binding") or {}
+        from ..memory.stated_preferences import confirmed_preference_payloads
+        current = [{key: deepcopy(row[key]) for key in ("id", "do", "scope", "not_implies")}
+                   for row in confirmed_preference_payloads(persona)] if persona is not None else []
+        projection_bound = (binding.get("owner_id") == ctx.user_id
+            and persona is not None and persona.user_id == ctx.user_id
+            and binding.get("session_id") == ctx.session_id
+            and type(binding.get("turn_index")) is int and binding["turn_index"] == len(ctx.turns)
+            and binding.get("projection_sha256") == hashlib.sha256(json.dumps(projection,
+                ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest())
+        supplied_ids = {row["id"] for row in projection if projection_bound and row in current}
+        trace["reported_applied_preference_ids"] = reported_ids
+        trace["applied_preference_ids"] = list(dict.fromkeys(
+            item for item in reported_ids if item in supplied_ids))
+        trace["rejected_applied_preference_ids"] = list(dict.fromkeys(
+            item for item in reported_ids if item not in supplied_ids))
+        trace["applied_preference_ids_source_verified"] = True
+        trace["applied_preference_projection_bound"] = projection_bound
+        trace["applied_preference_ids_semantically_verified"] = False
+        if "response_segments" in payload:
+            trace["response_segments"] = deepcopy(payload["response_segments"])
+        if version in SEMANTIC_DECISION_VERSIONS:
+            trace["semantic_delivery_binding"] = {
+                "user_id": ctx.user_id, "scene_id": ctx.scene_id, "session_id": ctx.session_id,
+            }
+    if _active_version(ctx) in SAFETY_DECISION_VERSIONS:
         trace["safety_concern"] = safety_concern
         trace["safety_source"] = "online_model_semantics"
+        if version in EVIDENCE_DECISION_VERSIONS:
+            from ..risk.safety_evidence import assess_evidence
+            trace["safety_evidence"] = deepcopy(payload.get("safety_evidence"))
+            trace["safety_assessment"] = assess_evidence(
+                safety_concern, trace["safety_evidence"], utterance)
         control = payload.get("cognitive_control")
         valid_control = (
             type(control) is dict and set(control) == {"version", "action", "evidence_quote"}
@@ -998,11 +1187,24 @@ def apply_single_pass_decision(
         trace["cognitive_control_status"] = "validated" if valid_control else "missing_or_invalid"
         trace["cognitive_control"] = deepcopy(control) if valid_control else None
         trace["owner_message_sha256"] = hashlib.sha256(utterance.encode()).hexdigest()
-        from ..memory.preference_dialogue import validate_preference_control
-        preference_control = validate_preference_control(payload.get("preference_control"), persona, ctx, utterance)
-        trace["preference_control_status"] = "validated" if preference_control is not None else "missing_or_invalid"
-        trace["preference_control"] = preference_control
-        trace["preference_control_supplied"] = "preference_control" in payload
+        if version == ONLINE_DECISION_VERSION_V7:
+            trace.update(preference_control_status="missing_or_invalid", preference_control=None,
+                         preference_control_supplied=False, preference_control_inert=True)
+        else:
+            from ..memory.preference_dialogue import validate_preference_control, uninvited_unclear_control
+            preference_control = validate_preference_control(payload.get("preference_control"), persona, ctx, utterance)
+            trace["preference_control_status"] = "validated" if preference_control is not None else "missing_or_invalid"
+            trace["preference_control"] = preference_control
+            trace["preference_control_supplied"] = "preference_control" in payload
+            if version in EVIDENCE_DECISION_VERSIONS:
+                trace["preference_control_inert"] = uninvited_unclear_control(
+                    payload.get("preference_control"), ctx)
+    if ctx.working_memory.get("_safety_response_instruction_version") == "conditional_response_v2":
+        from ..risk.safety_task import bind_task_projection
+        trace["task_projection"] = bind_task_projection(ctx, utterance, payload, trace)
+    if ctx.working_memory.get("_safety_response_instruction_version") in ("conditional_response_v3", "conditional_response_v4", "compact_response_v1"):
+        from ..risk.source_response import bind_source_response
+        trace["source_response"] = bind_source_response(ctx, utterance, pre_guard_response, response, trace)
     ctx.working_memory["online_turn_decision"] = trace
     history = ctx.working_memory.setdefault(
         "online_decision_history", []
@@ -1170,7 +1372,7 @@ def _guard_user_response(
     violations = list(dict.fromkeys(violations))
     if not violations:
         # Scan the same compact view; v3 delivery retains author-visible layout.
-        delivered = response if _active_version(ctx) == ONLINE_DECISION_VERSION_SAFETY else value
+        delivered = response if _active_version(ctx) in SAFETY_DECISION_VERSIONS else value
         return delivered, {
             "activated": False,
             "violations": [],
@@ -1383,6 +1585,8 @@ def _looks_like_internal_protocol(raw: str) -> bool:
             ONLINE_DECISION_VERSION,
             ONLINE_DECISION_VERSION_V2,
             ONLINE_DECISION_VERSION_SAFETY,
+            ONLINE_DECISION_VERSION_EVIDENCE,
+            *BOUND_DECISION_VERSIONS,
             "aria_turn_decision",
             '"state_signals"',
             '"current_affect"',

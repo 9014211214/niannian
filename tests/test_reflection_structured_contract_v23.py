@@ -17,19 +17,26 @@ def payload():
     return {"protocol_version": "2.0", "reviews": [item], "changes": [change(item)]}
 
 
-def test_saved_r8_low_retire_shape_is_legal_without_rewriting_proposal():
-    raw = json.loads(R8_RETIRE_RAW)
+def test_saved_r8_low_retire_new_shape_projection_preserves_original_proposal():
+    original = json.loads(R8_RETIRE_RAW)
+    raw = deepcopy(original)
+    for item in raw["reviews"]:
+        item.pop("event_kind")
+        item.pop("prior_event_id")
     before = deepcopy(raw)
     validate_reflection_response_shape(raw)
     assert raw == before
+    assert raw["changes"] == original["changes"]
+    assert json.loads(R8_RETIRE_RAW) == original
     assert raw["changes"][0]["confidence"] == .5
 
 
 def test_schema_is_fresh_closed_and_all_nullable_fields_still_required():
     schema = reflection_response_schema()
-    assert schema["title"] == "AriaOfflineEvidenceReview2_3"
+    assert schema["title"] == "AriaOfflineEvidenceReview2_5"
     assert schema["properties"]["changes"]["maxItems"] == 1
     assert schema["properties"]["reviews"]["maxItems"] == 6
+    assert not {"event_kind", "prior_event_id"} & schema["$defs"]["_Review"]["properties"].keys()
     for obj in [schema, *schema["$defs"].values()]:
         if obj.get("type") == "object":
             assert obj["additionalProperties"] is False
@@ -141,7 +148,7 @@ def test_structural_schema_pass_does_not_assert_quote_grounding_or_scope_truth()
 
 def test_unknown_is_structurally_valid_without_promoting_to_support():
     raw = payload()
-    raw["reviews"][0].update(applicability="unknown", relation="unknown", event_kind="unknown")
+    raw["reviews"][0].update(applicability="unknown", relation="unknown")
     raw["changes"] = []
     validate_reflection_response_shape(raw)
     updater, llm, persona = setup()
@@ -162,7 +169,8 @@ def test_new_generation_one_change_does_not_retroactively_break_old_multi_propos
     with pytest.raises(ValidationError):
         validate_reflection_response_shape(raw)
     apply(updater, llm, persona, ctx, [first, second], [one, two])
-    assert updater.last_status == "ok" and len(persona.person_hypotheses) == 1
-    assert len(updater.last_belief_change_results) == 1
-    assert updater.last_application_summary["applied_count"] == 1
-    assert updater.last_application_summary["deferred_count"] == 1
+    assert updater.last_status == "ok" and not persona.person_hypotheses
+    assert updater.last_belief_change_results == []
+    assert updater.last_application_summary["applied_count"] == 0
+    assert updater.last_application_summary["deferred_count"] == 2
+    assert len(persona.evidence_review_ledger) == 2

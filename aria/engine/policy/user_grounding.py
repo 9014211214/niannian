@@ -34,6 +34,20 @@ def _permitted(text: str, predicate: PrivacyPredicate | None) -> bool:
 
 
 def _window(ctx: EngineContext, count: int) -> tuple[list[tuple[int, str]], str]:
+    from .fictional_context import fictional_conversation_history
+    fictional_history = fictional_conversation_history(ctx)
+    if fictional_history is not None:
+        # This explicit one-response stimulus is the complete actual wire
+        # history, not a paired Turn log or person evidence. Use original row
+        # indexes; current runtime exclusions do not refer to these rows.
+        # Existing privacy predicates still filter every user source below.
+        turns = [(index, row["content"]) for index, row in enumerate(fictional_history)
+                 if row["role"] == "user"]
+        fingerprint = hashlib.sha256(json.dumps(
+            {"fictional_conversation_history_v1": fictional_history},
+            ensure_ascii=False, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        return turns, fingerprint
     start = max(0, len(ctx.turns) - count)
     excluded = {item for item in ctx.working_memory.get("_sensitive_memory_excluded_turns", [])
                 if type(item) is int and item >= 0}

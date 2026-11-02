@@ -92,7 +92,10 @@ class PersonaStore:
         )
         try:
             data = json.loads(text)
-            return PersonaProfile(**data)
+            persona = PersonaProfile(**data)
+            from .preference_status import mark_persisted_preferences
+            mark_persisted_preferences(persona)
+            return persona
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
             # Validation messages may echo private field values. Fail closed
             # and log only identifiers plus the exception class.
@@ -132,6 +135,8 @@ class PersonaStore:
             encoding="utf-8",
         )
         replace_with_retry(tmp, path)
+        from .preference_status import mark_persisted_preferences
+        mark_persisted_preferences(persona)
         logger.info(
             f"persona saved: {persona.user_id} "
             f"(episodes={len(persona.episodic_memory)})"

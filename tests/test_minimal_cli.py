@@ -52,6 +52,45 @@ def test_minimal_cli_help_advertises_opt_in_and_data_isolation(capsys):
     output = capsys.readouterr().out
     assert "--minimal" in output and "--minimal-data-dir" in output
     assert "--enable-model-calls" in output
+    assert "--offline-model" in output and "--offline-provider" in output
+
+
+def test_default_web_can_explicitly_select_same_deepseek_offline_route(tmp_path, monkeypatch):
+    import json
+    from tests.test_deepseek_offline_route import metadata, policy, DEEPSEEK_MODEL
+    models, route = metadata()
+    source, endpoint, prices = (tmp_path / name for name in ("models.json", "endpoint.json", "policy.json"))
+    source.write_bytes(models)
+    endpoint.write_bytes(route)
+    prices.write_text(json.dumps(policy()), encoding="utf-8")
+    monkeypatch.setattr(cli, "load_local_env", lambda: None)
+    monkeypatch.setattr("aria.runtime.openrouter_api_key", lambda: "inert-software-key")
+    seen = []
+    class Server:
+        server_port = 8099
+        def __init__(self, app): self.app = app
+        def serve_forever(self):
+            seen.extend([self.app.clients.online.model, self.app.clients.memory.model, self.app.clients.reflection.model])
+            assert self.app.call_guard.snapshot()["calls_used"] == 0
+        def server_close(self): self.app.close()
+    monkeypatch.setattr(minimal, "make_minimal_server", lambda app, *args: Server(app))
+    assert cli.web_main(["--minimal-data-dir", str(tmp_path / "app"), "--enable-model-calls",
+        "--model-max-requests", "10", "--model-stop-cost-usd", "1",
+        "--model-reservation-policy", str(prices), "--online-models-metadata", str(source),
+        "--online-endpoints-metadata", str(endpoint), "--offline-endpoints-metadata", str(endpoint),
+        "--offline-model", DEEPSEEK_MODEL, "--offline-provider", "together"]) == 0
+    assert seen == [DEEPSEEK_MODEL] * 3
+
+
+@pytest.mark.parametrize("options", [
+    ["--offline-provider", "together"],
+    ["--release-profile", "legacy", "--offline-model", "deepseek/deepseek-v4.1-flash-1017", "--offline-provider", "together"],
+])
+def test_web_offline_route_mismatch_rejected_before_credentials(monkeypatch, options):
+    monkeypatch.setattr(cli, "load_local_env", lambda: pytest.fail("credentials must not be loaded"))
+    with pytest.raises(SystemExit) as error:
+        cli.web_main(["--enable-model-calls", *options])
+    assert error.value.code == 2
 
 
 def test_minimal_cli_reports_close_failure_without_claiming_sealed(tmp_path, monkeypatch, capsys):

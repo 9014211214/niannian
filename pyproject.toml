@@ -27,12 +27,15 @@ dependencies = [
 
 [project.scripts]
 aria-web = "aria.cli:web_main"
+aria-asr = "aria.voice.asr_cli:main"
+aria-model-policy = "aria.engine.policy.release_configuration:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.6"]
 secure = ["cryptography>=42"]
+asr = ["websockets>=14"]
 
-# Explicit model clients use stdlib urllib; no media services are bundled.
+# Text model clients use stdlib urllib. ASR requires its explicit optional extra.
 
 [tool.setuptools.packages.find]
 include = ["aria*"]
@@ -44,6 +47,10 @@ aria = [
     "assets/voice/*.html",
     "assets/voice/*.md",
     "bench/cases/*.yaml",
+    "bench/cases/fixed_safety_v1/manifest.json",
+    "bench/cases/fixed_safety_v1/inputs.json",
+    "bench/cases/fixed_safety_v1/references.json",
+    "bench/cases/fixed_safety_v1/protocol.json",
     "bench/datasets/*.yaml",
     "scenes/companion_elder/*.yaml",
 ]

@@ -35,15 +35,20 @@ from ..._openrouter import (
     headers as openrouter_headers,
 )
 from .online_decision import (
+    EVIDENCE_DECISION_VERSIONS, ONLINE_DECISION_VERSION_EVIDENCE,
     online_decision_tool_spec,
     protocol_version,
     uses_online_decision_protocol,
 )
 from .online_return_channel import OnlineReturnChannel, bind_online_return_channel
 from .online_json import parse_json_decision, prepare_json_messages
+from .online_structured import (
+    ONLINE_JSON_FORMATS, ONLINE_STRUCTURED_FORMAT, OnlineStructuredRoute,
+    online_structured_request_format, validate_online_structured_client,
+)
 
 LLMRole = Literal[
-    "online", "online_fast", "state", "memory", "reflection", "judge"
+    "online", "online_fast", "state", "memory", "reflection", "judge", "safety_review", "confirm_judge"
 ]
 
 
@@ -325,18 +330,22 @@ class OpenAILLMClient:
             },
         )
 
-    def _request_json(self, request: urllib.request.Request) -> dict:
+    def _request_json(self, request: urllib.request.Request, *, require_preference_control: bool = False, require_task_projection: bool = False) -> dict:
         """只重试幂等推理请求的瞬时错误；认证/参数错误立即暴露。"""
+        if type(require_preference_control) is not bool or type(require_task_projection) is not bool:
+            raise ValueError("invalid_online_request_requirement")
         minimal_control = getattr(self, "model_request_control", None)
         if minimal_control is not None:
             if getattr(self, "benchmark_request_control", None) is not None:
                 raise ValueError("multiple model request controllers are not allowed")
-            return minimal_control.request_json(self, request)
+            options = {**({"require_preference_control": True} if require_preference_control else {}), **({"require_task_projection": True} if require_task_projection else {})}
+            return minimal_control.request_json(self, request, **options)
         # Only the benchmark CLI installs this process-local shared controller.
         # Product clients retain their existing transport and latency defaults.
         controller = getattr(self, "benchmark_request_control", None)
         if controller is not None:
-            return controller.request_json(self, request)
+            options = {**({"require_preference_control": True} if require_preference_control else {}), **({"require_task_projection": True} if require_task_projection else {})}
+            return controller.request_json(self, request, **options)
         transient_statuses = {429, 500, 502, 503, 504}
         for attempt in range(self.max_retries + 1):
             self._record_network_request()
@@ -420,16 +429,43 @@ class OpenRouterLLMClient(OpenAILLMClient):
         role: LLMRole = "online",
         timeout: float | None = None,
         max_retries: int | None = None,
-        online_return_format: Literal["native", "json_object"] = "native",
+        online_return_format: Literal["native", "json_object", "json_schema_v1"] = "native",
+        online_structured_route: OnlineStructuredRoute | None = None,
         bounded_transport: bool = False,
-        reflection_return_format: Literal["native", "body_json", "json_schema", "json_schema_v1", "json_schema_v2"] = "native",
+        reflection_return_format: Literal["native", "body_json", "json_schema", "json_schema_v1", "json_schema_v2", "json_schema_v3", "json_schema_v4"] = "native",
+        offline_reasoning_route=None,
+        safety_structured_route: OnlineStructuredRoute | None = None,
+        memory_prefix_recovery: bool = False,
+        reflection_itemwise_review: bool = False,
+        memory_structured_route=None,
+        confirm_structured_route=None,
     ):
-        if online_return_format not in {"native", "json_object"}:
+        if online_return_format not in {"native", *ONLINE_JSON_FORMATS}:
             raise ValueError("invalid_online_return_format")
         self.online_return_format = online_return_format
-        if reflection_return_format not in {"native", "body_json", "json_schema", "json_schema_v1", "json_schema_v2"}:
+        if online_return_format != ONLINE_STRUCTURED_FORMAT and online_structured_route is not None:
+            raise ValueError("unexpected_online_structured_route")
+        self.online_structured_route = online_structured_route
+        if reflection_return_format not in {"native", "body_json", "json_schema", "json_schema_v1", "json_schema_v2", "json_schema_v3", "json_schema_v4"}:
             raise ValueError("invalid_reflection_return_format")
         self.reflection_return_format = reflection_return_format
+        for flag, expected_role in ((memory_prefix_recovery, "memory"), (reflection_itemwise_review, "reflection")):
+            if type(flag) is not bool or flag and role != expected_role:
+                raise ValueError("invalid_offline_recovery_option")
+        if offline_reasoning_route is not None and role != "reflection":
+            raise ValueError("invalid_offline_reasoning_client")
+        if safety_structured_route is not None and role != "safety_review":
+            raise ValueError("invalid_safety_structured_client")
+        if memory_structured_route is not None and role != "memory":
+            raise ValueError("invalid_memory_structured_client")
+        self.memory_structured_route = memory_structured_route
+        if confirm_structured_route is not None and role != "confirm_judge":
+            raise ValueError("invalid_confirm_judge_client")
+        self.confirm_structured_route = confirm_structured_route
+        self.offline_reasoning_route = offline_reasoning_route
+        self.safety_structured_route = safety_structured_route
+        self.memory_prefix_recovery = memory_prefix_recovery
+        self.reflection_itemwise_review = reflection_itemwise_review
         if type(bounded_transport) is not bool:
             raise ValueError("invalid_bounded_transport")
         self.bounded_transport = bounded_transport
@@ -441,6 +477,8 @@ class OpenRouterLLMClient(OpenAILLMClient):
             "memory": "OPENROUTER_MEMORY_MODEL",
             "reflection": "OPENROUTER_REFLECTION_MODEL",
             "judge": "OPENROUTER_JUDGE_MODEL",
+            "safety_review": "OPENROUTER_SAFETY_REVIEW_MODEL",
+            "confirm_judge": "OPENROUTER_ONLINE_FAST_MODEL",
         }[role]
         default_model = {
             "online": DEFAULT_CHAT_MODEL,
@@ -449,6 +487,8 @@ class OpenRouterLLMClient(OpenAILLMClient):
             "memory": DEFAULT_MEMORY_MODEL,
             "reflection": DEFAULT_REFLECTION_MODEL,
             "judge": DEFAULT_JUDGE_MODEL,
+            "safety_review": "qwen/qwen3.8-flash",
+            "confirm_judge": DEFAULT_ONLINE_FAST_MODEL,
         }[role]
         selected_model = model or os.getenv(model_env)
         if role == "online":
@@ -526,6 +566,8 @@ class OpenRouterLLMClient(OpenAILLMClient):
             "memory": 1800,
             "reflection": 2800,
             "judge": 1600,
+            "safety_review": 1024,
+            "confirm_judge": 60,
         }[role]
         configured_max_tokens = os.getenv(
             f"OPENROUTER_{role.upper()}_MAX_COMPLETION_TOKENS"
@@ -534,29 +576,100 @@ class OpenRouterLLMClient(OpenAILLMClient):
             64,
             int(configured_max_tokens or default_max_tokens),
         )
+        if role == "confirm_judge":
+            self.temperature = 0
+            self.max_completion_tokens = 60
+            self.max_retries = 0
+            self.fallback_models = []
         default_reasoning_effort = {
             "online_fast": "none",
             "online": "low",
             "state": "low",
             "memory": "low",
-            "reflection": "high",
+            "reflection": offline_reasoning_route.effort if offline_reasoning_route is not None else "high",
             "judge": "low",
+            "safety_review": "none",
+            "confirm_judge": "none",
         }[role]
-        self.reasoning_effort = (
+        from .qwen_max_structured import qwen_max_route
+        selected_max_route = qwen_max_route(self)
+        self.reasoning_effort = selected_max_route.effort if selected_max_route is not None else (
             os.getenv(f"OPENROUTER_{role.upper()}_REASONING_EFFORT")
             or default_reasoning_effort
         ).strip().lower()
+        from .online_structured import DEEPSEEK_MODEL
+        if self.model == DEEPSEEK_MODEL and role in {"online_fast", "safety_review", "confirm_judge"}:
+            self.reasoning_effort = "none"
+        if memory_structured_route is not None:
+            self.reasoning_effort = "none"
+            from .memory_structured import validate_memory_structured_client
+            validate_memory_structured_client(self)
+        if self.online_return_format == ONLINE_STRUCTURED_FORMAT:
+            validate_online_structured_client(self)
+        if offline_reasoning_route is not None:
+            from .offline_reasoning import validate_offline_reasoning_client
+            validate_offline_reasoning_client(self)
+        if role == "safety_review":
+            from .safety_structured import validate_safety_structured_client
+            validate_safety_structured_client(self)
+        if role == "confirm_judge":
+            from .online_structured import validate_release_online_client
+            validate_release_online_client(self)
 
-    def complete(self, messages: list[dict]) -> str:
+    @property
+    def last_finish_reason(self):
+        return self.last_diagnostic.get("finish_reason")
+
+    def complete(self, messages: list[dict], *, require_preference_control: bool = False, require_task_projection: bool = False) -> str:
         self._start_decision()
         self.last_diagnostic = {}
-        reflection_json = self.reflection_return_format in {"json_schema", "json_schema_v1", "json_schema_v2"}
+        from .qwen_max_structured import qwen_max_route, validate_qwen_max_client
+        max_route = validate_qwen_max_client(self) if qwen_max_route(self) is not None else None
+        memory_route = None
+        reflection_route = None
+        if self.memory_structured_route is not None:
+            from .memory_structured import validate_memory_structured_client
+            memory_route = validate_memory_structured_client(self)
+        if getattr(self, "reflection_structured_route", None) is not None:
+            from .reflection_structured import validate_reflection_structured_client
+            reflection_route = validate_reflection_structured_client(self)
+        if (self.offline_reasoning_route is not None or self.role in {"safety_review", "confirm_judge"}
+                or self.memory_prefix_recovery or max_route
+                or getattr(self, "reflection_structured_route", None) is not None):
+            from .reserved_calls import ReservedCallGuard
+            if not isinstance(getattr(self, "model_request_control", None), ReservedCallGuard):
+                raise ValueError("candidate_requires_reserved_receipt_guard")
+        safety_sentence_count = None
+        safety_review_version = None
+        confirm_route = None
+        if self.role == "confirm_judge":
+            from .online_structured import validate_release_online_client
+            from ..memory.preference_dialogue import validate_confirm_judge_messages
+            confirm_route = validate_release_online_client(self)
+            validate_confirm_judge_messages(messages)
+        if self.role == "safety_review":
+            from .safety_structured import validate_safety_structured_client, validate_safety_review_request
+            validate_safety_structured_client(self)
+            safety_sentence_count = validate_safety_review_request(messages, client=self)
+            safety_review_version = json.loads(messages[1]["content"])["version"]
+        offline_route = None
+        if self.offline_reasoning_route is not None:
+            from .offline_reasoning import validate_offline_reasoning_client
+            offline_route = validate_offline_reasoning_client(self)
+        reflection_json = self.reflection_return_format in {"json_schema", "json_schema_v1", "json_schema_v2", "json_schema_v3", "json_schema_v4"}
         reflection_body = self.reflection_return_format == "body_json"
         if reflection_json or reflection_body:
             from .reflection_json import validate_reflection_request
             validate_reflection_request(self, messages)
+        wire_messages = messages
+        if self.reflection_return_format == "json_schema_v3":
+            from .reflection_compact import compact_reflection_messages
+            wire_messages = compact_reflection_messages(messages)
+        if self.reflection_return_format == "json_schema_v4":
+            from .reflection_compact import indexed_compact_reflection_messages
+            wire_messages = indexed_compact_reflection_messages(messages)
         base_payload = {
-            "messages": messages,
+            "messages": wire_messages,
             "temperature": self.temperature,
             "max_completion_tokens": self.max_completion_tokens,
             "reasoning": {
@@ -566,12 +679,24 @@ class OpenRouterLLMClient(OpenAILLMClient):
         }
         integrated = (protocol_version(messages)
                       if self.role in {"online", "online_fast"} else None)
+        # Supplied from server-owned invitation state, never stored on the client.
+        if (type(require_preference_control) is not bool or type(require_task_projection) is not bool
+                or ((require_preference_control or require_task_projection) and integrated not in EVIDENCE_DECISION_VERSIONS)):
+            raise ValueError("invalid_online_request_requirement")
+        request_options = {**({"require_preference_control": True} if require_preference_control else {}), **({"require_task_projection": True} if require_task_projection else {})}
+        structured_route = None
+        if self.online_return_format == ONLINE_STRUCTURED_FORMAT:
+            structured_route = validate_online_structured_client(self)
+            if not integrated:
+                raise ValueError("strict_online_requires_integrated_protocol")
         bounded_online = (self.role in {"online", "online_fast"}
-                          and self.online_return_format == "json_object")
+                          and self.online_return_format in ONLINE_JSON_FORMATS)
         json_mode = bool(integrated and bounded_online)
         if bounded_online or self.bounded_transport:
             base_payload["max_tokens"] = base_payload.pop("max_completion_tokens")
-            base_payload["reasoning"] = {"enabled": False, "exclude": True}
+            reasoning_route = offline_route or max_route
+            base_payload["reasoning"] = ({"effort": reasoning_route["effort"], "exclude": True}
+                                         if reasoning_route else {"enabled": False, "exclude": True})
             base_payload["stream"] = False
             base_payload["provider"] = {
                 "allow_fallbacks": False, "require_parameters": True,
@@ -579,7 +704,18 @@ class OpenRouterLLMClient(OpenAILLMClient):
             }
             # The successful experiment covered this exact default route.
             # An explicitly configured different model must not inherit Alibaba.
-            if self.model == DEFAULT_ONLINE_FAST_MODEL:
+            if offline_route is not None:
+                base_payload["provider"]["only"] = [offline_route["provider"]]
+            elif self.role == "confirm_judge":
+                base_payload["provider"]["only"] = [confirm_route["provider"]]
+            elif self.role == "safety_review":
+                base_payload["provider"]["only"] = [self.safety_structured_route.provider]
+            elif structured_route is not None:
+                base_payload["provider"]["only"] = [structured_route["provider"]]
+            elif memory_route is not None or reflection_route is not None:
+                base_payload["provider"]["only"] = [(memory_route or reflection_route)["provider"]]
+                base_payload.pop("temperature", None)
+            elif self.model == DEFAULT_ONLINE_FAST_MODEL:
                 base_payload["provider"]["only"] = ["alibaba"]
             elif self.model == DEFAULT_MEMORY_MODEL:
                 base_payload["provider"]["only"] = ["anthropic"]
@@ -588,13 +724,25 @@ class OpenRouterLLMClient(OpenAILLMClient):
                 base_payload.pop("temperature", None)
             if self.reservation_max_price is not None:
                 base_payload["provider"]["max_price"] = dict(self.reservation_max_price)
-        if json_mode:
-            base_payload["response_format"] = {"type": "json_object"}
+        if self.role == "safety_review":
+            from .safety_structured import safety_request_format, uses_source_instruction
+            base_payload["response_format"] = safety_request_format(
+                safety_review_version, owner_sources=uses_source_instruction(messages))
+        elif self.role == "confirm_judge":
+            from ..memory.preference_dialogue import confirm_judge_request_format
+            base_payload["response_format"] = confirm_judge_request_format()
+        elif memory_route is not None:
+            from .memory_structured import memory_request_format
+            base_payload["response_format"] = memory_request_format(self)
+        elif json_mode:
+            base_payload["response_format"] = (
+                online_structured_request_format(integrated, **request_options) if structured_route is not None
+                else {"type": "json_object"})
         elif reflection_json:
             from .reflection_json import reflection_request_format
             base_payload["response_format"] = reflection_request_format(self.reflection_return_format)
         elif integrated:
-            base_payload["tools"] = [online_decision_tool_spec(integrated)]
+            base_payload["tools"] = [online_decision_tool_spec(integrated, **request_options)]
             base_payload["tool_choice"] = {
                 "type": "function",
                 "function": {"name": "aria_turn_decision"},
@@ -610,20 +758,34 @@ class OpenRouterLLMClient(OpenAILLMClient):
                 response_received = False
                 try:
                     data = self._request_for_model(
-                        base_payload, model=model
+                        base_payload, model=model, **request_options
                     )
                     response_received = True
                     if bounded_online or self.bounded_transport:
-                        self._reject_disabled_reasoning(data)
-                    if json_mode:
-                        result = self._extract_json_decision(data, integrated)
+                        self._validate_bounded_reasoning(data)
+                    if self.role == "safety_review":
+                        result = self._extract_safety_review(data, safety_sentence_count, safety_review_version)
+                    elif memory_route is not None:
+                        from .memory_structured import validate_memory_structured_response
+                        result = validate_memory_structured_response(data, self)
+                        self._record_response_shape(self._first_choice(data), output_kind="memory_schema", error_type=None)
+                    elif self.memory_prefix_recovery:
+                        result = self._extract_memory_prefix(data)
+                    elif json_mode:
+                        result = self._extract_json_decision(data, integrated, **request_options)
                     elif reflection_json:
                         result = self._extract_reflection_json(data)
                     elif reflection_body:
                         result = self._extract_reflection_body(data)
                     else:
-                        result = (self._extract_online_decision(data)
-                                  if integrated else self._extract_response(data))
+                        if integrated in EVIDENCE_DECISION_VERSIONS:
+                            result = self._extract_online_decision(data, version=integrated, **request_options)
+                        elif integrated:
+                            # Retained v1-v3 extractors may implement the original
+                            # data-only interface. Their parsing path is unchanged.
+                            result = self._extract_online_decision(data)
+                        else:
+                            result = self._extract_response(data)
                 except Exception:
                     control = getattr(self, "model_request_control", None)
                     if (response_received and control is not None
@@ -667,7 +829,17 @@ class OpenRouterLLMClient(OpenAILLMClient):
                 (time.perf_counter() - started) * 1000
             )
 
-    def _request_for_model(self, payload: dict, *, model: str) -> dict:
+    def _request_for_model(self, payload: dict, *, model: str,
+                           require_preference_control: bool = False, require_task_projection: bool = False) -> dict:
+        if getattr(self, "structured_stream_protocol", None) is not None:
+            from .max_release.sse_adapter import validate_structured_sse_client, ReflectionSSEGuardMixin
+            validate_structured_sse_client(self)
+            if (not isinstance(getattr(self, "model_request_control", None), ReflectionSSEGuardMixin)
+                    or not hasattr(self.model_request_control, "policy")
+                    or model != self.model or payload.get("stream") is not False
+                    or payload.get("response_format", {}).get("type") != "json_schema"):
+                raise ValueError("structured_sse_reserved_contract_required")
+            payload = {**payload, "stream": True}
         selected = dict(payload)
         selected["model"] = model
         # Bind after the final tool configuration, including an independently
@@ -676,10 +848,20 @@ class OpenRouterLLMClient(OpenAILLMClient):
             selected["messages"],
             channel="native" if selected.get("tools") else "plain_json",
         )
+        from .release_prompt import uses_compact_prompt, validate_system_budget
+        compact = uses_compact_prompt(selected["messages"])
+        if compact and selected.get("response_format", {}).get("type") != "json_schema":
+            raise ValueError("compact_prompt_requires_native_json_schema")
         if (self.role in {"online", "online_fast"}
-                and selected.get("response_format") == {"type": "json_object"}
+                and self.online_return_format in ONLINE_JSON_FORMATS
+                and selected.get("response_format", {}).get("type") in {"json_object", "json_schema"}
                 and (version := protocol_version(selected["messages"]))):
-            selected["messages"] = prepare_json_messages(selected["messages"], version)
+            selected["messages"] = prepare_json_messages(
+                selected["messages"], version, require_preference_control=require_preference_control, require_task_projection=require_task_projection,
+                **({"compact_schema": True} if compact else {}),
+            )
+        if compact:
+            validate_system_budget(selected["messages"])
         # 每个实际请求只命名一个模型，避免 OpenRouter 的多模型 Function
         # Call 路由跳过主模型；fallback 顺序由本客户端显式执行。
         selected.pop("models", None)
@@ -690,7 +872,8 @@ class OpenRouterLLMClient(OpenAILLMClient):
             ).encode("utf-8"),
             headers=openrouter_headers(self.api_key),
         )
-        return self._request_json(request)
+        options = {**({"require_preference_control": True} if require_preference_control else {}), **({"require_task_projection": True} if require_task_projection else {})}
+        return self._request_json(request, **options)
 
     def _fallback_allowed(self) -> bool:
         error_type = self.last_diagnostic.get("error_type")
@@ -761,6 +944,77 @@ class OpenRouterLLMClient(OpenAILLMClient):
         })
         self.last_diagnostic = current
 
+    def _validate_bounded_reasoning(self, data: dict) -> None:
+        reflection_schema = getattr(self, "reflection_structured_route", None) is not None
+        if self.memory_structured_route is not None or reflection_schema:
+            from .response_observability import safe_usage
+            try:
+                self._reject_disabled_reasoning(data)
+                if reflection_schema:
+                    from .reflection_structured import validate_reflection_structured_channel
+                    validate_reflection_structured_channel(data)
+            finally:
+                # Even rejection paths must not retain arbitrary provider
+                # usage metadata in public completion/diagnostic observers.
+                self.last_usage = safe_usage(data)
+            return
+        from .qwen_max_structured import qwen_max_route, validate_qwen_max_response
+        if qwen_max_route(self) is not None:
+            counts = validate_qwen_max_response(self, data)
+            from .response_observability import safe_usage
+            self._record_effective_model(data.get("model"))
+            self.last_usage = safe_usage(data)
+            self._update_diagnostic(reasoning_usage=counts)
+            return
+        if self.offline_reasoning_route is None:
+            self._reject_disabled_reasoning(data)
+            return
+        from .offline_reasoning import validate_offline_reasoning_client, validate_offline_reasoning_response
+        validate_offline_reasoning_client(self)
+        counts = validate_offline_reasoning_response(data, max_completion_tokens=self.max_completion_tokens)
+        from .response_observability import safe_usage
+        self._record_effective_model(data.get("model"))
+        self.last_usage = safe_usage(data)
+        self._update_diagnostic(reasoning_usage=counts)
+
+    def _extract_memory_prefix(self, data):
+        choice = self._first_choice(data)
+        message = choice.get("message")
+        if (len(data["choices"]) != 1 or type(message) is not dict
+                or choice.get("finish_reason") not in {"stop", "length"}
+                or message.get("tool_calls") not in (None, [])
+                or message.get("function_call") is not None or message.get("refusal") not in (None, "")
+                or type(message.get("content")) is not str or not message["content"].strip()):
+            self._record_response_shape(choice, output_kind="invalid_memory_channel", error_type="invalid_memory_channel")
+            raise ValueError("invalid_memory_channel")
+        from .response_observability import safe_usage
+        self.last_usage = safe_usage(data)
+        self._record_effective_model(data.get("model"))
+        self._record_response_shape(choice, output_kind="memory_prefix" if choice["finish_reason"] == "length" else "text", error_type=None)
+        return message["content"]
+
+    def _extract_safety_review(self, data, sentence_count, version="safety_review_v1"):
+        from ..risk.safety_review import parse_safety_review
+        choice = self._first_choice(data)
+        message = choice.get("message")
+        if (len(data["choices"]) != 1 or type(message) is not dict or choice.get("finish_reason") != "stop"
+                or message.get("tool_calls") not in (None, []) or message.get("function_call") is not None
+                or message.get("refusal") not in (None, "")):
+            raise ValueError("invalid_safety_review_channel")
+        raw = message.get("content")
+        if type(raw) is not str:
+            raise ValueError("invalid_safety_review_channel")
+        if version == "safety_review_v1":
+            parse_safety_review(raw, sentence_count)
+        elif version != "safety_review_v2":
+            raise ValueError("invalid_safety_review_version")
+        # V2 has two independent judgments. Its source-bound product reviewer
+        # validates content once, without discarding a usable risk assessment
+        # merely because deletion fields failed. A receipt is not a verdict.
+        self._record_response_shape(choice, output_kind=("safety_review_text"
+            if version == "safety_review_v2" else "safety_review_json"), error_type=None)
+        return raw
+
     def _reject_disabled_reasoning(self, data: dict) -> None:
         """Enforce the bounded online request's disabled-reasoning contract.
 
@@ -785,8 +1039,10 @@ class OpenRouterLLMClient(OpenAILLMClient):
                 continue
             reasoning = message.get("reasoning")
             reasoning_details = message.get("reasoning_details")
+            reasoning_content = message.get("reasoning_content")
             if (reasoning is not None and reasoning != ""
-                    or reasoning_details is not None and reasoning_details != [] and reasoning_details != ""):
+                    or reasoning_details is not None and reasoning_details != [] and reasoning_details != ""
+                    or reasoning_content is not None and reasoning_content != ""):
                 violation = True
         if violation:
             def safe_count(value):
@@ -802,28 +1058,37 @@ class OpenRouterLLMClient(OpenAILLMClient):
             )
             raise ValueError("在线回执违反禁用推理约定") from None
 
-    def _extract_json_decision(self, data: dict, version: str) -> str:
+    def _extract_json_decision(self, data: dict, version: str, *,
+                               require_preference_control: bool = False, require_task_projection: bool = False,
+                               validated_padded_length: bool = False) -> str:
         from .online_json_diagnostics import online_shape_diagnostic
 
         self._record_effective_model(data.get("model"))
         usage = data.get("usage")
-        self.last_usage = usage if isinstance(usage, dict) else {}
+        from .qwen_max_structured import qwen_max_route
+        if qwen_max_route(self) is not None:
+            from .response_observability import safe_usage
+            self.last_usage = safe_usage(data)
+        else:
+            self.last_usage = usage if isinstance(usage, dict) else {}
         choice = self._first_choice(data)
         content_checked = False
         try:
             message = choice.get("message")
             if (len(data["choices"]) != 1 or type(message) is not dict
-                    or choice.get("finish_reason") != "stop"
+                    or choice.get("finish_reason") != ("length" if validated_padded_length else "stop")
                     or message.get("tool_calls") not in (None, [])
                     or message.get("function_call") is not None
                     or message.get("refusal") not in (None, "")):
                 raise ValueError("invalid_json_return_channel")
             content_checked = True
-            raw = parse_json_decision(message.get("content"), version)
+            raw = parse_json_decision(message.get("content"), version,
+                                      require_preference_control=require_preference_control, require_task_projection=require_task_projection)
         except (ValueError, TypeError, KeyError, RecursionError):
             self._record_response_shape(choice, output_kind="invalid_content_json",
                                         error_type="invalid_online_json_schema")
-            diagnostic = (online_shape_diagnostic(message.get("content"), version)
+            diagnostic = (online_shape_diagnostic(message.get("content"), version,
+                                                  require_preference_control=require_preference_control, require_task_projection=require_task_projection)
                           if content_checked else {"kind": "return_channel", "issues": []})
             self._update_diagnostic(online_shape=diagnostic)
             raise ValueError("在线决策正文不满足完整JSON字段契约") from None
@@ -838,7 +1103,11 @@ class OpenRouterLLMClient(OpenAILLMClient):
         """
         self._record_effective_model(data.get("model"))
         usage = data.get("usage")
-        self.last_usage = usage if isinstance(usage, dict) else {}
+        if self.offline_reasoning_route is not None:
+            from .response_observability import safe_usage
+            self.last_usage = safe_usage(data)
+        else:
+            self.last_usage = usage if isinstance(usage, dict) else {}
         choice = self._first_choice(data)
         message = choice.get("message")
         if (len(data["choices"]) != 1 or type(message) is not dict
@@ -858,7 +1127,11 @@ class OpenRouterLLMClient(OpenAILLMClient):
 
         self._record_effective_model(data.get("model"))
         usage = data.get("usage")
-        self.last_usage = usage if isinstance(usage, dict) else {}
+        if getattr(self, "reflection_structured_route", None) is not None:
+            from .response_observability import safe_usage
+            self.last_usage = safe_usage(data)
+        else:
+            self.last_usage = usage if isinstance(usage, dict) else {}
         choice = self._first_choice(data)
         try:
             message = choice.get("message")
@@ -868,7 +1141,20 @@ class OpenRouterLLMClient(OpenAILLMClient):
                     or message.get("function_call") is not None
                     or message.get("refusal") not in (None, "")):
                 raise ValueError("invalid_reflection_return_channel")
-            raw = parse_reflection_json(message.get("content"))
+            if self.reflection_return_format in {"json_schema_v3", "json_schema_v4"}:
+                from hashlib import sha256
+                from .reflection_compact import (decode_compact_reflection, VERSION,
+                    decode_indexed_compact_reflection, INDEXED_VERSION)
+                indexed = self.reflection_return_format == "json_schema_v4"
+                decoder = decode_indexed_compact_reflection if indexed else decode_compact_reflection
+                raw = decoder(message.get("content"), itemwise_review=self.reflection_itemwise_review)
+                self._update_diagnostic(reflection_wire_codec={
+                    "version": INDEXED_VERSION if indexed else VERSION,
+                    "public_wire_sha256": sha256(message["content"].encode("utf-8")).hexdigest(),
+                    "canonical_sha256": sha256(raw.encode("utf-8")).hexdigest(),
+                    "representation_only": True, "content_repaired": False})
+            else:
+                raw = parse_reflection_json(message.get("content"), itemwise_review=self.reflection_itemwise_review)
         except (ValueError, TypeError, KeyError, RecursionError) as error:
             self._record_response_shape(choice, output_kind="invalid_reflection_json_schema",
                                         error_type="invalid_reflection_json_schema")
@@ -877,13 +1163,41 @@ class OpenRouterLLMClient(OpenAILLMClient):
         self._record_response_shape(choice, output_kind="reflection_json_schema", error_type=None)
         return raw
 
-    def _extract_online_decision(self, data: dict) -> str:
+    def _extract_online_decision(self, data: dict, *, version: str | None = None,
+                                 require_preference_control: bool = False, require_task_projection: bool = False) -> str:
         """只取强制 Function Call 参数；正文不能补成有效原生决策。"""
         self._record_effective_model(data.get("model"))
         usage = data.get("usage")
         self.last_usage = usage if isinstance(usage, dict) else {}
         choice = self._first_choice(data)
         message = choice.get("message")
+        if version in EVIDENCE_DECISION_VERSIONS:
+            # The new native channel has the same complete local contract as
+            # its body-JSON candidate. Preserve the first argument string so
+            # duplicate fields cannot disappear through parse/reserialization.
+            try:
+                if (len(data["choices"]) != 1 or type(message) is not dict
+                        or choice.get("finish_reason") not in {"stop", "tool_calls"}
+                        or message.get("content") not in (None, "")
+                        or message.get("refusal") not in (None, "")
+                        or message.get("function_call") is not None):
+                    raise ValueError("invalid_online_native_channel")
+                calls = message.get("tool_calls")
+                if type(calls) is not list or len(calls) != 1 or type(calls[0]) is not dict:
+                    raise ValueError("invalid_online_native_channel")
+                function = calls[0].get("function")
+                if type(function) is not dict or function.get("name") != "aria_turn_decision":
+                    raise ValueError("invalid_online_native_channel")
+                arguments = function.get("arguments")
+                raw = (json.dumps(arguments, ensure_ascii=False, allow_nan=False)
+                       if type(arguments) is dict else arguments)
+                result = parse_json_decision(raw, version, require_preference_control=require_preference_control, require_task_projection=require_task_projection)
+            except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
+                self._record_response_shape(choice, output_kind="invalid_tool_call",
+                                            error_type="invalid_online_json_schema")
+                raise ValueError("在线决策工具参数不满足完整JSON字段契约") from None
+            self._record_response_shape(choice, output_kind="tool_call", error_type=None)
+            return result
         if not isinstance(message, dict):
             self._record_response_shape(
                 choice, output_kind="missing_message",

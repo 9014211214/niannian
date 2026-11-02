@@ -6,8 +6,12 @@ details, free-form follow-up notes, authentication data or notification bodies.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 import re
+
+_SCOPE_NOTICE = '仅含最近3条提醒、每条最新发生记录、最多2条授权和2条当前通知、最新护理任务；未展示的旧记录不能视为未发生。'
+_RECORD_KINDS = ("reminders", "occurrences", "consents", "deliveries", "tasks")
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
@@ -161,8 +165,38 @@ def _project(view, elder_id, now):
         **projected,
         "counts": {kind: {"total": len(rows[kind]), "included": len(projected[kind]),
                           "omitted": len(rows[kind]) - len(projected[kind])} for kind in rows},
-        "scope_notice": "仅含最近3条提醒、每条最新发生记录、最多2条授权和2条当前通知、最新护理任务；未展示的旧记录不能视为未发生。",
+        "scope_notice": _SCOPE_NOTICE,
     }
+
+
+def compact_empty_care_context(snapshot: dict) -> dict:
+    """Omit redundant empty rows only when complete counts prove no omissions.
+
+    This prompt view preserves observation/configuration/authority fields and
+    never changes the stored snapshot or treats unavailable records as empty.
+    """
+    result = deepcopy(snapshot)
+    if (snapshot.get("source") != "minimal_care_records"
+            or snapshot.get("read_only") is not True
+            or snapshot.get("status") not in ("available", "not_configured")
+            or snapshot.get("scope_notice") != _SCOPE_NOTICE):
+        return result
+    counts = snapshot.get("counts")
+    if type(counts) is not dict or set(counts) != set(_RECORD_KINDS):
+        return result
+    for kind in _RECORD_KINDS:
+        row = snapshot.get(kind)
+        count = counts[kind]
+        if (type(row) is not list or row or type(count) is not dict
+                or set(count) != {"total", "included", "omitted"}
+                or any(type(value) is not int or value != 0 for value in count.values())):
+            return result
+    for kind in _RECORD_KINDS:
+        result.pop(kind)
+    result.pop("scope_notice")
+    result["counts"] = {"kinds": list(_RECORD_KINDS),
+                        "each": {"total": 0, "included": 0, "omitted": 0}}
+    return result
 
 
 def build_care_context(service, elder_id) -> dict:

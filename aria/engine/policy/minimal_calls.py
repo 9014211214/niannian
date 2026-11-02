@@ -29,6 +29,7 @@ from .response_observability import (
 )
 from .request_pacing import monotonic_value, pacing_interval, wait_until
 from .transport_failure import transport_failure
+from .response_body import ResponseDeadline, ResponseBodyLimitError, read_response_body
 from .observed_transport import (TransportTrace, VERSION as TRANSPORT_TRACE_VERSION,
     DIAGNOSTIC_VERSION as TRANSPORT_DIAGNOSTIC_VERSION, PreparationRecovery, open_observed,
     open_unredirected)
@@ -38,7 +39,7 @@ from .bounded_recovery import (
 )
 
 _ID = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
-_ROLES = {"online_fast", "memory", "reflection"}
+_ROLES = {"online_fast", "memory", "reflection", "safety_review", "confirm_judge"}
 MAX_MODEL_RESPONSE_BYTES = 2 * 1024 * 1024
 _VALIDATION_FAILURE_CODES = frozenset({
     "model_response_body_limit", "duplicate_response_field", "non_object_response",
@@ -49,6 +50,9 @@ _VALIDATION_FAILURE_CODES = frozenset({
     "invalid_response_message", "online_content_invalid_json", "online_content_duplicate_key",
     "online_content_non_finite", "online_content_not_object", "online_response_missing",
     "online_response_not_string", "online_response_empty", "online_decision_schema_invalid",
+    "offline_reasoning_response_invalid", "safety_review_schema_invalid",
+    "reflection_schema_invalid", "memory_schema_invalid",
+    "qwen_max_usage_unverified", "qwen_max_reasoning_response_invalid",
 })
 
 
@@ -147,6 +151,12 @@ class MinimalCallGuard:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._local = threading.local()
+        # One physical request at a time, with an accepted online turn taking
+        # precedence at the next boundary. Waiting never holds the ledger lock.
+        self._dispatch_condition = threading.Condition()
+        self._dispatch_owner = None
+        self._dispatch_depth = 0
+        self._online_waiters = 0
         self._broken = False
         self._closed = False
         self._closed_snapshot = None
@@ -262,8 +272,9 @@ class MinimalCallGuard:
         if (not isinstance(client, OpenRouterLLMClient) or client.role not in self.allowed_roles
                 or client.max_retries != 0 or client.fallback_models):
             raise ValueError("minimal allowance requires supported clients without retries or fallback")
-        if (client.online_return_format not in {"native", "json_object"}
-                or type(client.max_completion_tokens) is not int or client.max_completion_tokens < 64
+        if (client.online_return_format not in {"native", "json_object", "json_schema_v1"}
+                or type(client.max_completion_tokens) is not int
+                or (client.max_completion_tokens != 60 if client.role == "confirm_judge" else client.max_completion_tokens < 64)
                 or type(client.temperature) not in (int, float) or not math.isfinite(client.temperature)
                 or type(client.timeout) not in (int, float) or not math.isfinite(client.timeout)
                 or client.timeout <= 0 or not isinstance(client.reasoning_effort, str)):
@@ -279,16 +290,65 @@ class MinimalCallGuard:
             "temperature": client.temperature, "reasoning_effort": client.reasoning_effort,
             "timeout": client.timeout,
         }
+        if getattr(client, "preference_protocol_version", None) is not None:
+            from ..memory.preference_candidate import validate_preference_candidate_client
+            binding["preference_protocol"] = validate_preference_candidate_client(client)
+        if getattr(client, "preference_recovery_version", None) is not None:
+            from ..memory.preference_recovery import validate_preference_recovery_client
+            binding["preference_recovery"] = validate_preference_recovery_client(client)
+        from .qwen_max_structured import qwen_max_route
+        if (qwen_max_route(client) is not None or getattr(client, "offline_reasoning_route", None) is not None
+                or client.role in {"safety_review", "confirm_judge"} or getattr(client, "memory_prefix_recovery", False)) and not hasattr(self, "policy"):
+            raise ValueError("candidate_requires_reserved_receipt_guard")
         if getattr(client, "bounded_transport", False):
             binding["bounded_transport"] = True
+        for flag, role in (("memory_prefix_recovery", "memory"), ("reflection_itemwise_review", "reflection")):
+            value = getattr(client, flag, False)
+            if type(value) is not bool or value and (client.role != role or not client.bounded_transport):
+                raise ValueError("invalid_offline_recovery_option")
+            if value:
+                binding[flag] = True
+        if getattr(client, "offline_reasoning_route", None) is not None:
+            from .offline_reasoning import validate_offline_reasoning_client
+            binding["offline_reasoning_route"] = validate_offline_reasoning_client(client)
+        if getattr(client, "preference_scope_protocol", None) is not None:
+            from ..memory.preference_scope import validate_model_scope_client
+            binding["preference_scope"] = validate_model_scope_client(client)
+        if getattr(client, "memory_structured_route", None) is not None:
+            from .memory_structured import validate_memory_structured_client
+            binding["memory_structured_route"] = validate_memory_structured_client(client)
+        if getattr(client, "reflection_structured_route", None) is not None:
+            if not hasattr(self, "policy"):
+                raise ValueError("candidate_requires_reserved_receipt_guard")
+            from .reflection_structured import validate_reflection_structured_client
+            binding["reflection_structured_route"] = validate_reflection_structured_client(client)
+        if client.role == "safety_review":
+            from .safety_structured import validate_safety_structured_client
+            binding["safety_structured_route"] = validate_safety_structured_client(client)
+        elif getattr(client, "safety_structured_route", None) is not None:
+            raise ValueError("invalid_safety_structured_client")
+        if client.role == "confirm_judge":
+            from .online_structured import validate_release_online_client
+            from ..memory.preference_dialogue import confirm_judge_request_format, CONFIRM_JUDGE_INSTRUCTION
+            binding["confirm_structured_route"] = validate_release_online_client(client)
+            binding["confirm_judge_contract_sha256"] = hashlib.sha256(json.dumps(
+                [CONFIRM_JUDGE_INSTRUCTION, confirm_judge_request_format()],
+                sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        elif getattr(client, "confirm_structured_route", None) is not None:
+            raise ValueError("invalid_confirm_judge_client")
+        if client.online_return_format == "json_schema_v1":
+            from .online_structured import validate_online_structured_client, online_structured_schema_binding
+            binding["online_structured_route"] = validate_online_structured_client(client)
+            binding["online_structured_schema_sha256"] = online_structured_schema_binding()
         reflection_format = getattr(client, "reflection_return_format", "native")
-        if reflection_format not in {"native", "body_json", "json_schema", "json_schema_v1", "json_schema_v2"}:
+        if reflection_format not in {"native", "body_json", "json_schema", "json_schema_v1", "json_schema_v2", "json_schema_v3", "json_schema_v4"}:
             raise ValueError("invalid_reflection_return_format")
         if reflection_format != "native":
             from ..._openrouter import DEFAULT_REFLECTION_MODEL
             from .reflection_json import reflection_request_format, reflection_body_system_prompt
             if (client.role != "reflection" or not client.bounded_transport
-                    or client.model != DEFAULT_REFLECTION_MODEL):
+                    or (client.model != DEFAULT_REFLECTION_MODEL and "offline_reasoning_route" not in binding
+                        and "reflection_structured_route" not in binding)):
                 raise ValueError("unsupported_reflection_json_route")
             binding["reflection_return_format"] = reflection_format
             binding["reflection_format_sha256"] = hashlib.sha256(json.dumps(
@@ -301,7 +361,7 @@ class MinimalCallGuard:
         return json.dumps(binding, sort_keys=True, allow_nan=False)
 
     @staticmethod
-    def _validate_payload(client, payload):
+    def _validate_payload(client, payload, *, require_preference_control=False, require_task_projection=False):
         """Match the actual wire to the durable client contract before claim.
 
         Message content is turn-specific. Every transport option is derived
@@ -309,7 +369,7 @@ class MinimalCallGuard:
         No actual-payload flag may select a weaker validation branch.
         """
         from ..._openrouter import DEFAULT_ONLINE_FAST_MODEL, DEFAULT_MEMORY_MODEL
-        from .online_decision import online_decision_tool_spec, protocol_version
+        from .online_decision import EVIDENCE_DECISION_VERSIONS, ONLINE_DECISION_VERSION_EVIDENCE, online_decision_tool_spec, protocol_version
 
         if type(payload) is not dict:
             raise MinimalCallStopped("model_request_configuration_changed")
@@ -320,30 +380,98 @@ class MinimalCallGuard:
                 or type(message["content"]) is not str for message in messages)):
             raise MinimalCallStopped("model_request_configuration_changed")
         version = protocol_version(messages) if client.role == "online_fast" else None
+        if (type(require_preference_control) is not bool or type(require_task_projection) is not bool
+                or ((require_preference_control or require_task_projection) and version not in EVIDENCE_DECISION_VERSIONS)):
+            raise MinimalCallStopped("model_request_configuration_changed")
+        # Supplied by this call's trusted transport path, never inferred from
+        # payload fields or stored in mutable client/guard state.
+        request_options = {**({"require_preference_control": True} if require_preference_control else {}), **({"require_task_projection": True} if require_task_projection else {})}
         reflection_format = getattr(client, "reflection_return_format", "native")
-        reflection_json = reflection_format in {"json_schema", "json_schema_v1", "json_schema_v2"}
+        reflection_json = reflection_format in {"json_schema", "json_schema_v1", "json_schema_v2", "json_schema_v3", "json_schema_v4"}
         if reflection_json or reflection_format == "body_json":
             from .reflection_json import reflection_request_format, validate_reflection_request
             try:
-                validate_reflection_request(client, messages)
+                validate_reflection_request(client, messages, wire=True)
             except ValueError:
                 raise MinimalCallStopped("model_request_configuration_changed") from None
-        json_transport = client.role == "online_fast" and client.online_return_format == "json_object"
+        json_transport = client.role == "online_fast" and client.online_return_format in {"json_object", "json_schema_v1"}
+        structured_route = None
+        if client.online_return_format == "json_schema_v1":
+            from .online_structured import validate_online_structured_client, online_structured_request_format
+            try:
+                structured_route = validate_online_structured_client(client)
+            except ValueError:
+                raise MinimalCallStopped("model_request_configuration_changed") from None
+            if not version:
+                raise MinimalCallStopped("model_request_configuration_changed")
+        offline_route = None
+        safety_route = None
+        confirm_route = None
+        max_route = None
+        memory_route = None
+        reflection_route = None
+        try:
+            from .qwen_max_structured import qwen_max_route, validate_qwen_max_client
+            if qwen_max_route(client) is not None:
+                max_route = validate_qwen_max_client(client)
+            if getattr(client, "offline_reasoning_route", None) is not None:
+                from .offline_reasoning import validate_offline_reasoning_client
+                offline_route = validate_offline_reasoning_client(client)
+            if getattr(client, "memory_structured_route", None) is not None:
+                from .memory_structured import validate_memory_structured_client, memory_request_format
+                memory_route = validate_memory_structured_client(client)
+            if getattr(client, "reflection_structured_route", None) is not None:
+                from .reflection_structured import validate_reflection_structured_client
+                reflection_route = validate_reflection_structured_client(client)
+            if client.role == "safety_review":
+                from .safety_structured import (validate_safety_structured_client,
+                    validate_safety_review_request, safety_request_format, uses_source_instruction)
+                safety_route = validate_safety_structured_client(client)
+                validate_safety_review_request(messages, client=client)
+            if client.role == "confirm_judge":
+                from .online_structured import validate_release_online_client
+                from ..memory.preference_dialogue import validate_confirm_judge_messages, confirm_judge_request_format
+                confirm_route = validate_release_online_client(client)
+                validate_confirm_judge_messages(messages)
+        except (ValueError, TypeError, KeyError, RecursionError):
+            raise MinimalCallStopped("model_request_configuration_changed") from None
         expected = {"model": client.model, "messages": messages, "temperature": client.temperature}
         if json_transport or getattr(client, "bounded_transport", False):
             provider = {"allow_fallbacks": False, "require_parameters": True, "data_collection": "deny"}
-            if client.model == DEFAULT_ONLINE_FAST_MODEL:
+            if offline_route is not None:
+                provider["only"] = [offline_route["provider"]]
+            elif client.role == "confirm_judge":
+                provider["only"] = [confirm_route["provider"]]
+            elif safety_route is not None:
+                provider["only"] = [safety_route["provider"]]
+            elif structured_route is not None:
+                provider["only"] = [structured_route["provider"]]
+            elif memory_route is not None or reflection_route is not None:
+                provider["only"] = [(memory_route or reflection_route)["provider"]]
+                expected.pop("temperature", None)
+            elif client.model == DEFAULT_ONLINE_FAST_MODEL:
                 provider["only"] = ["alibaba"]
             elif client.model == DEFAULT_MEMORY_MODEL:
                 provider["only"] = ["anthropic"]
                 expected.pop("temperature", None)
             if getattr(client, "reservation_max_price", None) is not None:
                 provider["max_price"] = dict(client.reservation_max_price)
+            reasoning_route = offline_route or max_route
             expected.update(max_tokens=client.max_completion_tokens,
-                            reasoning={"enabled": False, "exclude": True},
+                            reasoning=({"effort": reasoning_route["effort"], "exclude": True}
+                                       if reasoning_route else {"enabled": False, "exclude": True}),
                             stream=False, provider=provider)
-            if version and json_transport:
-                expected["response_format"] = {"type": "json_object"}
+            if safety_route is not None:
+                expected["response_format"] = safety_request_format(json.loads(messages[1]["content"])["version"],
+                    owner_sources=uses_source_instruction(messages))
+            elif client.role == "confirm_judge":
+                expected["response_format"] = confirm_judge_request_format()
+            elif memory_route is not None:
+                expected["response_format"] = memory_request_format(client)
+            elif version and json_transport:
+                expected["response_format"] = (
+                    online_structured_request_format(version, **request_options) if structured_route is not None
+                    else {"type": "json_object"})
             elif reflection_json:
                 expected["response_format"] = reflection_request_format(reflection_format)
             elif version:
@@ -352,7 +480,7 @@ class MinimalCallGuard:
             expected.update(max_completion_tokens=client.max_completion_tokens,
                             reasoning={"effort": client.reasoning_effort, "exclude": True})
             if version:
-                expected.update(tools=[online_decision_tool_spec(version)],
+                expected.update(tools=[online_decision_tool_spec(version, **request_options)],
                                 tool_choice={"type": "function", "function": {"name": "aria_turn_decision"}},
                                 parallel_tool_calls=False)
         # Serialized comparison preserves JSON types: True is not 1 and a
@@ -371,6 +499,51 @@ class MinimalCallGuard:
                 raise ValueError("model configuration differs from retained allowance")
             self._db.execute("INSERT OR IGNORE INTO roles VALUES(?,?)", (client.role, binding))
         client.model_request_control = self
+
+    @contextmanager
+    def online_interest(self):
+        # Announce before accepting/saving input under the owner lock, so the
+        # review cannot win a race for its next physical request after save.
+        with self._dispatch_condition:
+            self._online_waiters += 1
+        try:
+            yield
+        finally:
+            with self._dispatch_condition:
+                self._online_waiters -= 1
+                self._dispatch_condition.notify_all()
+
+    @contextmanager
+    def dispatch_slot(self, *, online=False):
+        """Reentrant physical boundary; online callers retain it for one turn.
+
+        This is an in-process lock only. Durable operation/pending records and
+        every ordinary pre-send budget/permission check remain authoritative.
+        """
+        identity = threading.get_ident()
+        with self._dispatch_condition:
+            if self._dispatch_owner == identity:
+                self._dispatch_depth += 1
+            else:
+                if online:
+                    self._online_waiters += 1
+                try:
+                    while (self._dispatch_owner is not None
+                           or (not online and self._online_waiters)):
+                        self._dispatch_condition.wait()
+                    self._dispatch_owner = identity
+                    self._dispatch_depth = 1
+                finally:
+                    if online:
+                        self._online_waiters -= 1
+        try:
+            yield
+        finally:
+            with self._dispatch_condition:
+                self._dispatch_depth -= 1
+                if not self._dispatch_depth:
+                    self._dispatch_owner = None
+                    self._dispatch_condition.notify_all()
 
     @contextmanager
     def scope(self, kind, operation_id, session_id):
@@ -462,12 +635,13 @@ class MinimalCallGuard:
                 self._broken = True
                 raise MinimalCallStopped("ledger_write_failed") from None
 
-    def _begin(self, client, request, *, pacing=None, expected_prior_request=None):
+    def _begin(self, client, request, *, pacing=None, expected_prior_request=None,
+               require_preference_control=False, require_task_projection=False):
         if (self._connection_preparation_recovery
                 and getattr(self._local, "preparation_budget", {}).get("attempts", 2) >= 2):
             raise MinimalCallStopped("logical_connection_preparation_limit")
         scope = getattr(self._local, "scope", None)
-        if scope is None or (scope["kind"] == "turn") != (client.role == "online_fast"):
+        if scope is None or (scope["kind"] == "turn") != (client.role in {"online_fast", "safety_review", "confirm_judge"}):
             raise MinimalCallStopped("operation_scope_required")
         binding = self._binding(client)
         with self._transaction():
@@ -487,7 +661,7 @@ class MinimalCallGuard:
                 raise MinimalCallStopped("model_endpoint_changed")
             try:
                 payload = json.loads(request.data, object_pairs_hook=_unique_request_object)
-                self._validate_payload(client, payload)
+                self._validate_payload(client, payload, require_preference_control=require_preference_control, require_task_projection=require_task_projection)
                 product = self._reflection_product_metadata(client, payload, previous)
                 if (product.get("product_step") == "format_correction"
                         and previous[0].get("session_id") != scope["session_id"]):
@@ -547,7 +721,9 @@ class MinimalCallGuard:
     def _observe_reflection_body(client, row, data):
         if getattr(client, "reflection_return_format", "native") == "body_json":
             from .reflection_json import reflection_body_observation
-            row["reflection_body"] = reflection_body_observation(data)
+            row["reflection_body"] = reflection_body_observation(data,
+                itemwise_review=getattr(client, "reflection_itemwise_review", False),
+                reasoning_allowed=getattr(client, "offline_reasoning_route", None) is not None)
 
     def _reserve(self, client, request, payload, state):
         return {}
@@ -555,7 +731,7 @@ class MinimalCallGuard:
     def _record_receipt(self, client, row, data):
         pass
 
-    def _revalidate_pending_application(self, client, request, row):
+    def _revalidate_pending_application(self, client, request, row, *, require_preference_control=False, require_task_projection=False):
         """Read-only check after a connection wait; never make a second claim."""
         if self._stop_requested.is_set() or self._broken or self._closed:
             raise MinimalCallStopped("request_stop_requested")
@@ -573,7 +749,8 @@ class MinimalCallGuard:
         if (request.full_url != client.base_url.rstrip("/") + "/chat/completions" or request.get_method() != "POST"
                 or hashlib.sha256(request.data).hexdigest() != row["request_sha256"]):
             raise MinimalCallStopped("model_request_configuration_changed")
-        self._validate_payload(client, json.loads(request.data, object_pairs_hook=_unique_request_object))
+        self._validate_payload(client, json.loads(request.data, object_pairs_hook=_unique_request_object),
+                               require_preference_control=require_preference_control, require_task_projection=require_task_projection)
         state = self._snapshot()
         pending = [item for item in state["attempts"] if item["status"] == "pending"]
         if (len(pending) != 1 or pending[0]["request_id"] != row["request_id"]
@@ -594,17 +771,20 @@ class MinimalCallGuard:
             if self.recovery_policy is not None:
                 self._recovery.finish(row)
 
-    def request_json(self, client, request):
+    def request_json(self, client, request, *, require_preference_control=False, require_task_projection=False):
+        if type(require_preference_control) is not bool or type(require_task_projection) is not bool:
+            raise MinimalCallStopped("model_request_configuration_changed")
+        options = {**({"require_preference_control": True} if require_preference_control else {}), **({"require_task_projection": True} if require_task_projection else {})}
         if self.recovery_policy is None:
-            return self._request_once(client, request)
+            return self._request_once(client, request, **options)
         # A single logical position can create additional retained physical
         # attempts only through this explicit, globally bounded policy.
-        with self._lock:
+        with self.dispatch_slot(), self._lock:
             self._local.logical_started = self._recovery_clock()
             self._local.preparation_budget = {"attempts": 0}
             while True:
                 try:
-                    return self._request_once(client, request)
+                    return self._request_once(client, request, **options)
                 except MinimalCallStopped:
                     try:
                         if not self._recovery.prepare_wait(client, request):
@@ -618,7 +798,13 @@ class MinimalCallGuard:
                         self.halt()
                         raise MinimalCallStopped("bounded_recovery_wait_failed") from None
 
-    def _request_once(self, client, request):
+    def _request_once(self, client, request, *, require_preference_control=False, require_task_projection=False):
+        with self.dispatch_slot():
+            return self._request_once_serialized(client, request,
+                require_preference_control=require_preference_control,
+                require_task_projection=require_task_projection)
+
+    def _request_once_serialized(self, client, request, *, require_preference_control=False, require_task_projection=False):
         # One transport attempt. Other processes see the committed pending row
         # and cannot start another request while this one is unresolved.
         with self._lock:
@@ -653,7 +839,8 @@ class MinimalCallGuard:
                               "scope": "one_guard_all_roles", "clock": "monotonic"}
                 # No transaction is held during waiting. This claim repeats all
                 # allowance/configuration checks before recording an attempt.
-                row = self._begin(client, request, pacing=pacing, expected_prior_request=previous_request)
+                row = self._begin(client, request, pacing=pacing, expected_prior_request=previous_request,
+                                  **{**({"require_preference_control": True} if require_preference_control else {}), **({"require_task_projection": True} if require_task_projection else {})})
             except MinimalCallStopped:
                 client._update_diagnostic(error_type="minimal_call_stopped")
                 raise
@@ -663,12 +850,15 @@ class MinimalCallGuard:
             started = time.perf_counter()
             phase, headers = "local_pacing_check", None
             opener_invoked, response_returned = False, False
-            trace = TransportTrace(diagnostics=self._transport_diagnostics) if self._observe_transport else None
+            body_deadline = ResponseDeadline(started + client.timeout) if self._transport_diagnostics else None
+            trace = TransportTrace(diagnostics=self._transport_diagnostics, response_deadline=body_deadline) if self._observe_transport else None
             try:
                 if self._connection_preparation_recovery:
-                    preparation = PreparationRecovery(check=lambda: self._revalidate_pending_application(client, request, row),
+                    preparation = PreparationRecovery(check=lambda: self._revalidate_pending_application(
+                        client, request, row,
+                        **{**({"require_preference_control": True} if require_preference_control else {}), **({"require_task_projection": True} if require_task_projection else {})}),
                         timeout=client.timeout, monotonic=self._pacing_clock, budget=self._local.preparation_budget)
-                    trace = TransportTrace(diagnostics=True, preparation_recovery=preparation)
+                    trace = TransportTrace(diagnostics=True, preparation_recovery=preparation, response_deadline=body_deadline)
                 if pacing is not None:
                     current = monotonic_value(self._pacing_clock)
                     if self._last_network_started is not None:
@@ -696,7 +886,16 @@ class MinimalCallGuard:
                     client._update_diagnostic(http_status=row["http_status"], error_type=None)
                     headers = capture_response_headers(response)
                     phase = "read"
-                    raw = response.read(MAX_MODEL_RESPONSE_BYTES + 1)
+                    if body_deadline is not None:
+                        row["body_read"] = {}
+                        try:
+                            raw = read_response_body(response, limit=MAX_MODEL_RESPONSE_BYTES,
+                                deadline=body_deadline, observation=row["body_read"])
+                        except ResponseBodyLimitError:
+                            row["validation_error"] = "model_response_body_limit"
+                            raise
+                    else:
+                        raw = response.read(MAX_MODEL_RESPONSE_BYTES + 1)
                     if not isinstance(raw, bytes) or len(raw) > MAX_MODEL_RESPONSE_BYTES:
                         row["validation_error"] = "model_response_body_limit"
                         raise MinimalCallStopped("model_response_body_limit")
@@ -721,6 +920,14 @@ class MinimalCallGuard:
                 billing_fields = {"usage", "cost", "prompt_tokens", "completion_tokens", "total_tokens",
                                   "completion_tokens_details", "reasoning_tokens"}
                 row["usage"] = {} if duplicate_fields & billing_fields else safe_usage(data)
+                from .qwen_max_structured import qwen_max_route
+                from .memory_structured import memory_structured_route
+                if (qwen_max_route(client) is not None or memory_structured_route(client) is not None
+                        or getattr(client, "reflection_structured_route", None) is not None) and duplicate_fields & {"model", "provider"}:
+                    observed = row["usage"].pop("cost", None)
+                    if observed is not None:
+                        row["unverified_cost_usd"] = observed
+                    row["fee_verification_error"] = "duplicate_response_identity"
                 observation_data = {"usage": row["usage"]} if duplicate_fields else data
                 row["observation"] = observe_success(observation_data, header_observation=headers)
                 if duplicate_fields:
@@ -743,6 +950,14 @@ class MinimalCallGuard:
                     raise MinimalCallStopped("request_failed") from None
                 row["http_status"] = exc.code
                 row["observation"], row["usage"], failure_metadata = self._observe_http_failure(exc)
+                from .qwen_max_structured import qwen_max_route
+                from .memory_structured import memory_structured_route
+                if (qwen_max_route(client) is not None or memory_structured_route(client) is not None
+                        or getattr(client, "reflection_structured_route", None) is not None):
+                    observed = row["usage"].pop("cost", None)
+                    if observed is not None:
+                        row["unverified_cost_usd"] = observed
+                    row["fee_verification_error"] = "http_error_cost_unverified"
                 row.update(failure_metadata)
                 row.update(failure_phase="http_status", failure_code="http_error")
                 client._update_diagnostic(http_status=exc.code, error_type="http_error")

@@ -1,0 +1,12 @@
+{
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"response\":\"\",\"state_signals\":[],\"current_affect\":{\"label\":\"unknown\",\"confidence\":0.2,\"divergence\":{\"possible\":false,\"confidence\":0,\"pattern\":\"\"}},\"selected_intervention_id\":\"\",\"uncertainty\":0.8,\"communication_plan\":{\"pace\":\"open_listening\",\"support_order\":\"听本人说\",\"boundary\":\"不替本人做决定\"},\"safety_concern\":\"none\",\"safety_evidence\":{\"quote\":\"\",\"subject\":\"not_applicable\",\"time\":\"not_applicable\",\"urgency\":\"not_applicable\"},\"applied_preference_ids\":[],\"response_segments\":[{\"text\":\"\",\"kind\":\"conversation\",\"source_quote\":\"\",\"action\":\"none\",\"target\":\"\",\"state_ref\":\"\"}]}"
+      }
+    }
+  ]
+}

@@ -13,6 +13,8 @@ from aria.engine.policy import minimal_calls, observed_transport as transport
 from aria.engine.policy.minimal_calls import MinimalCallStopped
 from aria.engine.policy.reserved_calls import ReservedCallGuard
 from aria.engine.policy.transport_failure import transport_failure, validate_transport_failure
+from aria.engine.policy.max_release import tls_transport as candidate
+from aria.engine.policy.response_body import ResponseDeadline
 from tests.test_observed_transport import FakeSocket, response
 from tests.test_reserved_calls import call, client, policy, receipt
 
@@ -42,7 +44,8 @@ class TimedSocket(FakeSocket):
 
 
 def connect_fixture(actions, *, clock=None, trace=None, check=lambda: None, tunnel=False,
-                    body=b"{}", status=b"200 OK", write_failure=None, budget=None):
+                    body=b"{}", status=b"200 OK", write_failure=None, budget=None,
+                    connection_class=transport._ObservedHTTPSConnection):
     clock = clock if clock is not None else [0.0]
     budget = budget if budget is not None else {"attempts": 0}
     trace = trace or transport.TransportTrace(diagnostics=True, preparation_recovery=transport.PreparationRecovery(
@@ -59,7 +62,7 @@ def connect_fixture(actions, *, clock=None, trace=None, check=lambda: None, tunn
             if error is not None:
                 raise error
             return sock
-    conn = transport._ObservedHTTPSConnection("fixture.invalid", trace=trace, context=TLS())
+    conn = connection_class("fixture.invalid", trace=trace, context=TLS())
     def created(*args, **kwargs):
         connection_timeouts.append(conn.timeout)
         responses = [b"HTTP/1.1 200 Connection established\r\n\r\n"] if tunnel else []
@@ -77,6 +80,135 @@ def ssl_error(cls=ssl.SSLError, reason="UNEXPECTED_EOF_WHILE_READING", number=1)
     error = cls(number, "PRIVATE certificate/address/secret")
     error.reason, error.library = reason, "SSL"
     return error
+
+
+def candidate_fixture(actions, *, timeout=90, check=lambda: None, on_sleep=lambda: None,
+                      oversleep=0, write_failure=None):
+    clock, sleeps = [0.0], []
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds + oversleep
+        on_sleep()
+    preparation = candidate.TLSPreparation(check=check,
+        deadline=ResponseDeadline(timeout, clock=lambda: clock[0]),
+        allowance=candidate.LogicalTLSAllowance(), sleep=sleep)
+    preparation.bind_request_headers(object())
+    trace = candidate.CandidateTrace(preparation=preparation, deadline=preparation.deadline)
+    conn, _, sockets, timeouts, _ = connect_fixture(actions, clock=clock, trace=trace,
+        tunnel=True, write_failure=write_failure, connection_class=candidate._HTTPSConnection)
+    return conn, trace, sockets, timeouts, clock, sleeps
+
+
+@pytest.mark.parametrize("timeout", [90, 240])
+@pytest.mark.parametrize("error", [ssl_error(ssl.SSLEOFError), ssl_error()])
+def test_candidate_tls_rebuild_waits_once_within_original_deadline(timeout, error):
+    conn, trace, sockets, timeouts, clock, sleeps = candidate_fixture(
+        [(error, 2), (None, 3)], timeout=timeout)
+    try:
+        conn.request("POST", "/fixture", body=b"synthetic")
+        assert conn.getresponse().read() == b"{}"
+        transport.validate_trace(trace.snapshot(), require_complete=True)
+        assert sleeps == [1.0] and clock[0] == 6
+        assert timeouts == [timeout, timeout - 3]
+        assert sockets[0].closed and len(sockets[0].writes) == 1
+        assert sockets[0].writes[0][0].startswith(b"CONNECT ")
+        assert sum(data.startswith(b"POST ") for sock in sockets for data, _ in sock.writes) == 1
+        assert trace.preparation_recovery.receipt()["extra_consumed_in_physical"] == 1
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("failure_time", [89, 89.5])
+def test_candidate_no_rebuild_when_deadline_cannot_cover_pause(failure_time):
+    conn, trace, sockets, _, _, sleeps = candidate_fixture(
+        [(ssl_error(ssl.SSLEOFError), failure_time), (None, 0)])
+    try:
+        with pytest.raises(ssl.SSLEOFError):
+            conn.request("POST", "/fixture", body=b"synthetic")
+        assert sleeps == [] and len(sockets) == 1 and sockets[0].closed
+        assert trace.preparation_recovery.allowance.used == 0
+        transport.validate_trace(trace.snapshot())
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("change", ["cancel", "deadline"])
+def test_candidate_wait_rechecks_permission_and_original_deadline(change):
+    cancelled = [False]
+    def check():
+        if cancelled[0]:
+            raise PermissionError("synthetic cancellation")
+    conn, trace, sockets, _, _, sleeps = candidate_fixture(
+        [(ssl_error(ssl.SSLEOFError), 1), (None, 0)], check=check,
+        on_sleep=lambda: cancelled.__setitem__(0, change == "cancel"),
+        oversleep=90 if change == "deadline" else 0)
+    try:
+        with pytest.raises(PermissionError if change == "cancel" else TimeoutError):
+            conn.request("POST", "/fixture", body=b"synthetic")
+        assert sleeps == [1.0] and len(sockets) == 1 and sockets[0].closed
+        assert trace.preparation_recovery.allowance.used == 0
+        assert "application_request_started" not in trace.snapshot()["events"]
+        transport.validate_trace(trace.snapshot())
+    finally:
+        conn.close()
+
+
+def test_candidate_permission_revoked_before_pause_prevents_wait_and_rebuild():
+    checks = []
+    def check():
+        checks.append(True)
+        if len(checks) == 2:
+            raise PermissionError("synthetic revoked allowance")
+    conn, trace, sockets, _, _, sleeps = candidate_fixture(
+        [(ssl_error(ssl.SSLEOFError), 1), (None, 0)], check=check)
+    try:
+        with pytest.raises(PermissionError):
+            conn.request("POST", "/fixture", body=b"synthetic")
+        assert sleeps == [] and len(sockets) == 1 and sockets[0].closed
+        assert trace.preparation_recovery.allowance.used == 0
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("error", [ssl_error(ssl.SSLCertVerificationError),
+    ssl_error(reason="WRONG_VERSION_NUMBER"), TimeoutError("synthetic"),
+    ConnectionResetError("synthetic"), http.client.RemoteDisconnected("synthetic")])
+def test_candidate_pause_does_not_expand_rebuild_eligibility(error):
+    conn, trace, sockets, _, _, sleeps = candidate_fixture([(error, 1), (None, 0)])
+    try:
+        with pytest.raises(type(error)):
+            conn.request("POST", "/fixture", body=b"synthetic")
+        assert sleeps == [] and len(sockets) == 1 and sockets[0].closed
+        assert trace.preparation_recovery.allowance.used == 0
+    finally:
+        conn.close()
+
+
+def test_candidate_second_tls_failure_does_not_wait_or_connect_again():
+    conn, trace, sockets, _, _, sleeps = candidate_fixture(
+        [(ssl_error(ssl.SSLEOFError), 1), (ssl_error(ssl.SSLEOFError), 1), (None, 0)])
+    try:
+        with pytest.raises(ssl.SSLEOFError):
+            conn.request("POST", "/fixture", body=b"synthetic")
+        assert sleeps == [1.0] and len(sockets) == 2 and all(s.closed for s in sockets)
+        assert trace.preparation_recovery.allowance.used == 1
+        assert all(not data.startswith(b"POST ") for sock in sockets for data, _ in sock.writes)
+        transport.validate_trace(trace.snapshot())
+    finally:
+        conn.close()
+
+
+def test_candidate_application_write_failure_does_not_pause_or_reconnect():
+    # CONNECT is write 1; the application request starts at write 2.
+    conn, trace, sockets, _, _, sleeps = candidate_fixture([(None, 1), (None, 0)], write_failure=2)
+    try:
+        with pytest.raises(BrokenPipeError):
+            conn.request("POST", "/fixture", body=b"synthetic")
+        assert sleeps == [] and len(sockets) == 1
+        assert trace.preparation_recovery.allowance.used == 0
+        assert trace.snapshot()["events"]["application_write_attempted"]
+    finally:
+        conn.close()
 
 
 @pytest.mark.parametrize("cls,kind", [(ssl.SSLEOFError, "tls_eof_error"),

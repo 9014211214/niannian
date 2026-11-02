@@ -11,9 +11,13 @@ import re
 from datetime import datetime, timezone
 
 from ..context import EngineContext
+from .preference_sources import LEGACY as LEGACY_SOURCES, SOURCE_REFS, PreferenceSources
 from ..model.persona import (
     PersonaProfile, PreferenceQuote, PreferenceTransition,
     PreferenceUIConfirmation, PreferenceSemanticReview, StatedPreference,
+    PREFERENCE_DO_MAX_CHARACTERS, PREFERENCE_QUOTE_MAX_CHARACTERS, PREFERENCE_QUOTE_MAX_COUNT,
+    PREFERENCE_SCOPE_LEGACY, PREFERENCE_SCOPE_FULL_SOURCE, PREFERENCE_SCOPE_MODEL,
+    preference_scope_max_characters,
 )
 
 PREFERENCE_PROTOCOL_VERSION = "2.1"
@@ -137,13 +141,17 @@ def _owner_action_targets(instruction: str) -> bool:
     return not _THIRD_PARTY_ACTION.search(instruction)
 
 
-def _grounded_scope(full_sources: list[str]) -> str | None:
+def _grounded_scope(full_sources: list[str], *, scope_protocol: str = PREFERENCE_SCOPE_LEGACY) -> str | None:
     """Keep all source qualifiers without guessing which words are conditions.
 
     Short owner turns fit verbatim in scope. Longer turns exceed the existing
     storage bound and are rejected explicitly for length, not semantic support.
     A literal do receives no exception over an equally valid paraphrase.
     """
+    limit = preference_scope_max_characters(scope_protocol)
+    if scope_protocol == PREFERENCE_SCOPE_FULL_SOURCE:
+        full = "；".join(dict.fromkeys(full_sources))
+        return full if 1 <= len(full) <= limit else None
     parts = []
     for text in dict.fromkeys(full_sources):
         body = text.strip().rstrip("。.!！;；\n ")
@@ -152,7 +160,7 @@ def _grounded_scope(full_sources: list[str]) -> str | None:
             body = rest  # Evidence still keeps the full unmodified owner turn.
         parts.append(body)
     full = "；".join(parts)
-    if 1 <= len(full) <= 60:
+    if 1 <= len(full) <= limit:
         return full
     return None
 
@@ -180,7 +188,7 @@ def _quote(raw: object, ctx: EngineContext) -> PreferenceQuote | None:
     excluded = ctx.working_memory.get("_sensitive_memory_excluded_turns") or []
     if (type(index) is not int or not 0 <= index < len(ctx.turns)
             or index in excluded or not isinstance(text, str)
-            or not text.strip() or len(text) > 240
+            or not text.strip() or len(text) > PREFERENCE_QUOTE_MAX_CHARACTERS
             or text not in ctx.turns[index].user
             or raw.get("session_id", ctx.session_id) != ctx.session_id):
         return None
@@ -188,8 +196,18 @@ def _quote(raw: object, ctx: EngineContext) -> PreferenceQuote | None:
 
 
 def extract_preference_rows(rows: object, ctx: EngineContext, persona: PersonaProfile,
-                            *, source: str = "model") -> tuple[list[StatedPreference], list[str]]:
+                            *, source: str = "model", scope_protocol: str = PREFERENCE_SCOPE_LEGACY,
+                            source_protocol: str = LEGACY_SOURCES,
+                            source_snapshot: PreferenceSources | None = None,
+                            ) -> tuple[list[StatedPreference], list[str]]:
     """Return proposals only; extraction cannot confirm its own interpretation."""
+    preference_scope_max_characters(scope_protocol)
+    if source_protocol not in (LEGACY_SOURCES, SOURCE_REFS):
+        raise ValueError("unknown_preference_source_protocol")
+    if source_protocol == SOURCE_REFS and source != "model":
+        raise ValueError("preference_source_refs_require_model_route")
+    if source != "model" and scope_protocol != PREFERENCE_SCOPE_LEGACY:
+        raise ValueError("full_source_scope_requires_model_route")
     if not isinstance(rows, list):
         return [], ["preference_rows_not_array"]
     result: list[StatedPreference] = []
@@ -199,11 +217,25 @@ def extract_preference_rows(rows: object, ctx: EngineContext, persona: PersonaPr
         if not isinstance(raw, dict):
             rejected.append("preference_row_not_object")
             continue
-        raw_quotes = raw.get("quotes")
-        if not isinstance(raw_quotes, list) or not 1 <= len(raw_quotes) <= 2:
+        if source_protocol == SOURCE_REFS:
+            if (set(raw) - {"do", "scope", "source_turn_indices", "confirmation", "supersedes",
+                            "revision_turn_index", "semantic_review"}
+                    or type(source_snapshot) is not PreferenceSources):
+                rejected.append("preference_source_contract_invalid")
+                continue
+            raw_quotes = raw.get("source_turn_indices")
+        else:
+            raw_quotes = raw.get("quotes")
+        if not isinstance(raw_quotes, list) or not 1 <= len(raw_quotes) <= PREFERENCE_QUOTE_MAX_COUNT:
             rejected.append("preference_quotes_invalid")
             continue
-        quotes = [_quote(row, ctx) for row in raw_quotes]
+        if source_protocol == SOURCE_REFS:
+            quotes = [source_snapshot.quote(index, ctx, persona) for index in raw_quotes]
+            if any(row is None for row in quotes) or len({row.turn_index for row in quotes}) != len(quotes):
+                rejected.append("preference_source_reference_invalid")
+                continue
+        else:
+            quotes = [_quote(row, ctx) for row in raw_quotes]
         if any(row is None for row in quotes):
             rejected.append("preference_quote_not_verbatim_user_source")
             continue
@@ -212,23 +244,43 @@ def extract_preference_rows(rows: object, ctx: EngineContext, persona: PersonaPr
         # semantic intent from bounded safety checks; the old finite rule
         # parser is retained only for explicitly isolated local previews.
         safe_source = _model_source_safety if source == "model" else _safe_user_instruction
-        if not all(safe_source(ctx.turns[row.turn_index].user) for row in quotes):
+        if not all(safe_source(row.text if source_protocol == SOURCE_REFS else ctx.turns[row.turn_index].user)
+                   for row in quotes):
             rejected.append("preference_full_user_context_unsafe")
             continue
-        if any(len(ctx.turns[row.turn_index].user) > 240 for row in quotes):
+        if any(len(row.text if source_protocol == SOURCE_REFS else ctx.turns[row.turn_index].user)
+               > PREFERENCE_QUOTE_MAX_CHARACTERS for row in quotes):
             rejected.append("preference_full_user_context_too_long")
             continue
         instruction = raw.get("do")
-        if (not isinstance(instruction, str) or not 1 <= len(instruction) <= 60
+        if (not isinstance(instruction, str) or not 1 <= len(instruction) <= PREFERENCE_DO_MAX_CHARACTERS
                 or not instruction.strip() or _sharing_or_permission(instruction)
                 or not _owner_action_targets(instruction)
                 or _TRAIT_OR_CAUSE.search(instruction) or _UNSAFE_ADVICE.search(instruction)
                 or _MEDICAL_RULE_CONTEXT.search(instruction)):
             rejected.append("preference_not_safe_explicit_instruction")
             continue
-        full_sources = [ctx.turns[row.turn_index].user for row in quotes]
+        full_sources = [row.text if source_protocol == SOURCE_REFS else ctx.turns[row.turn_index].user
+                        for row in quotes]
         supersedes = raw.get("supersedes") or None
-        if supersedes and (supersedes not in existing or existing[supersedes].status != "confirmed"):
+        if supersedes:
+            if source_protocol == SOURCE_REFS:
+                revision_index = raw.get("revision_turn_index")
+                revision_valid = (source_snapshot.quote(revision_index, ctx, persona) is not None
+                                  and revision_index in raw_quotes)
+            else:
+                revision_basis = raw.get("revision_basis")
+                excluded = ctx.working_memory.get("_sensitive_memory_excluded_turns") or []
+                revision_valid = (isinstance(revision_basis, str) and revision_basis.strip()
+                                  and any(revision_basis in turn.user for index, turn in enumerate(ctx.turns)
+                                          if index not in excluded))
+            if not revision_valid:
+                # The model decides whether this is an explicit revision. Code
+                # only checks its current owner source; unsupported replacement
+                # intent must not discard an otherwise valid new proposal.
+                supersedes = None
+        if supersedes and (not isinstance(supersedes, str) or supersedes not in existing
+                           or existing[supersedes].status != "confirmed"):
             rejected.append("preference_superseded_target_invalid")
             continue
         semantic_review = None
@@ -241,10 +293,25 @@ def extract_preference_rows(rows: object, ctx: EngineContext, persona: PersonaPr
             if not _semantic_eligible(semantic_review):
                 rejected.append("preference_not_communication_style")
                 continue
-        scope = _grounded_scope(full_sources)
-        if scope is None:
-            rejected.append("preference_full_scope_too_long")
-            continue
+        if scope_protocol == PREFERENCE_SCOPE_MODEL:
+            # The model's proposed interpretation and its source evidence are
+            # different fields. Replacing scope with a quote can remove a
+            # condition that the model retained from the wider conversation.
+            # Keep its exact interpretation for owner review; do not infer or
+            # insert additional source turns, or turn it into confirmation.
+            scope = raw.get("scope")
+            if (not isinstance(scope, str) or not scope.strip()
+                    or not 1 <= len(scope) <= preference_scope_max_characters(scope_protocol)):
+                rejected.append("preference_model_scope_invalid")
+                continue
+            if not _model_source_safety(scope) or not _owner_action_targets(scope):
+                rejected.append("preference_model_scope_unsafe")
+                continue
+        else:
+            scope = _grounded_scope(full_sources, scope_protocol=scope_protocol)
+            if scope is None:
+                rejected.append("preference_full_scope_too_long")
+                continue
         now = _now()
         identity = f"{ctx.session_id}|{quotes[0].turn_index}|{instruction}"
         preference_id = "pref_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
@@ -253,26 +320,36 @@ def extract_preference_rows(rows: object, ctx: EngineContext, persona: PersonaPr
         # Keep the complete owner turn, including qualifiers that were outside
         # the selected quote. Never silently truncate evidence to fit the model.
         full_quotes = [PreferenceQuote(session_id=row.session_id, turn_index=row.turn_index,
-                                      text=ctx.turns[row.turn_index].user) for row in quotes]
+                                      text=row.text if source_protocol == SOURCE_REFS else ctx.turns[row.turn_index].user)
+                       for row in quotes]
         history = [PreferenceTransition(at=now, to="proposed", source=source)]
         try:
-            result.append(StatedPreference(
-                id=preference_id, do=instruction, scope=scope,
+            proposal = StatedPreference(
+                id=preference_id, do=instruction, scope=scope, scope_protocol=scope_protocol,
                 not_implies=["不代表所有场景都适用", "不代表同意执行任何现实动作"],
                 quotes=full_quotes, confirmation=None,
                 status="proposed", supersedes=supersedes,
                 history=history, extraction_source=source, created_at=now, updated_at=now,
                 semantic_review=semantic_review,
-            ))
+            )
         except ValueError:
             rejected.append("preference_model_validation_failed")
+            continue
+        if source_protocol == SOURCE_REFS and any(
+                source_snapshot.quote(row.turn_index, ctx, persona) != row for row in quotes):
+            # Nothing after source resolution may substitute a later turn.
+            # Recheck mutable identity/privacy/source bindings immediately
+            # before accepting; stored evidence stays the request snapshot.
+            rejected.append("preference_source_reference_changed")
+            continue
+        result.append(proposal)
     return result, rejected
 
 
 def heuristic_preferences(ctx: EngineContext, persona: PersonaProfile) -> list[StatedPreference]:
     rows = []
     for index, turn in enumerate(ctx.turns):
-        if not turn.user or len(turn.user) > 240:
+        if not turn.user or len(turn.user) > PREFERENCE_QUOTE_MAX_CHARACTERS:
             continue
         instruction = _rule_instruction(turn.user)
         if not instruction:

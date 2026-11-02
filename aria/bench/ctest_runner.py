@@ -68,10 +68,13 @@ class _RecordedMemoryCall:
 
 
 class CTestLocalMemoryFixture:
-    """Overinclusive software extractor; product rules must reject context.
+    """Preset software observations for the authored C-test scenarios.
 
     It sees only the production prompt, never groups, expected triggers, future
-    visits or the generated observation store. Not evidence of model accuracy.
+    visits or the generated observation store. The existing impact flag supplies
+    explicit_change labels only for the two late impact visits in each authored
+    change scenario; all other rows are preset context. This limited software
+    coverage is neither complete semantic annotation nor model accuracy evidence.
     """
     source_id = "ctest_local_software_fixture"
     model = "local/ctest-memory-fixture"
@@ -95,8 +98,10 @@ class CTestLocalMemoryFixture:
                 domain = "orientation"
             else:
                 domain = "memory"
+            impact = bool(re.search(r"耽误|影响|没法", text))
             rows.append({"domain": domain, "evidence_quote": text, "turn_index": source["turn_index"],
-                         "functional_impact": bool(re.search(r"耽误|影响|没法", text))})
+                         "functional_impact": impact,
+                         "signal": "explicit_change" if impact else "context"})
         return json.dumps({"episodes": [], "relationships": [], "stated_preferences": [],
                            "cognitive_privacy": [], "cognitive_observations": rows}, ensure_ascii=False)
 

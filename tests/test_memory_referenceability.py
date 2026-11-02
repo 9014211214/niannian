@@ -200,3 +200,68 @@ def test_context_version_and_integrity_cannot_be_skipped():
     entry.source_context_sha256 = source_context_sha256(entry.source_context)
     entry.source_context_version = None
     assert not entry.can_reference()
+
+
+@pytest.mark.parametrize("stored_basis", ["legacy_partial", "current_pair", "legacy_whole"])
+def test_preference_sources_project_only_the_independent_life_fact(tmp_path, stored_basis):
+    from aria.engine.model.persona import PreferenceQuote, StatedPreference
+
+    control = "请先等我说完。"
+    life = "朋友小林今天送了我一册画谱。"
+    utterance = control + life
+    session = "mixed-owner-source"
+    ctx, extractor = extraction(utterance, quote=life, relationship=True)
+    ctx.session_id = session
+    relation = extractor.extract(ctx, PersonaProfile(user_id=ctx.user_id)).relationships[0]
+    source = relation.evidence[0].fact_sources[0]
+    source.preference_source_quote = control if stored_basis == "current_pair" else None
+    relation.facts.append(control)
+    relation.evidence[0].fact_sources.append(source.model_copy(update={
+        "quote": control, "preference_source_quote": None,
+    }))
+    evidence = PreferenceQuote(session_id=session, turn_index=0,
+                               text=control if stored_basis == "legacy_partial" else utterance)
+    pref = StatedPreference(id="pref_test", do="先等我说完", scope="聊天时",
+                            quotes=[evidence], confirmation=evidence, status="withdrawn",
+                            created_at="2026-11-01", updated_at="2026-11-01")
+    episode = EpisodicMemoryEntry(
+        id="life", summary=utterance, keywords=["小林", "等我说完"], referenceable=True,
+        source_session_id=session, source_turn_index=0, source_quote=life,
+        source_context=utterance, source_context_sha256=source_context_sha256(utterance),
+        source_context_version=SOURCE_CONTEXT_VERSION, preference_source_quote=source.preference_source_quote,
+    )
+    profile = PersonaProfile(user_id=ctx.user_id, stated_preferences=[pref],
+                             episodic_memory=[episode, episode.model_copy(update={"id": "whole", "source_quote": utterance})],
+                             relationship_context=[relation])
+    store = PersonaStore(tmp_path)
+    store.save(profile)
+    loaded = store.load(ctx.user_id)
+    permitted = stored_basis != "legacy_whole"
+    episodes = recall_episodes(loaded, "小林", referenceable_only=True)
+    assert [row.id for row in episodes] == (["life"] if permitted else [])
+    if permitted:
+        assert episodes[0].summary == f"用户提到：{life}"
+        assert episodes[0].keywords == ["小林"]
+    assert [row.facts for row in loaded.referenceable_relationships()] == ([[life]] if permitted else [])
+    assert loaded.episodic_memory[0].summary == utterance
+    assert loaded.relationship_context[0].facts == [life, control]
+
+
+def test_new_fact_survives_a_gap_in_existing_daily_episode_ids(tmp_path):
+    from datetime import date
+
+    store = PersonaStore(tmp_path)
+    profile = PersonaProfile(user_id="fictional")
+    ctx, extractor = extraction("我每周三去学画画。")
+    MemoryConsolidator(store, extractor).consolidate(profile, ctx)
+    # Older extraction numbered model rows before rejecting invalid siblings.
+    profile.episodic_memory[0].id = f"llm_{date.today().isoformat()}_2"
+    store.save(profile)
+    profile = store.load(profile.user_id)
+    ctx, extractor = extraction("我昨晚种上一棵桂花。",
+                                quote="我昨晚种上一棵桂花")
+    ctx.session_id = "later-source-session"
+    MemoryConsolidator(store, extractor).consolidate(profile, ctx)
+    assert [episode.source_quote for episode in store.load(profile.user_id).episodic_memory] == [
+        "我每周三去学画画", "我昨晚种上一棵桂花",
+    ]

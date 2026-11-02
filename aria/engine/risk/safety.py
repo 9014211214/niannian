@@ -46,6 +46,13 @@ def safety_response(signal: RiskSignal, persona: Optional[PersonaProfile] = None
     who = _address(persona)
     contact = _consented_contact(persona)
 
+    if signal.kind == "semantic_safety_urgent_other":
+        from .safety_evidence import THIRD_PERSON_REPLY
+        return THIRD_PERSON_REPLY
+    if signal.kind == "semantic_safety_uncertain":
+        from .safety_evidence import UNCERTAIN_REPLY
+        return UNCERTAIN_REPLY
+
     if signal.kind == "semantic_self_harm_concern":
         return (
             f"{who}我想认真确认你的安全：你现在有伤害自己的打算，或者已经做了什么吗？"

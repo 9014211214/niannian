@@ -18,7 +18,7 @@ from tests.test_bench_request_control import client, controller_fixture, envelop
 
 
 GEN_ID = "gen-1789480804-sQdrvXdaT3WhCO3pBtai"
-REQ_ID = "55c10856-1a24-4e6e-90cc-60b9915f7510"
+REQ_ID = "11111111-2222-4333-8444-555555555555"
 
 
 def error(body, *, status=429, headers=None, stream=None):
@@ -59,7 +59,7 @@ def test_error_captures_only_finite_fields_and_explicit_zero_cost():
     assert row["provider_usage"] == {"cost": 0, "prompt_tokens": 12}
     assert row["retry_after_seconds"] == 4
     assert observation == {
-        "version": "1.3", "envelope_kind": "http_error", "body_status": "parsed",
+        "version": "1.5", "envelope_kind": "http_error", "body_status": "parsed",
         "error_category": "rate_limited", "provider_error_code": 429,
         "provider_error_type": "rate_limit_exceeded", "provider_error_type_source": "error_metadata_type",
         "provider_code": 429, "rate_limit_limit": 20.0, "rate_limit_remaining": 0.0,
@@ -70,6 +70,8 @@ def test_error_captures_only_finite_fields_and_explicit_zero_cost():
         "generation_id_candidate_status": "absent", "retry_after_status": "accepted",
         "retry_after_seconds": 4, "retry_after_source": "delta_seconds",
         "provider_raw_status": "not_inspected", "provider_native_code_status": "not_inspected",
+        "limit_source_status": "absent", "router_error_type_status": "recognized",
+        "router_error_type": "rate_limit_exceeded", "router_error_type_source": "error.metadata.error_type",
     }
     assert account["provider_cost_complete"] is True
     assert account["provider_observed_cost_usd"] == 0

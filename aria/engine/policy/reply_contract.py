@@ -13,6 +13,8 @@ from ..context import EngineContext
 
 REPLY_CONTRACT_VERSION = "1.6.0"
 REPLY_CONTRACT_HEADING = "## 本轮回复契约"
+EXPRESSION_DECISION_VERSION = "online_turn_decision_v4_evidence"
+EXPRESSION_CONTRACT_VERSION = "1.7.4"
 UNAVAILABLE_CONTACT_REPLY = (
     "我不能直接替你联系对方。若你想说点什么，我可以陪你斟酌说法；要不要联系由你决定。"
 )
@@ -203,11 +205,13 @@ def reply_quality_contract(
     # In v3 the same call interprets current intent. A pre-model ordinary
     # ask plan is a hypothesis, not authority to force a diagnostic question.
     # Safety takeover and explicit wait remain separate, stronger boundaries.
-    semantic_v3 = ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v3"
+    semantic_v3 = ctx.working_memory.get("_online_decision_version") in {"online_turn_decision_v3", "online_turn_decision_v4_evidence", "online_turn_decision_v5_bound", "online_turn_decision_v6_semantic", "online_turn_decision_v7"}
     advisory = bool(semantic_v3 and plan
                     and not ctx.working_memory.get("risk_flag"))
     return {
-        "version": "1.7.3" if semantic_v3 else REPLY_CONTRACT_VERSION,
+        "version": (EXPRESSION_CONTRACT_VERSION
+                    if ctx.working_memory.get("_online_decision_version") in (EXPRESSION_DECISION_VERSION, "online_turn_decision_v5_bound", "online_turn_decision_v6_semantic", "online_turn_decision_v7")
+                    else "1.7.3" if semantic_v3 else REPLY_CONTRACT_VERSION),
         "observation_advisory": advisory,
         "observation_mode": plan.mode if plan is not None else "observe",
         "observation_question": plan.question.strip() if plan is not None else "",
@@ -247,6 +251,7 @@ def contract_prompt(contract: dict[str, Any]) -> str:
     """
     mode = contract["observation_mode"]
     question = str(contract.get("observation_question") or "")
+    expression_candidate = contract.get("version") == EXPRESSION_CONTRACT_VERSION
     if contract.get("observation_advisory"):
         observation = (
             "response 的观察建议：本地候选尚未完成本轮语义判断，不要求使用预设问句。"
@@ -291,13 +296,20 @@ def contract_prompt(contract: dict[str, Any]) -> str:
     # not a semantic router for whether the model should complete a task.
     # Let the model understand the current request from context, including
     # negation, reported speech, conditional requests and changed intentions.
+    draft_wrapper = (
+        "未指定正文形式时，草稿默认可用引号或‘草稿：’标明；本人已明确要求合法的正文形式时，按该形式交付，"
+        "不额外加引号、前缀或说明。不把未授权的私人背景写给第三人；草稿不等于发送、报名或同意。\n"
+        if expression_candidate else
+        "草稿用引号或‘草稿：’标明，不把未授权的私人背景写给第三人；草稿不等于发送、报名或同意。\n"
+    )
     task_delivery = (
         "先按本人当前原话和相关上下文理解正在请求的帮助；转述、否定、未来或假设的任务"
         "不当作现在要做，最新纠正和停止优先。当前明确的问答、选择解释、文字整理等"
         "能在对话内完成时，正文就交付实际答案或内容，不只承诺稍后做，也不以陪伴或隐私提醒代替。"
         "当本轮明确要求起草/改写时，正文必须现在给出一版可看的实际措辞，不只说‘我来写’。"
         "已有相关上下文就沿用本人明确提出的内容和限制，不重复索要；确实缺少内容才问一个必要问题。"
-        "草稿用引号或‘草稿：’标明，不把未授权的私人背景写给第三人；草稿不等于发送、报名或同意。\n"
+        + draft_wrapper
+        +
         "本人只问一个问题或限定当前一步时，回答这个范围后停下，不顺带展开后续操作；"
         "按步骤交流不等于每轮追加下一步，简短不等于省略本人明确需要的内容。"
         "准备内容、本人审阅、是否发送、允许谁转发是不同决定，不能彼此推定。"
@@ -310,6 +322,11 @@ def contract_prompt(contract: dict[str, Any]) -> str:
         "不能把‘可以随时离开’当作安全保证。\n"
         if contract.get("promotional_offer_no_safety_verification") else ""
     )
+    question_boundary = (
+        "助手向本人追问最多一个必要问题；任务正文中的问句按本人合法明确要求交付，"
+        "不为默认交流习惯额外追加追问。\n"
+        if expression_candidate else "全轮最多一个问题。\n"
+    )
     return (
         REPLY_CONTRACT_HEADING + "\n"
         "优先级：安全与真实能力 > 本人当前事实/纠正/明确任务 > 观察合同 > "
@@ -320,7 +337,8 @@ def contract_prompt(contract: dict[str, Any]) -> str:
         "本人回答的语义判断只是提案；服务器核对并保存前，不声称已经确认或撤回。"
         "本人选择现在聊变化记录，只允许接下来一次当前会话的请求，不证明本人平静，也不是长期提醒或外发授权。\n"
         + "用户明确提出的生活任务仍需交代真实状态；留白不取消任务，必要的任务"
-        "确认只围绕任务，不借机问情绪。全轮最多一个问题。\n"
+        "确认只围绕任务，不借机问情绪。" + question_boundary
+        +
         "承接事实，不代言内心：他说过的感受可按原话回应；你推测的感受只作"
         "低确定性的可能，或不点破。不要把‘也许’升级成‘心里肯定’，也不必"
         "机械地说‘听起来’。人物假设用于选回应方式，不是当前事实。\n"

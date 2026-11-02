@@ -236,9 +236,15 @@ def has_current_action_intent(
     return notify or medication_reminder or confirmed
 
 
-def parse_action(raw: str) -> tuple[str, Optional[dict[str, Any]]]:
+def parse_action(raw: str, *, source_positions=None) -> tuple[str, Optional[dict[str, Any]]]:
     """返回 (用户可见文本, 动作 dict 或 None)。动作仅取第一个。"""
     matches = list(_ACTION_RE.finditer(raw))
+    if source_positions is not None:
+        kept = [index for index in range(len(raw))
+                if not any(match.start() <= index < match.end() for match in matches)]
+        untrimmed = "".join(raw[index] for index in kept)
+        start = len(untrimmed) - len(untrimmed.lstrip())
+        source_positions[:] = kept[start:start + len(untrimmed.strip())]
     if not matches:
         return raw.strip(), None
     m = matches[0]
@@ -269,6 +275,7 @@ def prepare_action(
     *,
     executed: Optional[set[str]] = None,
     pending_action: dict[str, Any] | None = None,
+    duplicate_is_attempt: bool = False,
 ) -> tuple[Optional[dict[str, Any]], str]:
     """确定性授权、补齐参数并去重；绝不只信 prompt 或模型自报的同意。"""
     tool = str(action.get("tool") or "")
@@ -393,6 +400,8 @@ def prepare_action(
         separators=(",", ":"),
     )
     if executed is not None and signature in executed:
+        if duplicate_is_attempt:
+            return None, "本会话已有同一动作的尝试记录，不重复提交；这不证明先前动作已完成"
         return None, "同一动作本会话已经执行，不重复提交"
     if executed is not None:
         executed.add(signature)

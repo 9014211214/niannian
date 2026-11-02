@@ -11,7 +11,7 @@ from scripts import build_minimal_release as release
 @pytest.fixture
 def source_zip(tmp_path):
     source = tmp_path / "source"
-    for name in release.REQUIRED_FILES:
+    for name in release._required_files(release.POLICY_VERSION):
         path = source / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# synthetic source\n", encoding="utf-8")
@@ -92,7 +92,7 @@ def test_only_recomputed_generated_manifest_hashes_receive_automatic_explanation
         }}
     result = audit.audit(source_zip, detector=scanner)
     manifest_hits = [row for row in result["findings"] if row["path"] == "RELEASE_MANIFEST.json"]
-    assert len(manifest_hits) == len(release.REQUIRED_FILES)
+    assert len(manifest_hits) == len(release._required_files(release.POLICY_VERSION))
     assert all(row["review"]["category"] == "public_integrity_digest" for row in manifest_hits)
     assert all(row["review"] is None for row in result["findings"] if row["path"] == "README.md")
 

@@ -45,6 +45,10 @@ from .model.persona import (
 )
 from .risk.safety import safety_response
 from .risk.semantic import semantic_safety_signal
+from .risk.safety_delivery import (
+    LEGACY, CONDITIONAL_CONTEXT_V1, TASK_CONTEXT_V2, SOURCE_RESPONSE_V3, SOURCE_RESPONSE_V4, MINIMAL_RESPONSE_V1, capture_delivery_context,
+    render_safety_delivery, render_unverified_safety, validate_delivery_version,
+)
 from .perception import PerceptionEngine, route_state_analysis
 from .perception.evidence import collect_evidence
 from .perception.longitudinal import enrich_with_personal_baseline
@@ -61,6 +65,7 @@ from .policy.actions import (
 from .policy.llm import LLMClient, create_llm_client
 from .policy.online_decision import (
     DETERMINISTIC_MODEL_FAILURE_REPLY, ONLINE_DECISION_VERSION_SAFETY,
+    EVIDENCE_DECISION_VERSIONS, ONLINE_DECISION_VERSION_EVIDENCE, SAFETY_DECISION_VERSIONS,
 )
 from .policy.prompt import update_delivery_state
 from .routing import route_reply_model
@@ -75,7 +80,8 @@ def _checkpoint_turns(ctx: EngineContext) -> list[SessionTurnSnapshot]:
     }
     start = max(0, len(ctx.turns) - 12)
     return [
-        SessionTurnSnapshot(user=turn.user, agent=turn.agent)
+        SessionTurnSnapshot(user=turn.user, agent=turn.agent,
+            person_response_sha256=(ctx.working_memory.get("_person_response_deliveries") or {}).get(str(index)))
         for index, turn in enumerate(ctx.turns[start:], start=start)
         if index not in excluded
     ]
@@ -97,10 +103,21 @@ class Engine:
         tools: Optional[list[Tool]] = None,
         state_llm_client: Optional[LLMClient] = None,
         fast_llm_client: Optional[LLMClient] = None,
+        safety_review_llm_client: Optional[LLMClient] = None,
+        confirm_judge_llm_client: Optional[LLMClient] = None,
+        safety_review_version: str = "safety_review_v2",
         simulation_mode: bool = False,
         delivery_block: Optional[str] = None,
         external_emotion_experiment: SyntheticEmotionExperiment | None = None,
+        safety_delivery_version: str = LEGACY,
+        safety_response_instruction_version: str = "legacy",
+        premodel_safety_version: str = "legacy",
     ) -> None:
+        from .risk.premodel_task import validate_premodel_safety_version
+        self.premodel_safety_version = validate_premodel_safety_version(premodel_safety_version)
+        self.safety_delivery_version = validate_delivery_version(safety_delivery_version)
+        from .policy.safety_instruction import SafetyResponseInstruction
+        self._safety_response_instruction = SafetyResponseInstruction(safety_response_instruction_version)
         if external_emotion_experiment is not None:
             if type(external_emotion_experiment) is not SyntheticEmotionExperiment:
                 raise ValueError("external_emotion_experiment_requires_python_capability")
@@ -129,10 +146,36 @@ class Engine:
             or create_llm_client("online_fast")
         )
         self.fast_llm = fast_llm
+        # An explicitly budgeted, deletion-only client; never auto-created.
+        self.safety_review_llm = safety_review_llm_client
+        self.confirm_judge_llm = confirm_judge_llm_client
+        if safety_review_version not in {"safety_review_v1", "safety_review_v2"}:
+            raise ValueError("unsupported_safety_review_version")
+        self.safety_review_version = safety_review_version
         # 仅为旧版集成保留公开属性。在线主链路不再创建或调用独立状态模型；
         # 深度人物模型由会后 hypothesis_updater 负责。
         self.state_llm = state_llm_client
-        self.policy = PolicyEngine(fast_llm=fast_llm, delivery_block=delivery_block)
+        self.policy = PolicyEngine(fast_llm=fast_llm, delivery_block=delivery_block,
+            **({"safety_response_instruction_version": self.safety_response_instruction_version}
+               if self.safety_response_instruction_version != "legacy" else {}))
+        if (self.safety_delivery_version != LEGACY
+                and self.policy.online_decision_version not in EVIDENCE_DECISION_VERSIONS):
+            raise ValueError("conditional_safety_delivery_requires_online_v4")
+        if (self.safety_delivery_version == TASK_CONTEXT_V2
+                and self.safety_response_instruction_version != "conditional_response_v2"):
+            raise ValueError("task_safety_delivery_requires_response_v2")
+        if ((self.safety_delivery_version == SOURCE_RESPONSE_V3)
+                != (self.safety_response_instruction_version == "conditional_response_v3")):
+            raise ValueError("source_response_requires_matching_instruction_v3")
+        if ((self.safety_delivery_version == SOURCE_RESPONSE_V4)
+                != (self.safety_response_instruction_version == "conditional_response_v4")):
+            raise ValueError("source_response_requires_matching_instruction_v4")
+        if ((self.safety_delivery_version == MINIMAL_RESPONSE_V1)
+                != (self.safety_response_instruction_version == "compact_response_v1")):
+            raise ValueError("minimal_response_requires_matching_compact_instruction")
+        from .risk.premodel_task import validate_premodel_configuration
+        validate_premodel_configuration(self.premodel_safety_version, self.safety_delivery_version,
+                                       self.safety_response_instruction_version, self.policy.online_decision_version)
         self.perception = PerceptionEngine()
         skills_provider = getattr(scene, "skills", None)
         scene_skills = (
@@ -161,7 +204,41 @@ class Engine:
         self.hypothesis_updater = hypothesis_updater or diagnoser
         self.diagnoser = self.hypothesis_updater     # 兼容 0.1 版公开属性
 
+    @property
+    def safety_response_instruction_version(self):
+        return self._safety_response_instruction.version
+
     def _validate_context_mode(self, ctx: EngineContext) -> None:
+        from .risk.premodel_task import validate_premodel_configuration
+        validate_premodel_configuration(self.premodel_safety_version, self.safety_delivery_version,
+                                       self.safety_response_instruction_version, self.policy.online_decision_version)
+        bound_premodel = ctx.working_memory.get("_premodel_safety_version")
+        if bound_premodel is not None and bound_premodel != self.premodel_safety_version:
+            raise ValueError("session_premodel_safety_version_mismatch")
+        if getattr(self.policy, "safety_response_instruction_version", "legacy") != self.safety_response_instruction_version:
+            raise ValueError("policy_safety_response_instruction_version_mismatch")
+        validate_delivery_version(self.safety_delivery_version)
+        if (self.safety_delivery_version != LEGACY
+                and self.policy.online_decision_version not in EVIDENCE_DECISION_VERSIONS):
+            raise ValueError("conditional_safety_delivery_requires_online_v4")
+        if (self.safety_delivery_version == TASK_CONTEXT_V2
+                and self.safety_response_instruction_version != "conditional_response_v2"):
+            raise ValueError("task_safety_delivery_requires_response_v2")
+        if ((self.safety_delivery_version == SOURCE_RESPONSE_V3)
+                != (self.safety_response_instruction_version == "conditional_response_v3")):
+            raise ValueError("source_response_requires_matching_instruction_v3")
+        if ((self.safety_delivery_version == SOURCE_RESPONSE_V4)
+                != (self.safety_response_instruction_version == "conditional_response_v4")):
+            raise ValueError("source_response_requires_matching_instruction_v4")
+        if ((self.safety_delivery_version == MINIMAL_RESPONSE_V1)
+                != (self.safety_response_instruction_version == "compact_response_v1")):
+            raise ValueError("minimal_response_requires_matching_compact_instruction")
+        bound_delivery = ctx.working_memory.get("_safety_delivery_version")
+        if bound_delivery is not None and bound_delivery != self.safety_delivery_version:
+            raise ValueError("session_safety_delivery_version_mismatch")
+        self._safety_response_instruction.bind_context(ctx, getattr(self.policy, "online_decision_version", None))
+        ctx.working_memory["_safety_delivery_version"] = self.safety_delivery_version
+        ctx.working_memory["_premodel_safety_version"] = self.premodel_safety_version
         external_input = (ctx.working_memory.get("perception_input") or {}).get("external_emotion")
         if (not self.simulation_mode and self.external_emotion_experiment is None
                 and (is_simulated(ctx.emotion.external_reading) or is_simulated(external_input))):
@@ -213,7 +290,14 @@ class Engine:
         multimodal: Optional[dict[str, Any]] = None,
         *,
         external_emotion: Optional[dict[str, Any]] = None,
+        safety_prelude=None,
     ) -> str:
+        from .policy.fictional_context import fictional_conversation_history
+        fictional_conversation_history(ctx)
+        if ctx.working_memory.get("_premodel_task_inflight") is not None:
+            raise ValueError("premodel_task_reentry_forbidden")
+        if ctx.working_memory.get("_safety_review_inflight") is not None:
+            raise ValueError("safety_review_reentry_forbidden")
         if ctx.working_memory.get("_offline_session_sealed"):
             raise ValueError("closed_session_requires_a_new_context")
         external_reading = parse_external_emotion(external_emotion)
@@ -229,7 +313,7 @@ class Engine:
             raise ValueError("simulated observations require an isolated simulation engine")
         self._validate_context_mode(ctx)
         semantic_screening = (
-            self.policy.online_decision_version == ONLINE_DECISION_VERSION_SAFETY
+            self.policy.online_decision_version in SAFETY_DECISION_VERSIONS
         )
         # The observation planner runs before reply generation; give it the
         # same explicit contract, including on the first turn of a session.
@@ -245,12 +329,20 @@ class Engine:
             multimodal, turn_index=len(ctx.turns), turn_id=current_turn_id,
         )
         ctx.working_memory["current_utterance"] = utterance
+        # Runtime-only routing: not serialized in working_memory/checkpoints,
+        # not copied from model data, and reset even on an early-return turn.
+        ctx._semantic_delivery_review_v2 = (
+            (ctx.user_id, ctx.session_id, ctx.scene_id, len(ctx.turns),
+             hashlib.sha256(utterance.encode("utf-8")).hexdigest())
+            if self._reviews_clear_body() else None)
         # 这些字段只描述“这一轮”。高风险会在常规感知/推理之前早退，因此若不
         # 先清理，Web 审计视图会把上一轮的情绪、干预、Skill 或反诈判断错误地
         # 展示成急症回合的依据。会话累计的 evidence/outcomes/delivery history
         # 仍然保留，结果学习不会被抹掉。
         for key in (
-            "risk_flag",
+            "risk_flag", "_safety_task_projection_for_turn", "_source_response_for_turn",
+            "safety_delivery", "safety_response_instruction",
+            "safety_review",
             "last_care_action",
             "skill_proposals",
             "personality_decision",
@@ -262,6 +354,7 @@ class Engine:
             "care_events",
             "_advertised_tools_for_turn",
             "_consumed_tool_result_for_turn",
+            "_semantic_current_action_receipt",
             "_delivery_response_candidate_for_turn",
             "_benchmark_reply_trace",
             "delivery_response_guard",
@@ -270,6 +363,7 @@ class Engine:
             "perception_fusion",
             "prompt_evidence_snapshot",
             "safety_screening_audit",
+            "premodel_task",
         ):
             ctx.working_memory.pop(key, None)
         ctx.reasoning.hypotheses = []
@@ -333,6 +427,8 @@ class Engine:
                     "latency_ms": 0,
                 },
             }
+            if self.premodel_safety_version in ("task_response_v1", "task_response_v2", "task_response_v3", "task_response_v4"):
+                return self._premodel_task_response(ctx, utterance, signal, safety_prelude)
             care_observer = getattr(self.scene, "observe_care", None)
             care_changed = (
                 bool(care_observer(ctx, self.persona, utterance, signal))
@@ -506,13 +602,30 @@ class Engine:
         if semantic_screening and apply_cognitive_withdrawal(ctx, self.persona, utterance):
             if self.store is not None and self.persona is not None:
                 self.store.save(self.persona)
-        model_signal = semantic_safety_signal(ctx, utterance)
-        semantic_clear = (
-            online_trace.get("version") == ONLINE_DECISION_VERSION_SAFETY
+        v7_without_optional_evidence = (
+            self.policy.online_decision_version == "online_turn_decision_v7"
+            and online_trace.get("version") == "online_turn_decision_v7"
             and online_trace.get("status") == "parsed"
             and online_trace.get("turn_index") == len(ctx.turns)
             and online_trace.get("safety_source") == "online_model_semantics"
             and online_trace.get("safety_concern") == "none"
+            and online_trace.get("safety_evidence") is None
+        )
+        model_signal = None if v7_without_optional_evidence else semantic_safety_signal(ctx, utterance)
+        delivery_context = capture_delivery_context(
+            ctx, utterance, delivery_version=self.safety_delivery_version,
+            online_version=self.policy.online_decision_version, persona=self.persona,
+        ) if self.safety_delivery_version != LEGACY else None
+        semantic_clear = (
+            online_trace.get("version") == self.policy.online_decision_version
+            and online_trace.get("status") == "parsed"
+            and online_trace.get("turn_index") == len(ctx.turns)
+            and online_trace.get("safety_source") == "online_model_semantics"
+            and online_trace.get("safety_concern") == "none"
+            and model_signal is None
+            and (online_trace.get("version") not in EVIDENCE_DECISION_VERSIONS
+                 or v7_without_optional_evidence
+                 or (online_trace.get("safety_assessment") or {}).get("disposition") == "clear")
         )
         if semantic_screening and not semantic_clear:
             # Keep the received protocol/route audit, but roll back tentative
@@ -532,17 +645,45 @@ class Engine:
                 "intervention_id": None, "reason": reason,
             }
             if model_signal is None:
+                # A valid v7 owner invitation is a separate transaction from
+                # optional safety metadata. Keep this turn's safety rollback
+                # and assessment, and use the same source-bound review below;
+                # never send the original body without that configured review.
+                from .memory.preference_dialogue import current_judged_preference_invitation
+                if (self._reviews_clear_body()
+                        and online_trace.get("safety_concern") == "none"
+                        and current_judged_preference_invitation(ctx, self.persona, utterance) is not None):
+                    preference_reply = self._respond_to_preference_invitation(
+                        ctx, utterance, raw, learning_before_screening=learning_before_screening,
+                        safety_prelude=safety_prelude)
+                    if preference_reply is not None:
+                        return preference_reply
                 # Missing/invalid safety is not a clear result. Deliver only
                 # fallback, without scene observers, actions or task flows.
                 ctx.working_memory["model_route"]["safety"] = {
                     "source": "online_model_semantics", "status": "unavailable",
                     "response_source": "deterministic_fallback",
                 }
-                ctx.add_turn(utterance, DETERMINISTIC_MODEL_FAILURE_REPLY)
+                response = DETERMINISTIC_MODEL_FAILURE_REPLY
+                if self.policy.online_decision_version in EVIDENCE_DECISION_VERSIONS:
+                    from .risk.safety_evidence import UNCERTAIN_REPLY
+                    response = UNCERTAIN_REPLY
+                if self.safety_delivery_version == TASK_CONTEXT_V2:
+                    response = self._compose_safety_task(ctx, None, None)
+                if self.safety_delivery_version == MINIMAL_RESPONSE_V1:
+                    response = self._compose_source_response(ctx, None, delivery_context,
+                                                             safety_prelude=safety_prelude)
+                    ctx.working_memory["model_route"]["safety"]["response_source"] = (
+                        "source_bound_body" if (ctx.working_memory.get("safety_delivery") or {}).get("status")
+                        in {"source_bound_guarded", "guard_replaced_without_crisis_prelude"}
+                        else "deterministic_fallback")
+                ctx.add_turn(utterance, response)
                 self._mark_interaction_started()
-                return DETERMINISTIC_MODEL_FAILURE_REPLY
+                return response
         if model_signal is not None:
-            self._record_risk(ctx, model_signal)
+            if (online_trace.get("version") not in EVIDENCE_DECISION_VERSIONS
+                    or (online_trace.get("safety_assessment") or {}).get("disposition") == "urgent_owner"):
+                self._record_risk(ctx, model_signal)
             ctx.working_memory["risk_flag"] = {
                 "tier": model_signal.tier, "kind": model_signal.kind,
                 "source": "online_model_semantics", "diagnosis": False,
@@ -562,7 +703,12 @@ class Engine:
                 "concern": online_trace["safety_concern"],
             }
             # Do not parse or execute the generated action/body on this branch.
-            response = self._handle_risk(ctx, model_signal)
+            if self.policy.online_decision_version in ("online_turn_decision_v5_bound", "online_turn_decision_v6_semantic", "online_turn_decision_v7"):
+                response = self._handle_risk(ctx, model_signal, delivery_context=delivery_context,
+                                             safety_prelude=safety_prelude)
+            else:
+                response = (self._handle_risk(ctx, model_signal, delivery_context=delivery_context)
+                            if delivery_context is not None else self._handle_risk(ctx, model_signal))
             from .policy.delivery_provenance import record_reply_stage
             record_reply_stage(ctx, "semantic_safety", raw, response,
                                violations=["semantic_safety_takeover"])
@@ -573,18 +719,10 @@ class Engine:
                 self.store.save(self.persona)
             return response
         if semantic_screening:
-            from .memory.preference_dialogue import apply_preference_dialogue
-            preference_reply = apply_preference_dialogue(ctx, self.persona, utterance, store=self.store)
+            preference_reply = self._respond_to_preference_invitation(
+                ctx, utterance, raw, learning_before_screening=learning_before_screening,
+                safety_prelude=safety_prelude)
             if preference_reply is not None:
-                from .policy.delivery_provenance import record_reply_stage
-                record_reply_stage(ctx, "preference_confirmation_commit", raw, preference_reply)
-                ctx.working_memory.pop("_delivery_response_candidate_for_turn", None)
-                ctx.working_memory["intervention_delivery"] = {
-                    "status": "not_delivered", "turn_index": len(ctx.turns),
-                    "intervention_id": None, "reason": "owner_preference_confirmation",
-                }
-                ctx.add_turn(utterance, preference_reply)
-                self._mark_interaction_started()
                 return preference_reply
             # These extension hooks can mutate consent, tasks or external care
             # state, so v3 may invoke them only after a current validated none.
@@ -638,7 +776,8 @@ class Engine:
             ctx.working_memory["_consumed_tool_result_for_turn"] = (
                 consumed_tool_result
             )
-        response, action = parse_action(raw)
+        from .policy.delivery_spans import parse_action_projected
+        response, action = parse_action_projected(ctx, raw)
         ctx.working_memory.setdefault(
             "_delivery_response_candidate_for_turn", response
         )
@@ -664,6 +803,7 @@ class Engine:
                     "_executed_action_signatures", set()
                 ),
                 pending_action=pending_action,
+                duplicate_is_attempt=self.policy.online_decision_version in ("online_turn_decision_v6_semantic", "online_turn_decision_v7"),
             )
             if prepared is None:
                 ctx.working_memory["last_tool_result"] = {
@@ -671,10 +811,8 @@ class Engine:
                     "ok": False,
                     "data": {"reason": denied_reason, "executed": False},
                 }
-                response = (
-                    "这个动作还没有执行："
-                    f"{denied_reason}。"
-                )
+                response = (("本次未提交动作：" if self.policy.online_decision_version in ("online_turn_decision_v6_semantic", "online_turn_decision_v7")
+                             else "这个动作还没有执行：") + f"{denied_reason}。")
                 response_overridden = True
             else:
                 result = self._tools.invoke(
@@ -686,37 +824,37 @@ class Engine:
                     "args": dict(prepared["args"]),
                     "data": result.data,
                 }
+                from .policy.semantic_delivery import bind_current_action_receipt
+                bind_current_action_receipt(ctx, utterance, ctx.working_memory["last_tool_result"])
                 pending_action_id = str(
                     prepared.get("pending_action_id") or ""
                 )
                 if result.ok and pending_action_id:
                     consume_pending_action(ctx, pending_action_id)
                 if not result.ok:
+                    semantic_outcome = self.policy.online_decision_version in ("online_turn_decision_v6_semantic", "online_turn_decision_v7")
+                    definitely_not_executed = type(result.data) is dict and result.data.get("executed") is False
                     signatures = ctx.working_memory.setdefault(
                         "_executed_action_signatures", set()
                     )
-                    signatures.discard(json.dumps(
-                        {
-                            "tool": prepared["tool"],
-                            "args": prepared["args"],
-                        },
-                        ensure_ascii=False,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ))
-                    note = str(
-                        result.data.get("note")
-                        or result.data.get("error")
-                        or "外部能力没有返回成功回执"
-                    )
-                    response = (
-                        "这个动作还没有执行："
-                        f"{note.rstrip('。')}。"
-                    )
+                    if not semantic_outcome or definitely_not_executed:
+                        signatures.discard(json.dumps(
+                            {"tool": prepared["tool"], "args": prepared["args"]},
+                            ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+                    if semantic_outcome:
+                        from .policy.semantic_delivery import failed_action_status
+                        response = failed_action_status(result.data)
+                    else:
+                        note = str(result.data.get("note") or result.data.get("error")
+                                   or "外部能力没有返回成功回执")
+                        response = "这个动作还没有执行：" + f"{note.rstrip('。')}。"
                     response_overridden = True
 
         record_reply_stage(ctx, "tool_result", before_tool, response,
                            violations=["tool_response_replaced"] if before_tool != response else [])
+        if before_tool != response and self.policy.online_decision_version in ("online_turn_decision_v6_semantic", "online_turn_decision_v7"):
+            from .policy.delivery_spans import publish_code_response
+            publish_code_response(ctx, response)
 
         # 6. 可选多步任务流；养老 Skill 需要等待/恢复时也可使用，不切换关系场景。
         flow = self.scene.task_flow()
@@ -740,6 +878,22 @@ class Engine:
                 response_overridden = True
         ctx.working_memory.pop("_consumed_tool_result_for_turn", None)
         ctx.working_memory.pop("_delivery_response_candidate_for_turn", None)
+        reviewed = self._review_clear_source_body(ctx, utterance, response, safety_prelude=safety_prelude)
+        if reviewed is not None:
+            reviewed_response, clear = reviewed
+            response_overridden = response_overridden or reviewed_response != response or not clear
+            response = reviewed_response
+            if not clear:
+                if learning_before_screening is not None:
+                    ctx.reasoning, ctx.alliance, ctx.formulation = deepcopy(learning_before_screening[:3])
+                # Preserve genuine transaction/task state, but do not record
+                # crisis or failed-review text as an observation intervention.
+                ctx.working_memory["intervention_delivery"] = {
+                    "status": "not_delivered", "turn_index": len(ctx.turns),
+                    "intervention_id": None, "reason": "body_safety_review"}
+                ctx.add_turn(utterance, response)
+                self._mark_interaction_started()
+                return response
 
         # 7. 写回上下文
         if self._state_reasoner is not None:
@@ -761,6 +915,20 @@ class Engine:
                     response,
                     response_overridden=response_overridden,
                 )
+        # Source provenance for a later observed-response hypothesis. It does
+        # not turn the model's interpretation into a fact. Code receipts,
+        # safety takeovers and failures cannot manufacture person evidence.
+        from .policy.delivery_spans import model_positions
+        from .risk.source_response import current_source_response
+        trace = ctx.working_memory.get("online_turn_decision") or {}
+        positions = model_positions(ctx, response)
+        if (trace.get("status") == "parsed" and trace.get("safety_concern") == "none"
+                and not ctx.working_memory.get("risk_flag")
+                and current_source_response(ctx, utterance, self.persona) is not None
+                and positions and all(origin is not None for origin in positions)
+                and all(trace["response_segments"][origin].get("kind") not in {"action", "safety_core"}
+                        for origin in set(positions))):
+            ctx.working_memory.setdefault("_person_response_deliveries", {})[str(len(ctx.turns))] = hashlib.sha256(response.encode()).hexdigest()
         ctx.add_turn(utterance, response)
         self._mark_interaction_started()
         return response
@@ -808,6 +976,8 @@ class Engine:
         elif self.persona is not persona:
             for name in type(persona).model_fields:
                 setattr(self.persona, name, deepcopy(getattr(persona, name)))
+            from .memory.preference_status import copy_preference_provenance
+            copy_preference_provenance(self.persona, persona)
 
     def _offline_queue_result(self, queue: OfflineSessionQueue, result: dict) -> dict:
         self._accept_offline_profile(queue.persona)
@@ -928,6 +1098,11 @@ class Engine:
             if not callable(update):
                 update = self.hypothesis_updater.diagnose
             updated = update(persona, ctx)
+            stage_summary = getattr(self.hypothesis_updater, "stage_audit_summary", None)
+            if callable(stage_summary):
+                summary = stage_summary()
+                if summary is not None:
+                    ctx.working_memory["_reflection_itemwise_audit"] = summary
             status = getattr(self.hypothesis_updater, "last_status", "ok")
             if status == "failed":
                 detail = getattr(self.hypothesis_updater, "last_error_detail", None)
@@ -1007,10 +1182,14 @@ class Engine:
                     if type(item) is int and item >= 0}
         indices = [index for index in range(len(ctx.turns)) if index not in excluded] if complete else []
         self.persona.pending_session = SessionCheckpointRecord(
+            premodel_safety_version=self.premodel_safety_version,
+            safety_delivery_version=self.safety_delivery_version,
+            safety_response_instruction_version=self.safety_response_instruction_version,
             session_id=ctx.session_id,
             scene_id=ctx.scene_id,
             updated_at=datetime.now().isoformat(timespec="seconds"),
-            turns=([SessionTurnSnapshot(user=ctx.turns[i].user, agent=ctx.turns[i].agent)
+            turns=([SessionTurnSnapshot(user=ctx.turns[i].user, agent=ctx.turns[i].agent,
+                        person_response_sha256=(ctx.working_memory.get("_person_response_deliveries") or {}).get(str(i)))
                     for i in indices] if complete else _checkpoint_turns(ctx)),
             cognitive_turns=cognitive_sources(self.persona, ctx) if complete else [],
             cognitive_session_at=(ctx.working_memory.get("_cognitive_session_at")
@@ -1186,13 +1365,819 @@ class Engine:
                 world = []
         ctx.working_memory["world_knowledge"] = world
 
-    def _handle_risk(self, ctx: EngineContext, signal: RiskSignal) -> str:
+    def _handle_risk(self, ctx: EngineContext, signal: RiskSignal, *, delivery_context=None,
+                     safety_prelude=None) -> str:
         """tier ≥2 接管:确定性安全回应(热线 12356 / 紧急 120 / 推向真人)。
 
         不过 LLM——安全底线不交给生成模型抽卡。通知照护人只做建议,
         自动通知需要真实通道 + 当次同意,接入口在此分流。
         """
+        if self.safety_delivery_version in (SOURCE_RESPONSE_V3, SOURCE_RESPONSE_V4, MINIMAL_RESPONSE_V1):
+            return self._compose_source_response(ctx, signal, delivery_context, safety_prelude=safety_prelude)
+        if self.safety_delivery_version == TASK_CONTEXT_V2:
+            return self._compose_safety_task(ctx, signal, delivery_context)
+        if delivery_context is not None:
+            current = capture_delivery_context(
+                ctx, ctx.working_memory.get("current_utterance"),
+                delivery_version=self.safety_delivery_version,
+                online_version=self.policy.online_decision_version, persona=self.persona,
+            )
+            if (current is not None and current == delivery_context
+                    and signal == semantic_safety_signal(
+                        ctx, ctx.working_memory.get("current_utterance"))):
+                response, segment_ids = render_safety_delivery(current)
+                ctx.working_memory["safety_delivery"] = {
+                    "version": self.safety_delivery_version, "turn_index": current.turn_index,
+                    "user_id": current.user_id, "session_id": current.session_id,
+                    "scene_id": current.scene_id, "status": "rendered",
+                    "source": current.source, "utterance_sha256": current.utterance_sha256,
+                    "quote_sha256": current.quote_sha256, "concern": current.concern,
+                    "subject": current.subject, "time": current.time, "urgency": current.urgency,
+                    "disposition": current.disposition, "reason": current.reason,
+                    "semantic_verified": False, "grants_permission": False,
+                    "delivery_only": True, "new_model_understanding_exposure": False,
+                    "segment_ids": list(segment_ids),
+                }
+                return response
         return safety_response(signal, self.persona)
+
+    def pending_safety_prelude(self, ctx, utterance):
+        """Prepare the existing immediate backstop without mutating a session.
+
+        Used while an accepted web input waits for the current physical call.
+        The transport must rebind the exact event when the turn is admitted;
+        this method grants neither a model call nor a delivered capability.
+        """
+        from .risk.premodel_task import make_prelude, response_only_context
+        if self.premodel_safety_version not in ("task_response_v1", "task_response_v2", "task_response_v3", "task_response_v4"):
+            return None
+        detached, profile = response_only_context(ctx, self.persona)
+        self._validate_context_mode(detached)
+        detached.working_memory["current_utterance"] = utterance
+        detached.working_memory["_online_decision_version"] = self.policy.online_decision_version
+        detached.working_memory["_premodel_safety_version"] = self.premodel_safety_version
+        for key in ("online_turn_decision", "_source_response_for_turn", "safety_review", "safety_delivery"):
+            detached.working_memory.pop(key, None)
+        signal = deepcopy(self._risk).assess(detached)
+        if signal is None or signal.tier < 2:
+            return None
+        protection = (self._compose_source_response(detached, signal, None, persona=profile)
+                      if self.safety_delivery_version in (SOURCE_RESPONSE_V3, SOURCE_RESPONSE_V4, MINIMAL_RESPONSE_V1)
+                      else self._compose_safety_task(detached, signal, None, persona=profile))
+        return make_prelude(detached, utterance, protection)
+
+    def _premodel_task_response(self, ctx, utterance, signal, safety_prelude):
+        """Preserve immediate protection, then one isolated response-only call."""
+        from .policy.fictional_context import fictional_conversation_history
+        from .risk.premodel_task import (DeliveredSafetyPrelude, make_prelude,
+                                         response_only_context, transfer_delivery_audits)
+        from .routing import ReplyModelRoute
+        protection = (self._compose_source_response(ctx, signal, None)
+                      if self.safety_delivery_version in (SOURCE_RESPONSE_V3, SOURCE_RESPONSE_V4, MINIMAL_RESPONSE_V1)
+                      else self._compose_safety_task(ctx, signal, None))
+        audit = {"version": self.premodel_safety_version, "turn_index": len(ctx.turns),
+                 "session_id": ctx.session_id,
+                 "status": "prelude_unavailable", "client_entered": False,
+                 "semantic_verified": False, "grants_permission": False}
+        ctx.working_memory["premodel_task"] = audit
+        delivered = False
+        delivered_prelude = None
+        original_turns = deepcopy(ctx.turns)
+        original_fictional_history = fictional_conversation_history(ctx)
+        inflight = object()
+        ctx.working_memory["_premodel_task_inflight"] = inflight
+        try:
+            if callable(safety_prelude):
+                try:
+                    expected = make_prelude(ctx, utterance, protection)
+                    event = dict(expected)
+                    audit["protection_sha256"] = expected["protection_sha256"]
+                    audit["utterance_sha256"] = expected["utterance_sha256"]
+                    delivered = safety_prelude(event) is True
+                    self._validate_context_mode(ctx)
+                    if (event != expected or make_prelude(ctx, utterance, protection) != expected
+                            or ctx.working_memory.get("current_utterance") != utterance
+                            or ctx.turns != original_turns
+                            or fictional_conversation_history(ctx) != original_fictional_history
+                            or ctx.working_memory.get("_premodel_task_inflight") is not inflight):
+                        delivered = False
+                        audit["status"] = "prelude_identity_changed"
+                    if delivered:
+                        delivered_prelude = DeliveredSafetyPrelude(**expected)
+                except Exception:
+                    audit["status"] = "prelude_failed"
+                    delivered = False
+            response = protection
+            if delivered:
+                audit["status"] = "prelude_emitted"
+                try:
+                    detached, profile = response_only_context(ctx, self.persona)
+                    scene = deepcopy(self.scene)
+                    # Fresh stateless policy; only the transport/fee client is shared.
+                    # No normal observers, learning, Skills or action commits run.
+                    policy = PolicyEngine(fast_llm=self.policy.fast_llm,
+                        online_decision_version=self.policy.online_decision_version,
+                        delivery_block=self.policy.delivery_block,
+                        safety_response_instruction_version=self.safety_response_instruction_version)
+                    returned = policy.respond(detached, scene, utterance, persona=profile,
+                                   available_tools=[], model_route=ReplyModelRoute(
+                                       "fast_integrated", ("premodel_response_only",)))
+                    audit["client_entered"] = (detached.working_memory.get("safety_response_instruction") or {}).get("passed_to_client") is True
+                    if self.premodel_safety_version in ("task_response_v2", "task_response_v3", "task_response_v4"):
+                        current_signal = semantic_safety_signal(detached, utterance)
+                        current_context = capture_delivery_context(
+                            detached, utterance, delivery_version=self.safety_delivery_version,
+                            online_version=policy.online_decision_version, persona=profile)
+                        response = self._compose_source_response(
+                            detached, current_signal, current_context, persona=profile,
+                            scene=scene, expected_return=returned,
+                            delivered_prelude=delivered_prelude)
+                    else:
+                        response = self._compose_safety_task(detached, signal, None, persona=profile, scene=scene)
+                    transfer_delivery_audits(detached, ctx)
+                    audit["status"] = "response_only_complete"
+                    if (ctx.working_memory.get("model_route") or {}).get("reply", {}).get("source") == "deterministic_fallback":
+                        audit["status"] = "response_only_failed"
+                except Exception:
+                    audit["status"] = "response_only_failed"
+                    ctx.working_memory["model_route"]["reply"] = {
+                        "tier": "deterministic_fallback", "source": "deterministic_fallback",
+                        "reasons": ["premodel_response_only_failed"],
+                        "configured_model": None, "effective_model": None}
+            if self.premodel_safety_version in ("task_response_v3", "task_response_v4") and delivered and response == protection:
+                response = "本次具体回应未能完成；若有现实中的紧急危险，请按先行提示及时求助。"
+                audit["duplicate_protection_avoided"] = True
+            ctx.add_turn(utterance, response)
+            self._mark_interaction_started()
+            return response
+        finally:
+            if ctx.working_memory.get("_premodel_task_inflight") is inflight:
+                ctx.working_memory.pop("_premodel_task_inflight", None)
+
+    def _compose_source_response(self, ctx, signal, delivery_context, *, persona=None,
+                                 scene=None, expected_return=None, safety_prelude=None,
+                                 delivered_prelude=None):
+        """Deliver a same-turn complete response through all normal guards.
+
+        V3 also requires an accepted assessment; V4 independently binds the
+        received body while preserving assessment rejection and isolation.
+        Neither path grants actions, learning or semantic validity. Missing provenance retains
+        deterministic protection. Already emitted preludes remain in transport
+        evidence; this function never rewrites their saved events.
+        """
+        from .risk.source_response import current_source_response, digest
+        from .policy.delivery_provenance import record_reply_stage
+        from .policy.online_decision import _guard_user_response
+        profile = self.persona if persona is None else persona
+        guard_scene = self.scene if scene is None else scene
+        utterance = ctx.working_memory.get("current_utterance")
+        current = capture_delivery_context(ctx, utterance,
+            delivery_version=self.safety_delivery_version,
+            online_version=self.policy.online_decision_version, persona=profile)
+        context_bound = (current is not None and current == delivery_context
+                         and signal == semantic_safety_signal(ctx, utterance))
+        protection, segment_ids = (render_safety_delivery(current) if context_bound
+                                   else render_unverified_safety())
+        minimal = self.safety_delivery_version == MINIMAL_RESPONSE_V1
+        independent_body = self.safety_delivery_version in (SOURCE_RESPONSE_V4, MINIMAL_RESPONSE_V1)
+        if independent_body and not context_bound:
+            from .risk.safety_delivery import render_unverified_safety_v2
+            protection, segment_ids = render_unverified_safety_v2()
+        if minimal and signal is None:
+            # Missing source is a generation failure, not evidence of danger.
+            protection, segment_ids = DETERMINISTIC_MODEL_FAILURE_REPLY, ()
+        frozen = current_source_response(ctx, utterance, profile)
+        trace = ctx.working_memory.get("online_turn_decision") or {}
+        from .risk.safety_review import current_review_evidence
+        review_evidence = current_review_evidence(ctx, utterance, persona=profile,
+            include_clear=self._reviews_clear_body()) if minimal else None
+        if review_evidence is not None:
+            from .risk.safety_delivery import render_review_protection
+            protection, segment_ids = (("", ()) if review_evidence["concern"] == "none"
+                                       else render_review_protection(review_evidence))
+        elif (minimal and self.policy.online_decision_version in ("online_turn_decision_v5_bound", "online_turn_decision_v6_semantic", "online_turn_decision_v7")
+              and signal is not None and frozen is None):
+            # The existing keyword backstop must be visible before its isolated
+            # model continuation. It is not a model semantic classification.
+            # A lexical backstop cannot establish subject, time or reality.
+            # Keep immediate protection conditional until the model has read
+            # the complete request; do not assert a personal current crisis.
+            if self.premodel_safety_version == "task_response_v4":
+                from .risk.safety_delivery import render_unverified_safety_v2
+                protection, segment_ids = render_unverified_safety_v2()
+            else:
+                protection, segment_ids = safety_response(signal, profile), ("keyword-safety-existing",)
+        assessment_current = context_bound or (
+            frozen is not None and trace.get("safety_concern") == "none"
+            and signal is None and delivery_context is None
+            and semantic_safety_signal(ctx, utterance) is None)
+        if independent_body and frozen is not None:
+            assessment_current = signal == semantic_safety_signal(ctx, utterance)
+        response = protection
+        status = "source_unavailable"
+        if (frozen is not None and assessment_current
+                and (not self._reviews_clear_body() or review_evidence is not None)
+                and (expected_return is None or expected_return == frozen.guarded)):
+            response_guard = getattr(guard_scene, "guard_response", None)
+            delivery_guard = getattr(guard_scene, "guard_delivery_response", None)
+            if callable(response_guard) and callable(delivery_guard):
+                # Recheck the original candidate, including completion claims
+                # that an earlier guard may have removed. No action parser runs.
+                if minimal:
+                    guarded, guard_audit = frozen.guarded, {"violations": [], "policy": "minimal_response_v1"}
+                else:
+                    guarded, guard_audit = _guard_user_response(frozen.guarded, ctx, utterance, profile)
+                record_reply_stage(ctx, "source_response_online_guard", frozen.guarded, guarded,
+                                   violations=guard_audit.get("violations", []))
+                before = guarded
+                guarded = response_guard(ctx, guarded)
+                record_reply_stage(ctx, "source_response_scene_guard", before, guarded,
+                    violations=["source_scene_replaced"] if before != guarded else [])
+                ctx.working_memory["_delivery_response_candidate_for_turn"] = frozen.raw
+                try:
+                    before = guarded
+                    guarded = delivery_guard(ctx, guarded, utterance, profile)
+                    record_reply_stage(ctx, "source_response_delivery_guard", before, guarded,
+                        violations=(ctx.working_memory.get("delivery_response_guard") or {}).get("violations", []))
+                finally:
+                    ctx.working_memory.pop("_delivery_response_candidate_for_turn", None)
+                if review_evidence is not None:
+                    from .policy.delivery_spans import model_positions
+                    body_positions = model_positions(ctx, guarded)
+                    body_segments = deepcopy(trace.get("response_segments"))
+                    if self.safety_review_version == "safety_review_v2":
+                        reviewed, protection, segment_ids = self._review_source_risk_v2(
+                            ctx, utterance, guarded, profile=profile, frozen=frozen,
+                            evidence=review_evidence, protection=protection, segment_ids=segment_ids,
+                            safety_prelude=safety_prelude, delivered_prelude=delivered_prelude)
+                    else:
+                        reviewed = self._review_source_risk_body(ctx, utterance, guarded,
+                            profile=profile, frozen=frozen, evidence=review_evidence,
+                            protection=protection, safety_prelude=safety_prelude,
+                            delivered_prelude=delivered_prelude)
+                    reviewed = self._remove_repeated_safety_core(
+                        ctx, guarded, reviewed, protection, body_positions, body_segments)
+                    reviewed = self._project_reviewed_ui_state(ctx, utterance, profile, reviewed,
+                                                               candidate=guarded, positions=body_positions)
+                    remaining_protection = self._undelivered_review_protection(ctx, protection)
+                    response = "\n".join(piece for piece in (remaining_protection, reviewed) if piece)
+                    if not response:
+                        response = "我在。" if "U-safe-contact" in segment_ids else DETERMINISTIC_MODEL_FAILURE_REPLY
+                    status = ("risk_reviewed_with_protection" if protection else "risk_reviewed_no_applicable_template") if reviewed else "risk_protection_only"
+                    record_reply_stage(ctx, "risk_body_review", guarded, response,
+                        violations=["risk_protection_required"])
+                elif guarded == frozen.raw:
+                    response, status, segment_ids = guarded, "source_bound_guarded", ()
+                elif minimal and signal is None:
+                    response, status, segment_ids = guarded, "guard_replaced_without_crisis_prelude", ()
+                else:
+                    # A finite guard rejection cannot certify that essential
+                    # safety content survived. Keep the existing safe fallback
+                    # plus the truthful guard explanation for this exceptional
+                    # path, instead of silently resurrecting the rejected body.
+                    response = protection + ("\n" + guarded if guarded else "")
+                    status = "guard_replaced_with_protection"
+            else:
+                status = "required_scene_guard_unavailable"
+        trace = ctx.working_memory.get("online_turn_decision") or {}
+        ctx.working_memory["safety_delivery"] = {
+            "version": self.safety_delivery_version, "turn_index": len(ctx.turns),
+            "user_id": ctx.user_id, "session_id": ctx.session_id, "scene_id": ctx.scene_id,
+            "status": status, "source": "online_model_semantics" if frozen else "unverified_backstop",
+            "utterance_sha256": digest(utterance) if type(utterance) is str else None,
+            "safety_context_status": "source_bound" if context_bound else
+                ("model_clear" if frozen and trace.get("safety_concern") == "none"
+                 and (trace.get("safety_assessment") or {}).get("disposition") == "clear" else "unverified"),
+            "concern": trace.get("safety_concern") if frozen else None,
+            "source_response": trace.get("source_response"),
+            "response_sha256": digest(response), "segment_ids": list(segment_ids),
+            "semantic_verified": False, "grants_permission": False,
+            "delivery_only": True, "new_model_understanding_exposure": False,
+        }
+        return response
+
+    def _respond_to_preference_invitation(self, ctx, utterance, raw, *,
+                                          learning_before_screening, safety_prelude):
+        """Commit a bound preference, then review only its actual model spans."""
+        from .memory.preference_dialogue import apply_preference_dialogue, judge_preference_confirmation
+        before_commit = judge_preference_confirmation(ctx, self.persona, utterance, client=self.confirm_judge_llm)
+        preference_reply = apply_preference_dialogue(
+            ctx, self.persona, utterance, store=self.store, response=raw, before_commit=before_commit)
+        if preference_reply is not None:
+            from .policy.delivery_provenance import record_reply_stage
+            record_reply_stage(ctx, "preference_confirmation_commit", raw, preference_reply)
+            if self.policy.online_decision_version in ("online_turn_decision_v5_bound", "online_turn_decision_v6_semantic", "online_turn_decision_v7"):
+                # The retained companion text has no authority to execute
+                # actions and must still pass normal truth/safety guards.
+                from .policy.delivery_spans import parse_action_projected
+                preference_reply, _ignored_action = parse_action_projected(ctx, preference_reply)
+                ctx.working_memory["_delivery_response_candidate_for_turn"] = preference_reply
+                for guard_name in ("guard_response", "guard_delivery_response"):
+                    guard = getattr(self.scene, guard_name, None)
+                    if callable(guard):
+                        before = preference_reply
+                        preference_reply = (guard(ctx, before) if guard_name == "guard_response"
+                                            else guard(ctx, before, utterance, self.persona))
+                        record_reply_stage(ctx, "preference_" + guard_name, before, preference_reply)
+            ctx.working_memory.pop("_delivery_response_candidate_for_turn", None)
+            reviewed = self._review_clear_source_body(
+                ctx, utterance, preference_reply, safety_prelude=safety_prelude)
+            if reviewed is not None:
+                preference_reply, clear = reviewed
+                if not clear and learning_before_screening is not None:
+                    ctx.reasoning, ctx.alliance, ctx.formulation = deepcopy(learning_before_screening[:3])
+            ctx.working_memory["intervention_delivery"] = {
+                "status": "not_delivered", "turn_index": len(ctx.turns),
+                "intervention_id": None, "reason": "owner_preference_confirmation",
+            }
+            ctx.add_turn(utterance, preference_reply)
+            from .memory.preference_recovery import complete_unclear_turn
+            complete_unclear_turn(self.persona, ctx)
+            self._mark_interaction_started()
+            return preference_reply
+        return None
+
+    def _reviews_clear_body(self):
+        return (self.policy.online_decision_version == "online_turn_decision_v7"
+                and self.safety_review_version == "safety_review_v2"
+                and self.safety_delivery_version == MINIMAL_RESPONSE_V1
+                and getattr(self.safety_review_llm, "role", None) == "safety_review")
+
+    def _review_clear_source_body(self, ctx, utterance, candidate, *, safety_prelude):
+        """Review final bound model spans without editing genuine code receipts.
+
+        Normal permission and transaction guards retain their authority. This
+        delivery-only check neither executes actions nor grants permissions.
+        Unconfigured previews and historical versions retain their old path.
+        """
+        if not self._reviews_clear_body():
+            return None
+        from .risk.source_response import current_source_response
+        from .risk.safety_review import current_review_evidence
+        from .policy.delivery_spans import model_positions, publish_positions
+        from .policy.delivery_provenance import record_reply_stage
+        trace = ctx.working_memory.get("online_turn_decision") or {}
+        if trace.get("status") != "parsed" or trace.get("safety_concern") != "none":
+            ctx.working_memory["safety_review"] = {
+                "version": "safety_review_v2", "turn_index": len(ctx.turns),
+                "status": "source_unavailable", "passed_to_client": False,
+                "actual_send_verified": False, "semantic_verified": False,
+                "grants_permission": False, "model_body_delivered": False}
+            return DETERMINISTIC_MODEL_FAILURE_REPLY, False
+        evidence = current_review_evidence(ctx, utterance, persona=self.persona, include_clear=True)
+        frozen = current_source_response(ctx, utterance, self.persona)
+        positions = model_positions(ctx, candidate)
+        current_trace = (trace.get("turn_index") == len(ctx.turns)
+                         and trace.get("owner_message_sha256") == hashlib.sha256(utterance.encode()).hexdigest())
+        if positions is not None and current_trace and all(origin is None for origin in positions):
+            return None
+        if positions is None or evidence is None or frozen is None:
+            ctx.working_memory["safety_review"] = {
+                "version": "safety_review_v2", "turn_index": len(ctx.turns),
+                "status": "source_unavailable", "passed_to_client": False,
+                "actual_send_verified": False, "semantic_verified": False,
+                "grants_permission": False, "model_body_delivered": False}
+            excluded = ctx.working_memory.setdefault("_sensitive_memory_excluded_turns", [])
+            if len(ctx.turns) not in excluded:
+                excluded.append(len(ctx.turns))
+            code = ("".join(char for char, origin in zip(candidate, positions) if origin is None)
+                    if positions is not None and current_trace else "")
+            response = DETERMINISTIC_MODEL_FAILURE_REPLY + ("\n" + code if code else "")
+            publish_positions(ctx, response, [None] * len(response))
+            record_reply_stage(ctx, "clear_body_review", candidate, response,
+                               violations=["body_safety_review_source_unavailable"])
+            return response, False
+        model_offsets = [index for index, origin in enumerate(positions) if origin is not None]
+        model_body = "".join(candidate[index] for index in model_offsets)
+        if not model_body.strip():
+            return None
+        body, protection, segment_ids = self._review_source_risk_v2(
+            ctx, utterance, model_body, profile=self.persona, frozen=frozen,
+            evidence=evidence, protection="", segment_ids=(),
+            safety_prelude=safety_prelude, delivered_prelude=None)
+        review = ctx.working_memory.get("safety_review") or {}
+        clear = (review.get("status") == "reviewed" and bool(body)
+                 and (review.get("risk_assessment") or {}).get("concern") == "none")
+        kept_offsets = set()
+        if body and review.get("status") == "reviewed":
+            offsets = self._retained_review_offsets(model_body, body, review)
+            if offsets is None:
+                review.update(status="source_changed", model_body_delivered=False)
+                body, clear = "", False
+            else:
+                kept_offsets = {model_offsets[index] for index in offsets}
+        selected_offsets = [index for index, origin in enumerate(positions)
+                            if origin is None or index in kept_offsets]
+        remainder = "".join(candidate[index] for index in selected_offsets)
+        prefix = self._undelivered_review_protection(ctx, protection)
+        if not prefix and not body:
+            prefix = "我在。" if "U-safe-contact" in segment_ids else DETERMINISTIC_MODEL_FAILURE_REPLY
+        separator = "\n" if prefix and remainder else ""
+        response = prefix + separator + remainder
+        publish_positions(ctx, response, [None] * (len(prefix) + len(separator))
+                          + [positions[index] for index in selected_offsets])
+        # This route already has a source-bound, parsed online "none". A failed
+        # body review withholds the generated reply, not the owner's original
+        # input. Preserve prior exclusions; a changed source or an actual new
+        # risk/uncertainty assessment can still exclude this turn from learning.
+        assessment = review.get("risk_assessment") or {}
+        if review.get("status") == "reviewed":
+            # The review can advise conditional protection yet explicitly find
+            # no owner signal. On this bound online-none path that distinction
+            # preserves the owner's words. Missing/invalid references do not.
+            protection_only = assessment.get("concern") == "uncertain" and review.get("owner_source_turns") == []
+            input_excluded = assessment.get("concern") != "none" and not protection_only
+        elif review.get("status") in {"review_failed", "unavailable"}:
+            input_excluded = bool(assessment) and assessment.get("concern") != "none"
+        else:
+            input_excluded = True
+        if input_excluded:
+            excluded = ctx.working_memory.setdefault("_sensitive_memory_excluded_turns", [])
+            if len(ctx.turns) not in excluded:
+                excluded.append(len(ctx.turns))
+        review["code_receipts_excluded_from_review"] = any(origin is None for origin in positions)
+        record_reply_stage(ctx, "clear_body_review", candidate, response,
+                           violations=[] if clear else ["body_safety_review"])
+        return self._project_reviewed_ui_state(ctx, utterance, self.persona, response), clear
+
+    @staticmethod
+    def _retained_review_offsets(candidate, body, review):
+        """Exact source positions of the reviewer's retained and edge-stripped text."""
+        from .risk.safety_review_v2 import response_sentences
+        retained = set(review.get("retained_sentence_ids", []))
+        offsets, offset = [], 0
+        for index, sentence in enumerate(response_sentences(candidate)):
+            if index in retained:
+                offsets.extend(range(offset, offset + len(sentence)))
+            offset += len(sentence)
+        text = "".join(candidate[i] for i in offsets)
+        start = len(text) - len(text.lstrip())
+        return offsets[start:start + len(body)] if text.strip() == body else None
+
+    def _project_reviewed_ui_state(self, ctx, utterance, profile, body, *, candidate=None, positions=None):
+        """Use the same transaction evidence after either route's safety review."""
+        from .memory.preference_status import preceding_failed_ui_state
+        from .policy.delivery_spans import model_positions, publish_positions
+        from .policy.delivery_provenance import record_reply_stage
+        from .policy.semantic_delivery import guard_semantic_delivery
+        review = ctx.working_memory.get("safety_review") or {}
+        trace = ctx.working_memory.get("online_turn_decision") or {}
+        if (not body or review.get("status") != "reviewed" or trace.get("version") != "online_turn_decision_v7"
+                or not any(row["kind"] == "preference_state" for row in trace.get("response_segments") or [])):
+            return body
+        failed_state = preceding_failed_ui_state(profile, ctx, utterance)
+        if not failed_state:
+            return body
+        if model_positions(ctx, body) is None and candidate is not None and positions is not None:
+            offsets = self._retained_review_offsets(candidate, body, review)
+            if offsets is not None:
+                publish_positions(ctx, body, [positions[i] for i in offsets])
+        projected = guard_semantic_delivery(ctx, body, utterance, profile, privacy_predicate=None,
+                                            failed_state=failed_state)
+        if projected != body:
+            record_reply_stage(ctx, "preference_ui_failure", body, projected,
+                               violations=["preference_status_from_failed_ui"])
+            review["model_body_delivered"] = any(
+                origin is not None for origin in model_positions(ctx, projected) or [])
+        return projected
+
+    @staticmethod
+    def _undelivered_review_protection(ctx, protection):
+        """Remove only the code-owned prefix acknowledged by this transport."""
+        review = ctx.working_memory.get("safety_review") or {}
+        count = review.get("delivered_protection_prefix_length")
+        if (review.get("turn_index") == len(ctx.turns)
+                and review.get("final_protection_sha256") == hashlib.sha256(protection.encode()).hexdigest()
+                and type(count) is int and 0 < count <= len(protection)
+                and review.get("prelude_status") in {"already_delivered", "delivered_after_review"}):
+            return protection[count:].lstrip("\n")
+        return protection
+
+    @staticmethod
+    def _remove_repeated_safety_core(ctx, candidate, reviewed, protection, positions, segments):
+        """Delete only exact repeated sentences from bound marked segments."""
+        from .risk.source_response import digest
+        from .risk.safety_review_v2 import response_sentences
+
+        trace = ctx.working_memory.get("online_turn_decision") or {}
+        if trace.get("version") != "online_turn_decision_v7" or not protection or not reviewed:
+            return reviewed
+        audit = {"status": "source_unavailable", "removed_segment_indexes": [],
+                 "semantic_verified": False, "grants_permission": False}
+        review = ctx.working_memory.get("safety_review") or {}
+        review["safety_core_deduplication"] = audit
+        if (type(segments) is not list or segments != trace.get("response_segments")
+                or positions is None or len(positions) != len(candidate)
+                or review.get("status") != "reviewed"
+                or review.get("turn_index") != len(ctx.turns)
+                or review.get("candidate_sha256") != digest(candidate)
+                or review.get("retained_body_sha256") != digest(reviewed)
+                or review.get("prelude_status") not in {"already_delivered", "delivered", "delivered_after_review"}
+                or review.get("final_protection_sha256") != digest(protection)
+                or (review.get("prelude_status") != "delivered_after_review"
+                    and review.get("protection_sha256") != digest(protection))):
+            return reviewed
+        marked = {index for index, row in enumerate(segments) if row.get("kind") == "safety_core"}
+        if not marked:
+            audit["status"] = "no_marked_segments"
+            return reviewed
+        # Review units may be comma clauses, but exact deduplication must not
+        # delete a shared condition and leave a different consequent behind.
+        # First recover the reviewer's exact retained offsets, then only remove
+        # an entire original sentence which survived review in full.
+        sentences = response_sentences(candidate)
+        retained = review.get("retained_sentence_ids")
+        if (type(retained) is not list
+                or any(type(index) is not int or not 0 <= index < len(sentences) for index in retained)
+                or retained != sorted(set(retained))):
+            return reviewed
+        retained_set = set(retained)
+        retained_offsets, offset = set(), 0
+        for index, unit in enumerate(sentences):
+            if index in retained_set:
+                retained_offsets.update(range(offset, offset + len(unit)))
+            offset += len(unit)
+        retained_text = "".join(candidate[index] for index in sorted(retained_offsets))
+        if retained_text.strip() != reviewed:
+            return reviewed
+        from .risk.safety_review import response_sentences as complete_sentences
+        covered = {sentence.strip() for sentence in complete_sentences(protection)}
+        removed_offsets, offset = set(), 0
+        removed = set()
+        for sentence in complete_sentences(candidate):
+            sentence_offsets = set(range(offset, offset + len(sentence)))
+            if sentence_offsets.issubset(retained_offsets):
+                origins = positions[offset:offset + len(sentence)]
+                source_indexes = {origin for char, origin in zip(sentence, origins) if not char.isspace()}
+                if (sentence.strip() in covered and source_indexes
+                        and source_indexes.issubset(marked)):
+                    removed.update(source_indexes)
+                    removed_offsets.update(sentence_offsets)
+            offset += len(sentence)
+        kept = sorted(retained_offsets - removed_offsets)
+        remaining = "".join(candidate[index] for index in kept)
+        result = remaining.strip()
+        if removed:
+            from .policy.delivery_spans import publish_positions
+            start = len(remaining) - len(remaining.lstrip())
+            publish_positions(ctx, result, [positions[i] for i in kept[start:start + len(result)]])
+        audit.update(status="removed" if removed else "no_proven_duplicates",
+                     removed_segment_indexes=sorted(removed), delivered_body_sha256=digest(result))
+        review["model_body_delivered"] = bool(result)
+        return result
+
+    def _review_source_risk_v2(self, ctx, utterance, candidate, *, profile, frozen,
+                               evidence, protection, segment_ids, safety_prelude,
+                               delivered_prelude):
+        """Verify model-only applicability before displaying a category template.
+
+        Keyword protection is immutable. Only this risk-only request may select
+        a different template; no receipt, action, memory or permission is added.
+        Waiting includes the product's pacing delay as well as model timeout.
+        """
+        from .risk.source_response import current_source_response
+        from .risk.safety_review import current_review_evidence
+        from .risk.safety_review_v2 import SAFETY_REVIEW_VERSION, review_safety_body
+        from .risk.safety_delivery import render_review_protection
+        from .risk.premodel_task import current_delivered_prelude, make_prelude
+        fallback = ("", protection, segment_ids)
+        previous = ctx.working_memory.get("safety_review")
+        if type(previous) is dict and previous.get("turn_index") == len(ctx.turns):
+            return fallback
+        audit = {"version": SAFETY_REVIEW_VERSION, "turn_index": len(ctx.turns),
+                 "status": "unavailable", "passed_to_client": False,
+                 "actual_send_verified": False, "semantic_verified": False,
+                 "grants_permission": False, "model_body_delivered": False}
+        ctx.working_memory["safety_review"] = audit
+        original_turns = deepcopy(ctx.turns)
+        inflight = object()
+        ctx.working_memory["_safety_review_inflight"] = inflight
+        try:
+            actual = current_delivered_prelude(ctx, utterance, delivered_prelude)
+            if delivered_prelude is not None and actual is None:
+                audit.update(status="prelude_invalid", prelude_status="source_changed")
+                return fallback
+            actual_text = actual["protection"] if actual is not None else None
+            event_hash = (hashlib.sha256(json.dumps(actual, sort_keys=True,
+                ensure_ascii=False).encode()).hexdigest() if actual is not None else None)
+            # The already-delivered conditional backstop remains valid while
+            # the reviewer judges applicability and the complete body. Different
+            # template wording is not evidence that the body must be discarded.
+            body, result = review_safety_body(ctx, utterance, candidate,
+                client=self.safety_review_llm, protection=actual_text, final_protection=protection,
+                evidence=evidence, persona=profile)
+            result.update(prelude_status="already_delivered" if actual is not None else "not_yet_delivered",
+                          prelude_event_sha256=event_hash, model_body_delivered=False)
+            ctx.working_memory["safety_review"] = result
+            if (ctx.turns != original_turns or current_source_response(ctx, utterance, profile) != frozen
+                    or current_review_evidence(ctx, utterance, persona=profile, include_clear=True) != evidence
+                    or ctx.working_memory.get("_safety_review_inflight") is not inflight
+                    or actual is not None and current_delivered_prelude(ctx, utterance, delivered_prelude) != actual):
+                result["status"] = "source_changed"
+                return fallback
+            selected, selected_ids = protection, segment_ids
+            if result["status"] in {"reviewed", "review_failed"} and "risk_assessment" in result:
+                assessment = result["risk_assessment"]
+                concern = assessment["concern"]
+                if concern == "none" or (concern == "other_danger" and body):
+                    selected, selected_ids = (actual_text, ("keyword-safety-existing",)) if actual_text else ("", ())
+                elif concern in {"uncertain", "other_danger"}:
+                    from .risk.safety_delivery import render_unverified_safety_v2
+                    safe_contact = concern == "other_danger" or result.get("risk_source_unbound", False)
+                    selected, selected_ids = ((actual_text, ("keyword-safety-existing",))
+                                              if actual_text else render_unverified_safety_v2(safe_contact=safe_contact))
+                else:
+                    selected, selected_ids = render_review_protection(assessment, reviewed_fields=True)
+                    if actual_text and selected != actual_text:
+                        selected = actual_text + "\n" + selected
+                        selected_ids = ("keyword-safety-existing", *selected_ids)
+            # An independently valid risk assessment still requires protection
+            # even when deletion validation failed and no body can be released.
+            if not body and "risk_assessment" not in result:
+                selected, selected_ids = protection, segment_ids
+            if selected and actual is None and callable(safety_prelude):
+                try:
+                    expected = make_prelude(ctx, utterance, selected)
+                    event = deepcopy(expected)
+                    acknowledged = safety_prelude(event) is True
+                    self._validate_context_mode(ctx)
+                    if (not acknowledged or event != expected or make_prelude(ctx, utterance, selected) != expected
+                            or ctx.turns != original_turns or current_source_response(ctx, utterance, profile) != frozen
+                            or current_review_evidence(ctx, utterance, persona=profile, include_clear=True) != evidence
+                            or ctx.working_memory.get("_safety_review_inflight") is not inflight):
+                        result.update(status="prelude_failed", prelude_status="failed")
+                        body = ""
+                    else:
+                        result["prelude_status"] = "delivered_after_review"
+                        result["delivered_protection_prefix_length"] = len(selected)
+                        result["prelude_event_sha256"] = hashlib.sha256(json.dumps(expected, sort_keys=True,
+                            ensure_ascii=False).encode()).hexdigest()
+                except Exception:
+                    result.update(status="prelude_failed", prelude_status="failed")
+                    body = ""
+            if actual_text and (selected == actual_text or selected.startswith(actual_text + "\n")):
+                result["delivered_protection_prefix_length"] = len(actual_text)
+            result.update(final_protection_sha256=hashlib.sha256(selected.encode()).hexdigest() if selected else None,
+                          model_body_delivered=bool(body))
+            return body, selected, selected_ids
+        finally:
+            if ctx.working_memory.get("_safety_review_inflight") is inflight:
+                ctx.working_memory.pop("_safety_review_inflight", None)
+
+    def _review_source_risk_body(self, ctx, utterance, candidate, *, profile, frozen,
+                                evidence, protection, safety_prelude,
+                                delivered_prelude):
+        """Emit protection before the sole risk-only request, then retain a subset."""
+        from .risk.source_response import current_source_response
+        from .risk.safety_review import (SAFETY_REVIEW_VERSION, current_review_evidence,
+                                         review_safety_body)
+        from .risk.premodel_task import (DeliveredSafetyPrelude, current_delivered_prelude,
+                                         make_prelude)
+        previous = ctx.working_memory.get("safety_review")
+        if type(previous) is dict and previous.get("turn_index") == len(ctx.turns):
+            # No second attempt if this internal composer is entered again.
+            return ""
+        audit = {"version": SAFETY_REVIEW_VERSION, "turn_index": len(ctx.turns),
+                 "status": "prelude_unavailable", "passed_to_client": False,
+                 "actual_send_verified": False, "semantic_verified": False,
+                 "grants_permission": False}
+        ctx.working_memory["safety_review"] = audit
+        original_turns = deepcopy(ctx.turns)
+        inflight = object()
+        ctx.working_memory["_safety_review_inflight"] = inflight
+        try:
+            receipt = delivered_prelude
+            actual = current_delivered_prelude(ctx, utterance, receipt)
+            delivered = actual is not None
+            audit["prelude_status"] = "already_delivered" if delivered else "unavailable"
+            if receipt is not None and not delivered:
+                audit.update(status="prelude_invalid", prelude_status="source_changed")
+                return ""
+            if not delivered and callable(safety_prelude):
+                try:
+                    expected = make_prelude(ctx, utterance, protection)
+                    event = deepcopy(expected)
+                    delivered = safety_prelude(event) is True
+                    self._validate_context_mode(ctx)
+                    delivered = bool(delivered and event == expected
+                        and make_prelude(ctx, utterance, protection) == expected)
+                    if delivered:
+                        receipt = DeliveredSafetyPrelude(**expected)
+                        actual = current_delivered_prelude(ctx, utterance, receipt)
+                        delivered = actual is not None
+                    audit["prelude_status"] = "delivered" if delivered else "failed"
+                except Exception:
+                    delivered = False
+                    audit["prelude_status"] = "failed"
+            if (ctx.turns != original_turns
+                    or current_source_response(ctx, utterance, profile) != frozen
+                    or current_review_evidence(ctx, utterance, persona=profile) != evidence
+                    or ctx.working_memory.get("_safety_review_inflight") is not inflight):
+                delivered = False
+                audit.update(status="source_changed", prelude_status="source_changed")
+            if not delivered:
+                return ""
+            # A keyword prelude can differ from the protection warranted by a
+            # later model label. Pass exactly what the callback displayed;
+            # planned final protection is a separate, explicitly future field.
+            actual_text = actual["protection"]
+            event_hash = hashlib.sha256(
+                json.dumps(actual, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            if actual_text != protection:
+                # This UI admits one acknowledged prelude per turn. Do not
+                # delay newly necessary protection behind another model call,
+                # and do not release the unreviewed body. The caller returns
+                # the new protection immediately as the final response.
+                audit.update(status="additional_protection_required",
+                    reason="new_protection_not_yet_delivered",
+                    protection_sha256=actual["protection_sha256"],
+                    final_protection_sha256=hashlib.sha256(protection.encode()).hexdigest(),
+                    prelude_event_sha256=event_hash, review_call_count=0,
+                    model_body_delivered=False)
+                return ""
+            body, result = review_safety_body(ctx, utterance, candidate,
+                client=self.safety_review_llm, protection=actual_text,
+                final_protection=protection, evidence=evidence, persona=profile)
+            result["prelude_status"] = audit["prelude_status"]
+            result["prelude_event_sha256"] = event_hash
+            if current_delivered_prelude(ctx, utterance, receipt) != actual:
+                result["status"] = "source_changed"
+                body = ""
+            ctx.working_memory["safety_review"] = result
+            return body
+        finally:
+            if ctx.working_memory.get("_safety_review_inflight") is inflight:
+                ctx.working_memory.pop("_safety_review_inflight", None)
+
+    def _compose_safety_task(self, ctx, signal, delivery_context, *, persona=None, scene=None):
+        """Compose independently bounded task content; never execute its plan.
+
+        Same-call model labels and exact quotes are not semantic proof. The
+        existing scene guards are finite backstops, not a completeness judge.
+        """
+        from .risk.safety_task import current_task_projection, digest
+        from .policy.delivery_provenance import record_reply_stage
+        profile = self.persona if persona is None else persona
+        guard_scene = self.scene if scene is None else scene
+        utterance = ctx.working_memory.get("current_utterance")
+        current = capture_delivery_context(ctx, utterance,
+            delivery_version=self.safety_delivery_version,
+            online_version=self.policy.online_decision_version, persona=profile)
+        verified_context = (current is not None and current == delivery_context
+                            and signal == semantic_safety_signal(ctx, utterance))
+        if verified_context:
+            protection, segment_ids = render_safety_delivery(current)
+        else:
+            protection, segment_ids = render_unverified_safety()
+        task = current_task_projection(ctx, utterance, profile)
+        task_status, task_text = "missing_or_rejected", ""
+        if task is not None:
+            from .policy.online_decision import _guard_user_response
+            # Only the projected user-visible slice enters the existing guards.
+            # Do not restore the original body or use communication_plan text.
+            guarded, audit = _guard_user_response(task.text, ctx, utterance, profile)
+            record_reply_stage(ctx, "safety_task_online_guard", task.text, guarded,
+                               violations=audit.get("violations", []))
+            response_guard = getattr(guard_scene, "guard_response", None)
+            delivery_guard = getattr(guard_scene, "guard_delivery_response", None)
+            if callable(response_guard) and callable(delivery_guard):
+                before = guarded
+                guarded = response_guard(ctx, guarded)
+                record_reply_stage(ctx, "safety_task_scene_guard", before, guarded,
+                                   violations=["task_scene_replaced"] if before != guarded else [])
+                ctx.working_memory["_delivery_response_candidate_for_turn"] = task.text
+                try:
+                    before = guarded
+                    guarded = delivery_guard(ctx, guarded, utterance, profile)
+                    record_reply_stage(ctx, "safety_task_delivery_guard", before, guarded,
+                        violations=(ctx.working_memory.get("delivery_response_guard") or {}).get("violations", []))
+                finally:
+                    ctx.working_memory.pop("_delivery_response_candidate_for_turn", None)
+                if guarded == task.text:
+                    task_status, task_text = "included_unverified_semantics", task.text
+                else:
+                    task_status = "rejected_by_existing_guard"
+            else:
+                task_status = "required_scene_guard_unavailable"
+        response = protection + ("\n" + task_text if task_text else "")
+        trace = ctx.working_memory.get("online_turn_decision") or {}
+        ctx.working_memory["safety_delivery"] = {
+            "version": TASK_CONTEXT_V2, "turn_index": len(ctx.turns),
+            "user_id": ctx.user_id, "session_id": ctx.session_id, "scene_id": ctx.scene_id,
+            "status": "composed", "source": "online_model_semantics" if trace.get("status") == "parsed" else "unverified_backstop",
+            "utterance_sha256": digest(utterance) if type(utterance) is str else None,
+            "safety_context_status": "source_bound" if verified_context else "unverified",
+            "concern": current.concern if verified_context else None,
+            "subject": current.subject if verified_context else "unverified",
+            "time": current.time if verified_context else "unverified",
+            "urgency": current.urgency if verified_context else "unverified",
+            "task_status": task_status, "task_projection": trace.get("task_projection"),
+            "task_response_sha256": digest(task_text) if task_text else None,
+            "response_sha256": digest(response), "segment_ids": list(segment_ids),
+            "semantic_verified": False, "grants_permission": False,
+            "delivery_only": True, "new_model_understanding_exposure": False,
+        }
+        return response
 
     def _record_risk(self, ctx: EngineContext, signal: RiskSignal) -> None:
         """历史/模型分流事件落账；不据此断言主体或自动推导纵向变化。"""

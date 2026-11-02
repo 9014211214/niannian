@@ -189,6 +189,28 @@ class ExplicitSharingService:
         source, contact = self._selection(context, row["source"]["turn_id"], row["recipient"]["id"])
         if source != row["source"] or contact != row["recipient"]:
             raise ValueError("原话或收件人已变化，原批准不能沿用。")
+        selection = row.get("selection")
+        message = self._selected_message(source, selection)
+        preview = {key: row[key] for key in ("source", "recipient", "channel", "message", "run_id", "session_id")}
+        if selection is not None:
+            preview["selection"] = selection
+        if message != row["message"] or _sha(preview) != row["preview_sha256"]:
+            raise ValueError("选定内容或预览已变化，请重新核对并批准。")
+
+    @staticmethod
+    def _selected_message(source, selection):
+        """An owner-selected exact span; no extraction, paraphrase or inference."""
+        if selection is None:
+            return source["text"]
+        if (type(selection) is not dict or set(selection) != {"start", "end", "unit"}
+                or selection["unit"] != "unicode_codepoint"
+                or type(selection["start"]) is not int or type(selection["end"]) is not int
+                or not 0 <= selection["start"] < selection["end"] <= len(source["text"])):
+            raise ValueError("请在当前原话中选定一个完整连续片段。")
+        message = source["text"][selection["start"]:selection["end"]]
+        if not message.strip():
+            raise ValueError("选定内容不能为空。")
+        return message
 
     def view(self, context):
         if not isinstance(context, SharingContext) or context.owner_id != self.owner_id:
@@ -208,7 +230,7 @@ class ExplicitSharingService:
 
     def action(self, context, action, payload, *, actor, read_only=False, current_context=None):
         self._authorize(context, actor, read_only, reduction=action == "revoke")
-        allowed = {"prepare": {"source_id", "contact_id"}, "approve": {"id", "preview_sha256", "confirmed"},
+        allowed = {"prepare": {"source_id", "contact_id", "selection"}, "approve": {"id", "preview_sha256", "confirmed"},
                    "send": {"id", "preview_sha256"}, "revoke": {"id"}}
         if (not isinstance(action, str) or action not in allowed or not isinstance(payload, dict)
                 or set(payload) - allowed[action] - {"request_id"}):
@@ -228,13 +250,17 @@ class ExplicitSharingService:
                     if any(row["status"] in _UNCERTAIN for row in self._rows()):
                         raise ValueError("已有转达结果未知；禁止换编号重新发送。")
                     source, recipient = self._selection(context, payload.get("source_id"), payload.get("contact_id"))
+                    selection = payload.get("selection")
+                    message = self._selected_message(source, selection)
                     for row in self._rows():
                         if row["run_id"] == context.run_id and row["status"] in {"draft", "approved"}:
                             row.update(status="superseded", reason="new_selection")
                             self._put(row)
                     preview = {"source": source, "recipient": recipient, "channel": self.adapter.channel,
-                               "message": source["text"], "run_id": context.run_id,
+                               "message": message, "run_id": context.run_id,
                                "session_id": context.session_id}
+                    if selection is not None:
+                        preview["selection"] = deepcopy(selection)
                     row = {"id": "share_" + secrets.token_hex(12), "owner_id": self.owner_id,
                            **preview, "preview_sha256": _sha(preview), "epoch": self._epoch,
                            "status": "draft", "created_at": self._now().isoformat(),

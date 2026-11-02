@@ -17,12 +17,11 @@ def digest(value):
     return sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def test_exact_reviewed_wire_and_unchanged_full_local_schema():
-    # These hashes identify the approved candidate and the independently
-    # frozen original contract, not a schema read from local experiment files.
+def test_current_t4_wire_and_full_local_schema():
+    # New contract snapshots, separate from all archived experiment schemas.
     assert reflection_json.REFLECTION_JSON_PROTOCOL_VERSION == "reflection_json_schema_v2"
-    assert digest(reflection_json.reflection_wire_schema()) == "15f3553324acf254b4bd184db3eaec072084e238ddbde3b61a57412421022012"
-    assert digest(reflection_response_schema()) == "b5ea411892d9e12c442e8bfafb0b762a036c5aaeb63e3646e083108a704cde9f"
+    assert digest(reflection_json.reflection_wire_schema()) == "3d3f58c2b16e78d7fb48f3940b85945fa4b5ebc849b7033b18eee99e5d00455a"
+    assert digest(reflection_response_schema()) == "6756842c4970ef783b7c4d677ab8473ed3e4f4726778ead633a7b93f019dad4b"
     format_ = reflection_json.reflection_request_format()
     assert format_["type"] == "json_schema"
     assert format_["json_schema"]["name"] == "aria_reflection_v1" and format_["json_schema"]["strict"] is True
@@ -32,7 +31,7 @@ def test_only_atomic_subgraph_changes_and_every_call_is_fresh():
     full = reflection_response_schema()
     original_full = deepcopy(full)
     original_wire = reflection_json._project_wire_keywords(full)
-    assert digest(original_wire) == "50fc2d963a2c901ce27dd027650609dbf3854fe2c28917a429205d17a184b9a4"
+    assert digest(original_wire) == "12cb00e1ed018264833c2de9d7bd8dd7f3282787eaf9af93001a11856c9b31a8"
     expected_old = deepcopy(original_wire)
     reduced = reflection_json._factor_atomic_outcomes(original_wire)
     restored = deepcopy(reduced)
@@ -45,7 +44,7 @@ def test_only_atomic_subgraph_changes_and_every_call_is_fresh():
     assert restored == original_wire == expected_old
     assert full == original_full == reflection_response_schema()
     reduced["$defs"].clear()
-    assert digest(reflection_json.reflection_wire_schema()) == "15f3553324acf254b4bd184db3eaec072084e238ddbde3b61a57412421022012"
+    assert digest(reflection_json.reflection_wire_schema()) == "3d3f58c2b16e78d7fb48f3940b85945fa4b5ebc849b7033b18eee99e5d00455a"
 
 
 @pytest.mark.parametrize("mutation", ["required", "open_object", "common_text", "nullable_shape",

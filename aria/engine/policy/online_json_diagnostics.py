@@ -33,6 +33,10 @@ def _fields():
             visit(schema["items"])
     for version in ONLINE_DECISION_VERSIONS:
         visit(online_decision_tool_spec(version)["function"]["parameters"])
+    from .online_decision import EVIDENCE_DECISION_VERSIONS
+    for version in EVIDENCE_DECISION_VERSIONS:
+        visit(online_decision_tool_spec(version, require_preference_control=True,
+                                      require_task_projection=True)["function"]["parameters"])
     return frozenset(fields)
 
 
@@ -61,7 +65,7 @@ def sanitize_online_shape_diagnostic(value):
     return result
 
 
-def online_shape_diagnostic(raw, version):
+def online_shape_diagnostic(raw, version, *, require_preference_control=False, require_task_projection=False):
     """Report violated field constraints without echoing any model field value.
 
     Object paths come exclusively from the trusted schema, including for
@@ -88,7 +92,9 @@ def online_shape_diagnostic(raw, version):
             return {"kind": "duplicate_key", "issues": []}
         if version not in ONLINE_DECISION_VERSIONS:
             return {"kind": "unsupported_schema", "issues": []}
-        schema = online_decision_tool_spec(version)["function"]["parameters"]
+        schema = online_decision_tool_spec(
+            version, require_preference_control=require_preference_control, require_task_projection=require_task_projection,
+        )["function"]["parameters"]
         result = {"kind": "schema", "issues": [], "truncated": False}
 
         def typename(value):

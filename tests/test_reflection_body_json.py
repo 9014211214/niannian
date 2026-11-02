@@ -39,12 +39,14 @@ def run(values):
     return updater, client, persona
 
 
-def test_default_body_has_full_schema_and_applies_original_evidence_transaction():
+def test_default_body_has_full_schema_and_retains_review_without_unqualified_evidence():
     client = create_minimal_clients(model_calls_enabled=True, api_key="local-fixture").reflection
     assert client.reflection_return_format == "body_json"
     updater, calls, persona = run([payload()])
-    assert updater.last_status == "ok" and len(persona.person_hypotheses) == 1
-    assert persona.person_hypotheses[0].status == "candidate"
+    assert updater.last_status == "ok" and not persona.person_hypotheses
+    assert len(persona.evidence_review_ledger) == 1
+    assert updater.last_proposal_results[0]["status"] == "deferred"
+    assert updater.last_proposal_results[0]["reason"] == "event_identity_unknown_no_update"
     assert len(calls.calls) == 1 and updater.last_format_correction_count == 0
     prompt = calls.calls[0][0]["content"]
     assert json.dumps(reflection_json.reflection_response_schema(), ensure_ascii=False, sort_keys=True) in prompt

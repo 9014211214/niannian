@@ -502,3 +502,26 @@ def test_old_profiles_load_with_empty_queue_defaults():
     persona = PersonaProfile.model_validate({"user_id": "old"})
     assert persona.offline_sessions == [] and persona.offline_session_audit == []
     assert OfflineSessionRecord.model_fields["recovery_mode"].default == "text_only"
+
+
+@pytest.mark.parametrize("boundary", ["valid", "changed", "invalid", "excluded"])
+def test_person_interaction_delivery_provenance_survives_only_exact_private_safe_source(boundary):
+    import hashlib
+    queue, _, _ = setup()
+    ctx = context()
+    digest = hashlib.sha256(ctx.turns[0].agent.encode("utf-8")).hexdigest()
+    ctx.working_memory["_person_response_deliveries"] = {"0": digest}
+    if boundary == "changed":
+        ctx.turns[0].agent = "替换后的代码回执。"
+    elif boundary == "invalid":
+        ctx.working_memory["_person_response_deliveries"]["0"] = "invalid"
+    elif boundary == "excluded":
+        ctx.working_memory["_sensitive_memory_excluded_turns"] = [0]
+    assert queue.enqueue(ctx)["status"] == "queued"
+    job = queue.persona.offline_sessions[0]
+    assert len(job.turns) == 3
+    recovered = queue._context(queue.persona, job)
+    assert recovered.working_memory["_person_response_deliveries"] == ({"0": digest} if boundary == "valid" else {})
+    if boundary == "excluded":
+        assert recovered.turns[0].user == recovered.turns[0].agent == ""
+        assert recovered.turns[1].user == ctx.turns[1].user

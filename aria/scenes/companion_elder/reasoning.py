@@ -183,6 +183,11 @@ _HUMAN_REOPEN_TARGET = re.compile(
 )
 _QUESTION_SENTENCE = re.compile(r"[^。！!？?]*[？?]")
 _OBSERVATION_NON_WORD = re.compile(r"[^\w\u3400-\u9fff]+", re.UNICODE)
+_SEMANTIC_DELIVERY_VERSIONS = {
+    "online_turn_decision_v3", "online_turn_decision_v4_evidence",
+    "online_turn_decision_v5_bound", "online_turn_decision_v6_semantic",
+    "online_turn_decision_v7",
+}
 
 _BEHAVIOR_WITHDRAWAL_SIGNALS = {
     "initiative_frequency", "conversation_duration", "social_participation",
@@ -373,7 +378,7 @@ class ElderStateReasoner:
         planned_mode = plan.mode if plan is not None else "none"
         planned_question = plan.question.strip() if plan is not None else ""
         online_trace = ctx.working_memory.get("online_turn_decision") or {}
-        semantic_v3 = ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v3"
+        semantic_delivery = ctx.working_memory.get("_online_decision_version") in _SEMANTIC_DELIVERY_VERSIONS
         delivery_guard = online_trace.get("delivery_guard") or {}
         task_communication = delivery_guard.get("task_communication") or {}
         task_question_executed = bool(
@@ -385,7 +390,7 @@ class ElderStateReasoner:
         # claim that the rejected psychological question was asked after all.
         executed_question = (
             ""
-            if planned_mode == "wait" and task_question_executed and not semantic_v3
+            if planned_mode == "wait" and task_question_executed and not semantic_delivery
             else _first_question(response)
         )
         if executed_question:
@@ -448,6 +453,7 @@ class ElderStateReasoner:
             ctx.working_memory.get("online_turn_decision") or {}
         ).get("delivery_guard") or {}
         online_trace = ctx.working_memory.get("online_turn_decision") or {}
+        online_version = ctx.working_memory.get("_online_decision_version")
         execution = (
             ctx.reasoning.observation_history[-1]
             if ctx.reasoning.observation_history
@@ -475,8 +481,8 @@ class ElderStateReasoner:
             reason = "delivery_guard_replaced_response"
         elif "requested_draft_not_delivered" in guard.get("task_delivery_diagnostics", []):
             reason = "requested_draft_not_delivered"
-        elif ctx.working_memory.get("_online_decision_version") == "online_turn_decision_v3" and (
-            online_trace.get("version") != "online_turn_decision_v3"
+        elif online_version in _SEMANTIC_DELIVERY_VERSIONS and (
+            online_trace.get("version") != online_version
             or online_trace.get("status") != "parsed"
             or online_trace.get("turn_index") != len(ctx.turns)
             or online_trace.get("requested_intervention_id") != selected.id
@@ -487,7 +493,7 @@ class ElderStateReasoner:
         ):
             reason = "unbound_final_strategy_delivery"
         elif (
-            ctx.working_memory.get("_online_decision_version") != "online_turn_decision_v3"
+            online_version not in _SEMANTIC_DELIVERY_VERSIONS
             and
             ctx.reasoning.observation_plan is not None
             and ctx.reasoning.observation_plan.mode == "ask"
@@ -540,14 +546,21 @@ class ElderStateReasoner:
         evidence: list[ObservationEvidence],
     ) -> None:
         state = ctx.reasoning
+        lexical_fallback = ctx.working_memory.get("_online_decision_version") != "online_turn_decision_v7"
+        # Historical outcome records remain available, but a phrase matcher
+        # cannot declare that the current owner has or has not reopened a route.
+        decision_utterance = utterance if lexical_fallback else ""
         state.evidence.extend(evidence)
         state.evidence = state.evidence[-60:]              # 会话证据有界，长期趋势由上游聚合
-        state.hypotheses = self._infer_hypotheses(state.evidence, persona, utterance)
+        state.hypotheses = self._infer_hypotheses(
+            state.evidence, persona, utterance,
+            lexical_fallback=lexical_fallback,
+        )
         # 先让当前证据、人物假设与已验证结果完成一次有界排序，再决定这一拍
         # 是否还值得追问。否则通用观察题会先锁死 prompt，覆盖已经形成的
         # 人物化路线或“连续失败后先停”的结果学习。
         state.candidates = self._build_candidates(
-            state.hypotheses, persona, utterance
+            state.hypotheses, persona, decision_utterance, lexical_fallback=lexical_fallback,
         )
         state.selected = max(state.candidates, key=lambda c: c.score, default=None)
         selected_id = state.selected.id if state.selected is not None else ""
@@ -555,12 +568,12 @@ class ElderStateReasoner:
             utterance, evidence, len(ctx.turns)
         )
         person_supported = _person_supports_route(
-            persona, state.candidates, selected_id
+            persona, state.candidates, selected_id, lexical_fallback=lexical_fallback,
         )
         cooldown_routes = _relevant_verified_cooldowns(
-            persona, state.candidates, utterance
+            persona, state.candidates, decision_utterance
         )
-        current_user_reopened = any(
+        current_user_reopened = lexical_fallback and any(
             _current_explicitly_reopens(utterance, intervention_id)
             for intervention_id in _OUTCOME_ADAPTIVE_INTERVENTIONS
         )
@@ -598,7 +611,7 @@ class ElderStateReasoner:
                 persona,
                 state.selected,
                 state.candidates,
-                utterance,
+                decision_utterance,
                 current_physical_source=current_physical_source,
             )
         )
@@ -681,9 +694,19 @@ class ElderStateReasoner:
         evidence: list[ObservationEvidence],
         persona: Optional[PersonaProfile],
         utterance: str,
+        *,
+        lexical_fallback: bool = True,
     ) -> list[WorkingHypothesis]:
         hypotheses: list[WorkingHypothesis] = []
         recent = evidence[-30:]
+
+        def text_score(words, score, hypothesis_id):
+            # Current online decisions already supply grounded semantic
+            # candidates. Everyday vocabulary is not a second classifier.
+            # Keep the archived fallback only for explicit older protocols.
+            if not lexical_fallback:
+                return _semantic_score(recent, hypothesis_id)
+            return _text_semantic_score(utterance, words, score, recent, hypothesis_id)
         active_cbt_claims = (
             [
                 item.claim
@@ -696,7 +719,7 @@ class ElderStateReasoner:
         semantic_hidden, semantic_hidden_ids, semantic_hidden_counter = (
             _semantic_score(recent, "concealed_distress")
         )
-        if _has_current_context_counter(utterance, "concealed_distress"):
+        if lexical_fallback and _has_current_context_counter(utterance, "concealed_distress"):
             semantic_hidden = 0.0
             semantic_hidden_counter.extend(
                 _current_text_ids(utterance, recent)
@@ -721,7 +744,7 @@ class ElderStateReasoner:
                 if _positive_signal(item):
                     hidden_score += 0.12 * item.weight
                     hidden_ids.append(item.id)
-        if persona and any(
+        if lexical_fallback and persona and any(
             "压抑" in p or "报喜不报忧" in p
             for p in [
                 *persona.case_conceptualization.core_patterns,
@@ -737,8 +760,8 @@ class ElderStateReasoner:
         )
 
         withdrawal_score, withdrawal_ids, withdrawal_counter = (
-            _text_semantic_score(
-                utterance, _WITHDRAWAL_WORDS, 0.34, recent,
+            text_score(
+                _WITHDRAWAL_WORDS, 0.34,
                 "reduced_life_engagement",
             )
         )
@@ -776,10 +799,10 @@ class ElderStateReasoner:
             counter_ids=counter_ids,
         )
 
-        role_score, role_ids, role_counter = _text_semantic_score(
-            utterance, _ROLE_LOSS_WORDS, 0.52, recent, "loss_of_role"
+        role_score, role_ids, role_counter = text_score(
+            _ROLE_LOSS_WORDS, 0.52, "loss_of_role"
         )
-        if persona and any(
+        if lexical_fallback and persona and any(
             "负担" in belief or "没用" in belief
             or "不再被需要" in belief
             or "角色" in belief
@@ -796,8 +819,8 @@ class ElderStateReasoner:
             counter_ids=role_counter,
         )
 
-        social_score, social_ids, social_counter = _text_semantic_score(
-            utterance, _SOCIAL_WORDS, 0.30, recent, "social_disconnection"
+        social_score, social_ids, social_counter = text_score(
+            _SOCIAL_WORDS, 0.30, "social_disconnection"
         )
         for item in recent:
             if item.modality == "behavioral" and item.signal in {
@@ -814,7 +837,7 @@ class ElderStateReasoner:
             counter_ids=social_counter,
         )
 
-        if current_self_physical_hit(utterance, _PHYSICAL_WORDS):
+        if lexical_fallback and current_self_physical_hit(utterance, _PHYSICAL_WORDS):
             physical_score, physical_ids, physical_counter = (
                 _text_semantic_score(
                     utterance, _PHYSICAL_WORDS, 0.48, recent,
@@ -839,7 +862,7 @@ class ElderStateReasoner:
                     current_semantic, "physical_discomfort"
                 )
             )
-            if any(word in utterance for word in _PHYSICAL_WORDS):
+            if lexical_fallback and any(word in utterance for word in _PHYSICAL_WORDS):
                 physical_counter.extend(
                     _current_text_ids(utterance, recent)
                 )
@@ -859,8 +882,8 @@ class ElderStateReasoner:
         )
 
         autonomy_score, autonomy_ids, autonomy_counter = (
-            _text_semantic_score(
-                utterance, _AUTONOMY_WORDS, 0.46, recent,
+            text_score(
+                _AUTONOMY_WORDS, 0.46,
                 "autonomy_threat",
             )
         )
@@ -871,8 +894,8 @@ class ElderStateReasoner:
             counter_ids=autonomy_counter,
         )
 
-        grief_score, grief_ids, grief_counter = _text_semantic_score(
-            utterance, _GRIEF_WORDS, 0.44, recent, "grief_or_transition"
+        grief_score, grief_ids, grief_counter = text_score(
+            _GRIEF_WORDS, 0.44, "grief_or_transition"
         )
         self._maybe_add(
             hypotheses, "grief_or_transition", "可能正在经历离别、失落或生活转折",
@@ -889,6 +912,8 @@ class ElderStateReasoner:
         hypotheses: list[WorkingHypothesis],
         persona: Optional[PersonaProfile],
         utterance: str = "",
+        *,
+        lexical_fallback: bool = True,
     ) -> list[InterventionCandidate]:
         by_id = {h.id: h for h in hypotheses}
 
@@ -1024,7 +1049,7 @@ class ElderStateReasoner:
                 selected_turn=turn,
             ),
         ]
-        self._apply_person_modifiers(candidates, persona, utterance)
+        self._apply_person_modifiers(candidates, persona, utterance, lexical_fallback=lexical_fallback)
         return sorted(candidates, key=lambda c: c.score, reverse=True)
 
     @staticmethod
@@ -1032,6 +1057,8 @@ class ElderStateReasoner:
         candidates: list[InterventionCandidate],
         persona: Optional[PersonaProfile],
         utterance: str = "",
+        *,
+        lexical_fallback: bool = True,
     ) -> None:
         """人物模型改变“选哪条路”，不只改变最后一句话的口吻。"""
         if persona is None:
@@ -1058,7 +1085,7 @@ class ElderStateReasoner:
         )
         active_claims = " ".join(
             item.claim for item in response_hypotheses
-        )
+        ) if lexical_fallback else ""
         active_dimensions = {
             item.dimension for item in response_hypotheses if item.dimension
         }
@@ -1138,7 +1165,7 @@ class ElderStateReasoner:
                 if by_id[candidate_id].hypothesis_ids:
                     by_id[candidate_id].score += 0.05
 
-        verified = " ".join(persona.aria_strategy_hints.tactics)
+        verified = " ".join(persona.aria_strategy_hints.tactics) if lexical_fallback else ""
         if (
             by_id["identity_based_reengagement"].hypothesis_ids
             and ("身份" in verified or "价值" in verified)
@@ -1417,6 +1444,8 @@ def _person_supports_route(
     persona: Optional[PersonaProfile],
     candidates: list[InterventionCandidate],
     intervention_id: str,
+    *,
+    lexical_fallback: bool = True,
 ) -> bool:
     """Whether scoped cross-session evidence specifically supports this route."""
     if persona is None or intervention_id not in _ROUTE_PERSON_DIMENSIONS:
@@ -1425,7 +1454,7 @@ def _person_supports_route(
     markers = _ROUTE_PERSON_MARKERS.get(intervention_id, ())
     return any(
         item.dimension in dimensions
-        or any(marker in item.claim for marker in markers)
+        or lexical_fallback and any(marker in item.claim for marker in markers)
         for item in _relevant_response_hypotheses(persona, candidates)
     )
 

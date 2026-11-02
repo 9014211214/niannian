@@ -1,4 +1,4 @@
-"""Machine-readable output shape for offline reflection prompt contract 2.4.
+"""Machine-readable output shape for offline reflection prompt contract 2.5.
 
 This schema constrains syntax, enums, counts and preference/outcome shape. It
 cannot establish quote ownership, scope entailment, old identity or event
@@ -41,8 +41,6 @@ class _Review(_Object):
     evidence_basis: Literal[
         "stated_preference", "observed_response", "repeated_pattern", "context_only",
     ]
-    event_kind: Literal["new_event", "same_event", "retrospective", "unknown"]
-    prior_event_id: str | None
     evidence: _Quotes
     event_evidence: _Quotes
     reason: _Text240
@@ -135,9 +133,8 @@ def reflection_response_schema() -> dict:
     change["properties"]["dimension"]["enum"] = sorted(set().union(*_FRAMEWORK_DIMENSIONS.values()))
     change["properties"]["scope_tags"]["items"]["enum"] = sorted(_SCOPE_TAGS)
     change["properties"]["scope_tags"]["uniqueItems"] = True
-    # This identifies the frozen schema shape, separately from prompt contract 2.4.
-    # Keep archived strict-wire bytes stable while the body prompt evolves.
-    schema["title"] = "AriaOfflineEvidenceReview2_3"
+    # Event identity is updater-owned in this generation contract.
+    schema["title"] = "AriaOfflineEvidenceReview2_5"
     return schema
 
 
@@ -149,3 +146,25 @@ def validate_reflection_response_shape(data: dict) -> None:
     Existing wire replay should use the updater, not this new generation check.
     """
     _Response.model_validate(data)
+
+
+class _ItemwiseEnvelope(_Object):
+    """Candidate transaction envelope; each item is validated separately later."""
+
+    protocol_version: Literal["2.0"]
+    reviews: Annotated[list[object], Field(max_length=6)]
+    # Preserve the archived updater's three-proposal compatibility and its
+    # deterministic single-change selection. Generation still asks for <=1.
+    changes: Annotated[list[object], Field(max_length=3)]
+
+
+def validate_reflection_response_envelope(data: dict) -> None:
+    _ItemwiseEnvelope.model_validate(data)
+
+
+def validate_reflection_review_shape(data: object) -> None:
+    _Review.model_validate(data)
+
+
+def validate_reflection_change_shape(data: object) -> None:
+    _Change.model_validate(data)

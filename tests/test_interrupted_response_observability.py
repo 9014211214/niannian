@@ -19,7 +19,7 @@ from tests.test_bench_request_control import Clock, client, envelope
 
 GEN_A = "gen-1789480804-abcdefgh12345678"
 GEN_B = "gen-1789480807-ijklmnop12345678"
-REQ_A = "55c10856-1a24-4e6e-90cc-60b9915f7510"
+REQ_A = "11111111-2222-4333-8444-555555555555"
 REQ_B = "req-1789480804-abcdefgh12345678"
 
 

@@ -14,7 +14,49 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, StrictInt, field_validator, model_validator
+
+
+PREFERENCE_DO_MAX_CHARACTERS = 60
+PREFERENCE_QUOTE_MAX_CHARACTERS = 240
+PREFERENCE_QUOTE_MAX_COUNT = 3
+PREFERENCE_LEGACY_SCOPE_MAX_CHARACTERS = 60
+PREFERENCE_FULL_SCOPE_MAX_CHARACTERS = (
+    PREFERENCE_QUOTE_MAX_COUNT * PREFERENCE_QUOTE_MAX_CHARACTERS
+    + PREFERENCE_QUOTE_MAX_COUNT - 1
+)
+PREFERENCE_SCOPE_LEGACY = "preference_scope_legacy_v1"
+PREFERENCE_SCOPE_FULL_SOURCE = "preference_scope_full_source_v1"
+PREFERENCE_SCOPE_MODEL = "preference_scope_model_v1"
+PreferenceScopeProtocol = Literal["preference_scope_legacy_v1", "preference_scope_full_source_v1",
+                                  "preference_scope_model_v1"]
+
+
+def preference_scope_max_characters(protocol: str) -> int:
+    if protocol == PREFERENCE_SCOPE_LEGACY:
+        return PREFERENCE_LEGACY_SCOPE_MAX_CHARACTERS
+    if protocol in {PREFERENCE_SCOPE_FULL_SOURCE, PREFERENCE_SCOPE_MODEL}:
+        return PREFERENCE_FULL_SCOPE_MAX_CHARACTERS
+    raise ValueError("unknown_preference_scope_protocol")
+
+
+class PreferenceScopeSelection(BaseModel):
+    """Trusted extraction selection, retained separately from model claims."""
+
+    model_config = ConfigDict(extra="forbid")
+    protocol: PreferenceScopeProtocol
+    max_characters: StrictInt
+
+    @model_validator(mode="after")
+    def capacity_matches_protocol(self):
+        capacities = {preference_scope_max_characters(self.protocol)}
+        if self.protocol in {PREFERENCE_SCOPE_FULL_SOURCE, PREFERENCE_SCOPE_MODEL}:
+            # Persisted two-quote extraction records retain their original
+            # capacity. New selections use the current three-quote capacity.
+            capacities.add(481)
+        if self.max_characters not in capacities:
+            raise ValueError("preference_scope_capacity_mismatch")
+        return self
 
 
 LOCAL_DEMO_NOTIFICATION_SCOPE = "local_demo_care_notifications"
@@ -119,6 +161,7 @@ class EpisodicMemoryEntry(BaseModel):
     source_context: Optional[str] = None
     source_context_sha256: Optional[str] = None
     source_context_version: Optional[str] = None
+    preference_source_quote: Optional[str] = None
 
     def can_reference(self) -> bool:
         from ..memory.referenceability import (
@@ -444,6 +487,7 @@ class RelationshipFactSource(BaseModel):
     source_context: str
     source_context_sha256: str
     source_context_version: str
+    preference_source_quote: Optional[str] = None
 
 
 class RelationshipEvidence(BaseModel):
@@ -525,6 +569,9 @@ class SessionTurnSnapshot(BaseModel):
 
     user: str
     agent: str
+    # Set by the final-delivery boundary only for an entirely model-origin,
+    # unprotected response. Absent on older or mixed operational replies.
+    person_response_sha256: Optional[str] = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class CognitiveSourceTurn(BaseModel):
@@ -537,7 +584,12 @@ class CognitiveSourceTurn(BaseModel):
 
 
 class SessionCheckpointRecord(BaseModel):
+    premodel_safety_version: Literal["legacy", "task_response_v1", "task_response_v2", "task_response_v3", "task_response_v4"] = "legacy"
     """异常退出恢复用的短期文字检查点；限量、过期并随画像加密/删除。"""
+
+    # Missing old records stay legacy; restoring cannot silently change delivery.
+    safety_delivery_version: Literal["legacy", "conditional_context_v1", "task_context_v2", "source_response_v3", "source_response_v4", "minimal_response_v1"] = "legacy"
+    safety_response_instruction_version: Literal["legacy", "conditional_response_v1", "conditional_response_v2", "conditional_response_v3", "conditional_response_v4", "compact_response_v1"] = "legacy"
 
     session_id: str
     scene_id: str
@@ -556,6 +608,52 @@ class SessionCheckpointRecord(BaseModel):
     offline_finalize_pending: bool = False
 
 
+MemoryOutputField = Literal[
+    "stated_preferences", "cognitive_privacy", "cognitive_observations", "episodes", "relationships",
+]
+
+
+class MemoryPrefixAudit(BaseModel):
+    """Content-free accounting for an explicitly selected memory protocol."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    protocol: Literal["memory_complete_prefix_v1"]
+    finish_reason: Literal["stop", "length", "unknown"]
+    truncated: bool
+    status: Literal["ok", "partial", "rejected"]
+    completed_fields: list[MemoryOutputField] = Field(max_length=5)
+    missing_fields: list[MemoryOutputField] = Field(max_length=5)
+    privacy_sources_validated: bool
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        fields = {"stated_preferences", "cognitive_privacy", "cognitive_observations", "episodes", "relationships"}
+        completed, missing = set(self.completed_fields), set(self.missing_fields)
+        if (len(completed) != len(self.completed_fields) or len(missing) != len(self.missing_fields)
+                or completed & missing or completed | missing != fields
+                or self.truncated != (self.finish_reason == "length")
+                or self.status == "partial" and not self.truncated
+                or self.status == "ok" and (self.truncated or missing)
+                or self.status in {"ok", "partial"} and (
+                    not self.privacy_sources_validated
+                    or not {"stated_preferences", "cognitive_privacy", "cognitive_observations"} <= completed)):
+            raise ValueError("invalid_memory_prefix_audit")
+        return self
+
+
+class ReflectionItemAudit(BaseModel):
+    """Attempt-local processing counts; persistence is owned by the queue."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    protocol: Literal["reflection_itemwise_v1"] = "reflection_itemwise_v1"
+    status: Literal["ok", "partial", "failed", "skipped"]
+    accepted_review_count: Optional[int] = Field(default=None, ge=0, le=6)
+    rejected_review_count: Optional[int] = Field(default=None, ge=0, le=6)
+    applied_proposal_count: Optional[int] = Field(default=None, ge=0, le=1)
+    deferred_proposal_count: Optional[int] = Field(default=None, ge=0, le=3)
+    rejected_proposal_count: Optional[int] = Field(default=None, ge=0, le=3)
+
+
 class OfflineSessionRecord(BaseModel):
     """Sealed, bounded text-only work; excluded slots retain their original index."""
 
@@ -568,11 +666,20 @@ class OfflineSessionRecord(BaseModel):
     cognitive_session_at: Optional[str] = None
     excluded_turn_indices: List[int] = Field(default_factory=list)
     source_completeness: Literal["complete", "legacy_tail_unknown_indices"] = "complete"
+    # Only enqueue reads the trusted runtime context; old sealed jobs stay legacy.
+    origin_online_decision_version: Optional[Literal[
+        "online_turn_decision_v1", "online_turn_decision_v2", "online_turn_decision_v3",
+        "online_turn_decision_v4_evidence",
+        "online_turn_decision_v5_bound", "online_turn_decision_v6_semantic", "online_turn_decision_v7",
+    ]] = None
+    preference_scope: Optional[PreferenceScopeSelection] = None
     recovery_mode: Literal["text_only"] = "text_only"
     memory_completed: bool = False
     # Old jobs default to unreviewed; stage completion alone does not prove
     # semantic privacy screening was performed before reflection.
     memory_privacy_review_completed: bool = False
+    memory_result: Optional[MemoryPrefixAudit] = None
+    reflection_result: Optional[ReflectionItemAudit] = None
     reflection_completed: bool = False
     attempts: int = 0
     state: Literal["pending", "started", "exhausted", "needs_review"] = "pending"
@@ -599,6 +706,9 @@ class OfflineSessionAuditRecord(BaseModel):
     attempts: int = 0
     gap: bool = False
     error_code: Optional[str] = None
+    preference_scope: Optional[PreferenceScopeSelection] = None
+    memory_result: Optional[MemoryPrefixAudit] = None
+    reflection_result: Optional[ReflectionItemAudit] = None
 
 
 class ReminderRule(BaseModel):
@@ -812,7 +922,7 @@ class PreferenceQuote(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_id: str = Field(min_length=1, max_length=100)
     turn_index: StrictInt = Field(ge=0)
-    text: str = Field(min_length=1, max_length=240)
+    text: str = Field(min_length=1, max_length=PREFERENCE_QUOTE_MAX_CHARACTERS)
 
 
 class PreferenceUIConfirmation(BaseModel):
@@ -848,10 +958,11 @@ class StatedPreference(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     id: str = Field(pattern=r"^pref_[A-Za-z0-9_-]{1,59}$")
-    do: str = Field(min_length=1, max_length=60)
-    scope: str = Field(min_length=1, max_length=60)
+    do: str = Field(min_length=1, max_length=PREFERENCE_DO_MAX_CHARACTERS)
+    scope: str = Field(min_length=1, max_length=PREFERENCE_FULL_SCOPE_MAX_CHARACTERS)
+    scope_protocol: PreferenceScopeProtocol = PREFERENCE_SCOPE_LEGACY
     not_implies: List[str] = Field(default_factory=list, max_length=3)
-    quotes: List[PreferenceQuote] = Field(min_length=1, max_length=2)
+    quotes: List[PreferenceQuote] = Field(min_length=1, max_length=PREFERENCE_QUOTE_MAX_COUNT)
     confirmation: Optional[PreferenceQuote | PreferenceUIConfirmation] = None
     status: Literal["proposed", "confirmed", "declined", "withdrawn", "superseded"] = "proposed"
     supersedes: Optional[str] = Field(default=None, pattern=r"^pref_[A-Za-z0-9_-]{1,59}$")
@@ -889,6 +1000,11 @@ class StatedPreference(BaseModel):
 
     @model_validator(mode="after")
     def confirmed_requires_confirmation(self):
+        if len(self.scope) > preference_scope_max_characters(self.scope_protocol):
+            raise ValueError("preference_scope_capacity_exceeded")
+        if (self.scope_protocol == PREFERENCE_SCOPE_FULL_SOURCE
+                and self.scope != "；".join(dict.fromkeys(quote.text for quote in self.quotes))):
+            raise ValueError("preference_scope_complete_sources_required")
         if self.status in {"confirmed", "withdrawn", "superseded"} and self.confirmation is None:
             raise ValueError("preference_confirmation_required")
         if self.supersedes == self.id:
@@ -898,6 +1014,10 @@ class StatedPreference(BaseModel):
 
 class PersonaProfile(BaseModel):
     """完整 persona 档案,从 yaml / json 加载。"""
+    # Storage provenance is never accepted from JSON/model output or persisted
+    # as part of a profile. Only the explicit v6 status path consumes it.
+    _preference_storage_source: Optional[dict] = PrivateAttr(default=None)
+    _preference_ui_result: Optional[dict] = PrivateAttr(default=None)
     user_id: str
     profile_origin: str = "blank"          # blank / synthetic_demo / imported
     demographics: Optional[Demographics] = None
@@ -970,10 +1090,59 @@ class PersonaProfile(BaseModel):
         return "cold_start"
 
     def referenceable_episodes(self) -> List[EpisodicMemoryEntry]:
-        return [e for e in self.episodic_memory if e.can_reference()]
+        from ..memory.referenceability import preference_source_turns, separate_fact_source
+
+        controls = preference_source_turns(self)
+        result = []
+        for episode in self.episodic_memory:
+            if not episode.can_reference():
+                continue
+            evidence = controls.get((episode.source_session_id, episode.source_turn_index))
+            if not evidence:
+                result.append(episode)
+            elif separate_fact_source(episode.source_context, episode.source_quote,
+                                      episode.preference_source_quote, evidence):
+                # Older summaries can include more than the eligible quote.
+                result.append(episode.model_copy(update={
+                    "summary": f"用户提到：{episode.source_quote}",
+                    "keywords": [word for word in episode.keywords if word in episode.source_quote],
+                }))
+        return result
 
     def referenceable_relationships(self) -> List[RelationshipContextEntry]:
-        return [e for e in self.relationship_context if e.can_reference()]
+        from ..memory.referenceability import (
+            REVIEWED_FACT_CONTEXT, preference_source_turns, retired_source_starts, separate_fact_source,
+        )
+
+        controls = preference_source_turns(self)
+        retired = retired_source_starts(self)
+
+        def eligible_source(session, source):
+            evidence = controls.get((session, source.turn_index), set())
+            if (not evidence and source.source_context_version != REVIEWED_FACT_CONTEXT
+                    and session in retired and source.turn_index >= retired[session]):
+                # A v8 row could already store its own disjoint fact/control
+                # pair. Recheck it without granting permission to sibling facts.
+                evidence = {source.source_context}
+            return separate_fact_source(source.source_context, source.quote, source.preference_source_quote, evidence)
+
+        result = []
+        for row in self.relationship_context:
+            if not row.can_reference():
+                continue
+            eligible = {
+                source.quote for evidence in row.evidence
+                if evidence.source == "user_conversation" and evidence.session_id.strip()
+                for source in evidence.fact_sources
+                if eligible_source(evidence.session_id, source)
+            }
+            facts = [fact for fact in row.facts if fact in eligible]
+            if facts == row.facts:
+                result.append(row)
+            elif any(row.name in fact for fact in facts):
+                relation = row.relation if row.relation and any(row.relation in fact for fact in facts) else None
+                result.append(row.model_copy(update={"facts": facts, "relation": relation}))
+        return result
 
     def internal_episodes(self) -> List[EpisodicMemoryEntry]:
         """Aria 内化但不能挑明的。"""

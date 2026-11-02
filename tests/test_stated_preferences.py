@@ -86,7 +86,8 @@ def test_old_profile_load_and_full_preference_roundtrip(tmp_path):
     ({"quotes": [{"turn_index": 0, "text": "报名前先问问我，别替我决定。", "session_id": "future"}]}, "preference_quote_not_verbatim_user_source"),
     ({"do": "每次先问女儿再帮我安排", "semantic_review": communication_review(kind="action_request")}, "preference_not_safe_explicit_instruction"),
     ({"do": "帮我通知女儿", "semantic_review": communication_review(kind="permission_boundary", no_permission_claim=False)}, "preference_not_safe_explicit_instruction"),
-    ({"supersedes": "pref_unknown"}, "preference_superseded_target_invalid"),
+    ({"supersedes": "pref_unknown", "revision_basis": "报名前先问问我，别替我决定。"},
+     "preference_superseded_target_invalid"),
 ])
 def test_bad_sources_or_invented_instruction_rejected(change, reason):
     row = {**_row(), **change}
@@ -238,7 +239,10 @@ def test_replacement_only_supersedes_after_confirmation_and_refuses_stale_target
     profile = _profile()
     old_id = profile.stated_preferences[0].id
     ctx = _context("replacement_session")
-    row = {**_row(), "confirmation": None, "supersedes": old_id}
+    ctx.add_turn("把原来那条改一下：报名前先问问我，别替我决定。", "我先整理供你确认。")
+    row = {**_row(), "confirmation": None, "supersedes": old_id,
+           "revision_basis": "把原来那条改一下：报名前先问问我，别替我决定。",
+           "quotes": [{"turn_index": 2, "text": ctx.turns[2].user}]}
     proposals, _ = extract_preference_rows([row], ctx, profile)
     merge_preferences(profile, proposals)
     assert profile.stated_preferences[0].status == "confirmed"

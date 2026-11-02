@@ -18,13 +18,8 @@ VERSION = "cognitive-change-v4-20261006"
 READINESS_VERSION = "cognitive_text_readiness_v1"
 READINESS_MESSAGE = "现在愿意聊这些记录。"
 _DOMAINS = {"memory", "language", "orientation", "daily_function", "repetition"}
-_NOT_SELF = re.compile(r"我妈|我爸|我老伴|我爱人|我女儿|我儿子|邻居|他说|她说|听说|如果|假如|新闻|电影|电视剧")
-_NEGATED = re.compile(r"没有忘|没忘|并非|不是记不|没有搞混|不是.*说不出|没有.*变化")
-_CONTEXT = re.compile(r"老了.{0,5}记性|年纪大.{0,6}记性|偶尔|一时|后来想起来|后来找到了|没睡好|失眠|听不清|口误|方言|故意|有意|再说一遍|跟你说过")
 _COGNITIVE_HINT = re.compile(r"忘|记不[住清得]|想不起|找不到词|话到嘴边|说不出|搞混|叫啥|算不清")
 _ACUTE = re.compile(r"突然.{0,10}(?:糊涂|不认|不知道|认不出)|(?:现在|刚才|刚刚).{0,8}(?:找不到回家|迷路)|不认识家|回不来|煤气.{0,8}(?:没关|忘关)|忘.{0,3}关火|药.{0,6}(?:两遍|两次|重复)")
-_IMPACT_NEGATED = re.compile(r"(?:没(?:有)?|并未|不曾|不)(?:受|被)?(?:影响|耽误)|仍能照常|照常(?:做饭|买菜|办事)")
-_CARE_RECEIPT_ONLY = re.compile(r"(?:护理|提醒|任务|通知).{0,12}(?:未确认|没确认|无回执|未送达)")
 _BUSY = re.compile(r"难过|伤心|生气|烦|低落|害怕|焦虑|担心|着急|帮我|请帮|提醒|通知|取消|授权|求助|疼|难受|救命|忙|先办|正在办|怎么|如何|下一步|在哪[里儿]|先做什么|先干什么")
 
 
@@ -266,7 +261,7 @@ def apply_cognitive_withdrawal(ctx, persona, utterance, *, now=None):
     if type(control) is not dict:
         return False
     if (_enabled(persona) and ctx.user_id == persona.user_id and not ctx.simulation_mode
-            and trace.get("version") == "online_turn_decision_v3"
+            and trace.get("version") in {"online_turn_decision_v3", "online_turn_decision_v4_evidence", "online_turn_decision_v5_bound", "online_turn_decision_v6_semantic", "online_turn_decision_v7"}
             and trace.get("status") == "parsed" and trace.get("turn_index") == len(ctx.turns)
             and control.get("version") == "cognitive_permission_v1"
             and control.get("action") == "disable_observation"
@@ -344,7 +339,10 @@ def cognitive_extraction_prompt(persona, ctx):
         "cognitive_observations的条目按上方同一JSON示例的字段输出，不另输出一个对象。"
         "审阅已同意本人原话区的全部轮次，不能按某个词是否出现筛选；只从此区提出观察。"
         "不判断疾病、人格、严重程度或概率。"
-        "自嘲、听力/睡眠影响、方言、口误、有意重讲、他人经历和假设情景不算变化。"
+        "每条观察的signal必须为explicit_change或context。只在本人明确描述真实变化时选explicit_change；"
+        "本人的泛泛自嘲或听力/睡眠等混杂选context，只保留背景不计数。"
+        "方言、口误、有意重讲、他人经历、假设情景、否定变化均不作为变化观察。"
+        "结合完整原话判断主体和否定范围；提到他人或否定另一件事不排除同轮真实的本人变化。"
         "护理提醒未确认不算忘记。标为认知隐私的轮次绝不能进入episodes、relationships、stated_preferences。"
         "普通交流仍可正常提取事实，不要把已同意原话区全部当作认知观察。"
         "functional_impact只在原话明确描述实际日常功能受影响时为true，不确定为false。"
@@ -384,11 +382,19 @@ def extract_cognitive_rows(rows, persona, ctx):
             continue
         if _grounded_quote(quote, row["turn_index"], source_context) is None:
             continue
-        # Full source, not a cherry-picked fragment, controls negation/context.
-        if (_NOT_SELF.search(source.text) or _NEGATED.search(source.text) or _ACUTE.search(source.text)
-                or _CARE_RECEIPT_ONLY.search(source.text)):
+        # Emergency/privacy backstops remain separate from semantic admission.
+        # A person's name or negation elsewhere in the full source cannot veto
+        # an otherwise grounded proposal. The same memory call reads that
+        # context and supplies signal/impact; literal grounding is not proof
+        # that its semantic annotation is correct.
+        if _ACUTE.search(source.text):
             continue
-        context = bool(_CONTEXT.search(source.text))
+        signal = row.get("signal", "context")
+        if not isinstance(signal, str) or signal not in {"context", "explicit_change"}:
+            continue
+        # Legacy rows without a semantic signal can remain visible, but an
+        # absent classification must never manufacture countable evidence.
+        context = signal == "context"
         event_id = None
         if domain == "repetition":
             # C1 has its own consent-scoped identity. Never borrow personality
@@ -399,19 +405,18 @@ def extract_cognitive_rows(rows, persona, ctx):
                 f"{source.consent_at}|{source.text}".encode()).hexdigest()[:24]
             duplicates = sum(item.text == source.text and item.turn_index <= source.turn_index
                              for item in sources.values())
-            if row.get("event_kind") != "same_event" or context:
+            if row.get("event_kind") != "same_event":
                 continue
             prior_sessions = {item.session_id for item in persona.cognitive_observations
                               if item.event_id == event_id and item.source_quote == quote
                               and _parse(item.at) is not None
                               and _parse(source.at) - timedelta(days=7) <= _parse(item.at) <= _parse(source.at)}
-            context = duplicates < 3 and len(prior_sessions | {ctx.session_id}) < 3
+            context = context or (duplicates < 3 and len(prior_sessions | {ctx.session_id}) < 3)
         identifier = "cog_" + hashlib.sha256(
             f"{ctx.session_id}|{source.turn_index}|{domain}|{source.text}".encode()).hexdigest()[:24]
         if identifier in persona.cognitive_trend.deleted_observation_ids:
             continue
-        impact = (row.get("functional_impact") is True
-                  and not _IMPACT_NEGATED.search(source.text) and not context)
+        impact = row.get("functional_impact") is True and not context
         result.append(CognitiveObservationRecord(
             id=identifier, at=source.at, session_id=ctx.session_id, domain=domain,
             signal="context" if context else "explicit_change", severity="context" if context else "functional" if impact else "watch",

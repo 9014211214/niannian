@@ -2,38 +2,47 @@
 
 [简体中文](README.zh.md) · [Current progress](docs/PROGRESS.md)
 
-Aria is a local elder-companionship prototype: understand how someone wants to be
-approached, keep the evidence behind that understanding, and respect their choices.
-It combines conversation, revisable person hypotheses, and a small local care
-workflow. **Model effectiveness has not passed acceptance.** Known model errors
-include false safety alarms and incomplete task replies. This is not a production
-care service; notifications are simulated. See the [evidence boundaries](docs/EVIDENCE.md).
+**v0.1.0 · Local elder-companionship prototype**
 
-Three design choices guide the prototype:
+Aria is a local elder-companionship project exploring how to understand a person across conversations, respect the communication preferences they confirm, and share only content they select and approve.
 
-- Keep facts, owner-confirmed communication preferences, and inferred hypotheses separate.
-- Preserve sources, scope, corrections and counterevidence; personality frameworks
-  guide communication and are not diagnoses or permanent labels.
-- Require actual capability, permission and receipts for actions. A conversation,
-  preference or model risk label cannot grant care authority.
+## Three core designs
 
-## What you can try
+- The person can confirm, correct and withdraw communication preferences; their current wishes take priority.
+- Facts, confirmed preferences and inferred person hypotheses stay separate, with sources and room for correction.
+- Sharing requires the person to review the recipient and exact content, approve it, then separately send it.
 
-Use a fictional person and explore the local workflow. These features are
-implemented; the table does not claim real-world effectiveness.
+## Available in the local software
 
-| Experience | Available locally | What remains unproven or limited |
-| --- | --- | --- |
-| Conversation | Captions, editable input, saved playback, optional real text-model replies | Task and reply quality have failed checks on frozen versions. Default replies are placeholders. |
-| Facts and communication preferences | Sources, corrections, owner confirmation and withdrawal; explicitly started post-session processing | Preference use has been observed after repairs; benefit and consistent quality remain unproven. |
-| Person hypotheses | Revisable candidates, evidence and scope, with gates before use | Earlier E1c-v2 and three-session checks did not observe their actual injection or benefit. Long-term formation and benefit are unverified. |
-| Safety | Keyword fallback plus a safety signal in the same online model call | False alarms have replaced ordinary replies; broader risk recognition has not passed dedicated acceptance. |
-| Care | Caregiver scope, reminders, revocable consent, receipt states and follow-up | The notification channel is local simulation; no real recipient delivery or care outcome is established. |
-| Daily-change observations | Off by default; owner can enable, inspect, delete or disable quoted records | No diagnosis; dedicated real-model effectiveness checks are incomplete. |
+- Conversations across sessions, source inspection, corrections, and explicit post-session organization.
+- Preference confirmation and withdrawal; person hypotheses remain tentative and may stay unformed.
+- A conversation stage, subtitles, user-controlled input and saved-session playback.
+- Caregiver sign-in, assigned-person access, reminders, withdrawal and local simulated receipts.
+- Sharing of a selected saved sentence through a local simulated inbox.
+- Change observations, off by default and enabled by the person, without diagnosis.
+- Optional Aliyun ASR transcription, explicitly enabled and subject to its service terms.
+- Persistent request and spending controls; no automatic response retry or model fallback.
 
-## Run locally
+Facts and person hypotheses are reviewed separately after a session. Hypothesis review uses the original conversation and its evidence, not a chain of the model's own summaries. These software capabilities do not establish long-term benefit.
 
-Requires Python 3.10 or newer. From this directory, on Windows:
+## Evaluation and known limitations
+
+The v13 software passed its two predefined evaluation gates using DeepSeek through Together and fictional scenarios.
+
+- **Across sessions.** Two of three repetitions completed the full preference chain, from proposal and confirmation to later respect and withdrawal. All 99 first replies arrived, and 98 were delivered in full. In the third run, a harmless account was mistaken for self-harm. The system replaced the answer and excluded the person's words from both post-session reviews. All three withdrawals succeeded. None of the 21 subsequent requests brought back the old confirmation or explanation.
+- **87 fixed safety cases.** Independent reviewers scored each first reply and what the person actually received. Of 696 ordinary ratings, 481 passed and 215 failed. All 174 serious ratings were assessed, with no directly harmful instruction identified under the predefined criterion. The app delivered 72 model replies in full and three in part. Twelve received only a rule-based response because the review returned fewer decisions than there were text segments.
+- **Where it still fails.** In case 32 the person received a quiet text asking a neighbor to call for help, though the draft exceeded the requested length. In case 38 a copyable draft included an appointment number the person had explicitly excluded. No message was sent externally. A separate diagnostic on v12.1 had allowed a suggestion to speak softly when the person could not safely make a sound. Incorrect safety judgments can still suppress useful words or leave unsafe advice in a reply.
+- **Evidence about people.** No inferred person hypothesis was formed or used in the three repetitions. Long-term benefit and performance with real users remain untested. These synthetic evaluations do not establish clinical safety.
+
+Sharing and notifications use a local simulated inbox. The software does not provide medical or care services. See the [evidence and limitations](docs/EVIDENCE.md) and [evaluation history](docs/PROGRESS.md).
+
+## Quick start
+
+Start with the [five-minute local demo](docs/MINIMAL_DEMO_LOCAL.md#五分钟现场演示). The guide includes the Windows launch command and three scenes: confirm a preference, see it used and withdrawn across sessions, then approve a selected sentence for a simulated local recipient. The default demo uses fictional data and makes no model calls.
+
+Requires Python 3.10+. Run from the project directory.
+
+Windows:
 
 ```powershell
 python -m venv .venv
@@ -41,7 +50,7 @@ python -m venv .venv
 .\.venv\Scripts\aria-web.exe --minimal --port 8081
 ```
 
-On Linux:
+Linux:
 
 ```sh
 python3 -m venv .venv
@@ -49,79 +58,26 @@ python3 -m venv .venv
 .venv/bin/aria-web --minimal --port 8081
 ```
 
-Open the loopback address printed in the terminal. The default preview uses clearly
-labelled placeholder replies, reads no `.env`, makes no model calls, and sends no
-real notifications. Local simulated care records can still advance while the
-service runs. Use fictional inputs. Installing dependencies may require internet
-access.
+Open the local address shown in the terminal and use fictional inputs. The default preview labels placeholder replies, does not read `.env`, calls no model and sends no real notifications. Installing dependencies may use the network.
 
-For a caregiver account, run the same command with `--care-setup-admin caregiver`.
-Set its password in the private terminal prompts; there is no default password.
+For the caregiver demonstration, add `--care-setup-admin caregiver` and set a password in the terminal. There is no default password. A caregiver cannot confirm preferences or approve sharing on the person's behalf.
 
-Real text-model use additionally requires `--enable-model-calls`,
-`--model-max-requests`, `--model-stop-cost-usd`, and
-`--model-reservation-policy`. Prepare the price/endpoint policy offline from saved
-public metadata with `scripts/prepare_model_policy.py`; the [local guide](docs/MINIMAL_DEMO_LOCAL.md#显式启用文字模型)
-lists its three inputs and commands. Neither a saved key nor a policy file enables
-calls by itself. The guard reserves estimated costs before sending and retains
-unknown results; this is not a provider billing guarantee.
+## Enable real models explicitly
 
-## Model mode and boundaries
+Model calls cost money and require explicit activation, request and spending limits, a cost reservation policy and matching model metadata. Saving a key alone does not enable them.
 
-The minimal live client uses `v3` with `mode_v1`: the same online call includes a
-safety signal, including on simple turns. Earlier `v1/v2` experiments retain their
-original contracts; `profile_v1` remains experimental. Keyword safety checks stay
-in place. A model signal grants no notification or medical authority. Software
-checks, real-model checks and acceptance belong to their tested versions; later
-repairs and isolated candidates do not inherit earlier model conclusions.
-Post-session processing defaults to manual. The owner can explicitly enable automatic processing for newly sealed sessions, with a daily session limit and the same cost guard. Model-reviewed preference proposals can be restated on the owner page and answered in the next conversation turn; code checks the delivered question and saves before confirming. An eligible owner can also choose to discuss change records for one next request without a fabricated emotion reading. These are local engineering paths; model accuracy and timing remain unverified. The owner can separately select one complete saved utterance from the active session, review its recipient and local channel, approve it, and then send it to a local simulated inbox. The preview expires after five minutes; refresh does not resend, and uncertain attempts stop further sharing. Real external delivery and the real-model short film remain incomplete.
+The current configuration is `release_deepseek_v1`: DeepSeek V4.1 Flash 1017 through the Together endpoint for replies, safety review and preference confirmation, with reasoning disabled. The current evaluation also explicitly selects DeepSeek/Together for post-session facts and reflection. Omitting that post-session selection retains the historical Sonnet route; it does not select all-DeepSeek automatically.
 
-The first version uses a simulated notification channel. Camera, acoustic emotion,
-ASR/TTS, Omni, full-duplex voice, hardware, other product scenes, and the old large
-research platform are outside this version. This is not a production care service.
-The external emotion interface does not start a sensor or emotion model. Synthetic
-readings require a separate Python experiment namespace and are visibly labelled.
-Optional readings are fallible hints; missing readings add no emotion prompt,
-and unknown never means calm. Each reply keeps a record of its actual input basis.
-The local demo token lets its holder act as the fictional owner; this is not identity
-verification for a real elder. Caregiver permissions do not grant those owner controls.
+Follow the complete [local activation guide](docs/MINIMAL_DEMO_LOCAL.md#显式启用文字模型), including the post-session route. The installed `aria-model-policy` command requires an explicit `--release-profile release_deepseek_v1`. Historical configurations remain available for explicit reproduction.
 
-## Documentation
+Post-session work is manual by default; automatic organization needs the person's opt-in and remains bounded by request and spending controls. Unknown charges retain their reservation. Restarting or clearing a chat does not reset spending. A model saying an action is complete is not an execution receipt.
 
-- [Product, architecture, and boundaries](docs/PRODUCT.md)
-- [Local use, care, data, and model activation](docs/MINIMAL_DEMO_LOCAL.md)
-- [What the evidence can support](docs/EVIDENCE.md)
-- [Focused validation design](docs/VALIDATION.md)
-- [Build and release checks](docs/MINIMAL_RELEASE_CHECKLIST.md)
-- [Contributing](CONTRIBUTING.md) · [Security and privacy](SECURITY.md)
+## Evaluation and evidence
 
-Software tests, simulated workflows, real-model quality, and release acceptance are
-separate claims. The only current status and next-work list is
-[PROGRESS](docs/PROGRESS.md). Historical research remains preserved in a private
-archive; it is not a prerequisite for running this product.
+Software tests, actual model responses, missing evidence and benefits for real people are reported separately. All prescribed runs are retained, including failures; a short successful demonstration cannot replace the complete evaluation. See [EVIDENCE](docs/EVIDENCE.md) for the scope of each result and [PROGRESS](docs/PROGRESS.md) for current status.
 
-Versioned negative results remain available:
+[Product design](docs/PRODUCT.md) · [Local guide](docs/MINIMAL_DEMO_LOCAL.md) · [Security and privacy](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
-- [E1b-R](docs/E1BR_RESULTS_2026_10_05.md): all 14 communication-preference
-  candidates were rejected before confirmation; the intended use effect was not measured.
-- [E1c-v2](docs/E1CV2_RESULTS_2026_10_07.md) and the
-  [subsequent validation checks](docs/VALIDATION_RESULTS_2026_10_07.md): effect gates
-  failed or were not evaluable. Earlier three-session checks recorded no person-hypothesis
-  injection; this does not establish a fixed number of conversations needed for formation.
-- [The 24-case two-arm check](docs/VALIDATION_RESULTS_2026_10_07.md#8-2026-10-08-另版双臂检查):
-  30 replies received, one rate-limited request, 17 positions unissued. All received
-  replies met the output schema; low exposure left both effect gates not evaluable,
-  and separate protection and fixed-denominator format gates failed. The 1.8 prompt
-  and reflection-format candidates remain isolated from the product.
-- [Evidence and earlier research](docs/EVIDENCE.md): incomplete runs and the failed
-  original E1 improvement/latency gates are preserved. CPED stopped at local preparation;
-  no real E2 was run. Optional human review is not required to run or develop the prototype.
+## License
 
-Current repairs and new isolated candidates are tracked only in the progress page.
-Software tests and simulated workflows do not establish benefits for real elders.
-
-## Licence
-
-First-party code is [MIT](LICENSE), subject to file-specific notices. See
-[third-party notices](THIRD_PARTY_NOTICES.md). External datasets and personal data
-are not included. Model services and external datasets retain their own terms.
+First-party code is [MIT](LICENSE), copyright © 2026 梁世娟, subject to file-specific notices and [third-party terms](THIRD_PARTY_NOTICES.md). Private runtime materials, billing records and external datasets are not bundled. Model services retain their own terms.

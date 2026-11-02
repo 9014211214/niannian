@@ -436,3 +436,43 @@ def test_closed_guard_retains_readable_stopped_snapshot(tmp_path, monkeypatch):
         assert state["stopped"]
         assert state["calls_used"] == 1
         assert Decimal(state["known_cost_usd"]) == Decimal("0.03")
+
+
+@pytest.mark.parametrize("profile", ["product", "release"])
+def test_live_scope_registration_does_not_authorize_another_guard_or_restart(tmp_path, profile):
+    from aria.engine.policy.product_calls import ProductCallGuard
+    from aria.engine.policy.max_release.guard import MaxReleaseCallGuard
+    from tests.test_deepseek_release import prices
+    from _reservation_fixtures import fixture_reservation_policy
+    selected = ProductCallGuard if profile == "product" else MaxReleaseCallGuard
+    policy = fixture_reservation_policy() if profile == "product" else prices()
+    options = dict(max_requests=20, max_observed_cost_usd="2", reservation_policy=policy)
+    guard = selected(tmp_path / "shared.sqlite3", **options)
+    other = selected(tmp_path / "shared.sqlite3", **options)
+    try:
+        with guard.scope("review", "review-a", "session-a"):
+            assert other.snapshot()["stopped"]
+            with pytest.raises(MinimalCallStopped):
+                with other.scope("turn", "foreign-turn", "session-b"):
+                    pytest.fail("foreign live operation entered")
+            # Same-instance contexts are explicitly registered and remain
+            # separate. Nested software scopes test durable identity only.
+            with guard.scope("turn", "turn-b", "session-b"):
+                assert not guard.snapshot()["stopped"]
+                assert other.snapshot()["stopped"]
+            assert not guard.snapshot()["stopped"]
+        assert not other.snapshot()["stopped"]
+        with guard._lock, guard._transaction():
+            if profile == "product":
+                guard._append({"event": "started", "token": "crashed", "kind": "review",
+                    "operation_id": "crashed-review", "session_id": "old-session"})
+            else:
+                guard._db.execute("INSERT INTO release_operations VALUES(?,?,?,?,0)",
+                    ("crashed", "review", "crashed-review", "old-session"))
+        assert other.snapshot()["stopped"]
+        with pytest.raises(MinimalCallStopped):
+            with other.scope("turn", "later-turn", "session-c"):
+                pytest.fail("orphan scope was inherited")
+    finally:
+        guard.close()
+        other.close()

@@ -41,10 +41,10 @@ def test_default_is_byte_exact_old_mode_text_for_reply(mode):
 
 
 @pytest.mark.parametrize("value,expected,version", [
-    ("mode_v1", "mode_v1", "1.18.0"),
-    ("profile_v1", "profile_v1", "1.19.0"),
-    ("unknown", "mode_v1", "1.18.0"),
-    ("", "mode_v1", "1.18.0"),
+    ("mode_v1", "mode_v1", "1.18.1"),
+    ("profile_v1", "profile_v1", "1.19.1"),
+    ("unknown", "mode_v1", "1.18.1"),
+    ("", "mode_v1", "1.18.1"),
 ])
 def test_environment_and_invalid_explicit_values_resolve_safely(
     monkeypatch, value, expected, version,
@@ -86,7 +86,7 @@ def test_engine_reply_keeps_instance_option_after_environment_changes(
     assert len(client.messages) == 1
     assert engine.policy.delivery_block == block
     assert prompt_version_for(engine.policy.delivery_block) == {
-        "mode_v1": "1.18.0", "profile_v1": "1.19.0",
+        "mode_v1": "1.18.1", "profile_v1": "1.19.1",
     }[block]
 
 
@@ -113,7 +113,7 @@ def test_minimal_web_capabilities_and_engine_use_same_frozen_block(tmp_path, mon
         monkeypatch.setenv("ARIA_DELIVERY_BLOCK", "mode_v1")
         architecture = app.capabilities()["reasoning_architecture"]
         assert architecture["delivery_block"] == "profile_v1"
-        assert architecture["prompt_version"] == "1.19.0"
+        assert architecture["prompt_version"] == "1.19.1"
         assert architecture["online_decision_schema"] == ONLINE_DECISION_VERSION
         engine = app._engine_for_persona(app._seed_persona("fictional-chen"))
         assert engine.policy.delivery_block == "profile_v1"

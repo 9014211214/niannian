@@ -130,7 +130,7 @@ def test_prior_12_observation_is_accepted_unchanged_and_cannot_gain_native_field
     # Historical rows are not required for a portable software test.
     result, _ = native()
     result["version"] = "1.2"
-    for field in ("provider_native_code_status", "provider_raw_status"):
+    for field in ("provider_native_code_status", "provider_raw_status", "limit_source_status", "router_error_type_status"):
         result.pop(field)
     before = deepcopy(result)
     observation.validate_observation(result)

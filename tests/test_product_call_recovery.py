@@ -23,7 +23,9 @@ def deny_network(monkeypatch):
 def guard(tmp_path, cls=ProductCallGuard, *, maximum=40, budget="1"):
     g = cls(tmp_path / "calls.sqlite3", max_requests=maximum, max_observed_cost_usd=budget,
             reservation_policy=policy())
-    g._pacing_sleep = lambda duration: None
+    clock = [0.0]
+    g._pacing_clock = lambda: clock[0]
+    g._pacing_sleep = lambda duration: clock.__setitem__(0, clock[0] + duration)
     return g
 
 
@@ -411,7 +413,10 @@ def test_reflection_transport_retries_and_one_business_correction_are_separate(t
 
 def test_settled_no_content_memory_failure_seals_and_next_session_can_review(tmp_path, monkeypatch):
     from tests.test_minimal_call_integration import app_at, responses, Response, DECISION
-    app = app_at(tmp_path); app.call_guard._pacing_sleep = lambda _: None
+    app = app_at(tmp_path)
+    clock = [0.0]
+    app.call_guard._pacing_clock = lambda: clock[0]
+    app.call_guard._pacing_sleep = lambda duration: clock.__setitem__(0, clock[0] + duration)
     sid = app.start()["state"]["session_id"]
     responses(monkeypatch, Response(DECISION, {"cost": .001}))
     assert app.submit("普通会话", "first", sid)["ok"]

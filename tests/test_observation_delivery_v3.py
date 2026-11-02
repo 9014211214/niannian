@@ -140,8 +140,8 @@ class Reasoner(ElderStateReasoner):
         pass
 
 
-def app_fixture(tmp_path, mode="ask", response=None):
-    online = Client(response)
+def app_fixture(tmp_path, mode="ask", response=None, client_type=Client):
+    online = client_type(response)
     offline = Client('{"episodes":[],"relationships":[],"stated_preferences":[],"cognitive_privacy":[]}')
     app = MinimalWebApp(tmp_path, clients=MinimalModelClients(online, offline, offline, True))
     sid = app.start()["state"]["session_id"]
@@ -195,3 +195,57 @@ def test_current_product_is_imported():
     import aria.engine.policy.reply_contract as contract
     expected = Path(__file__).resolve().parents[1] / "aria/engine/policy/reply_contract.py"
     assert Path(contract.__file__).resolve() == expected
+
+
+def v7_payload(response="按本轮需要自然回应。", *, selected=True):
+    result = {"response_segments": [{"text": response}], "safety_concern": "none"}
+    if selected:
+        result["selected_intervention_id"] = "quiet_companionship"
+    return json.dumps(result, ensure_ascii=False)
+
+
+class V7Client(Client):
+    online_decision_version = "online_turn_decision_v7"
+
+    def __init__(self, response=None):
+        super().__init__(response or v7_payload())
+
+
+@pytest.mark.parametrize("selected", [True, False])
+def test_v7_web_delivers_natural_body_and_only_records_bound_model_selection(tmp_path, selected):
+    app, sid, engine, ctx, online = app_fixture(
+        tmp_path, response=v7_payload(selected=selected), client_type=V7Client)
+    try:
+        result = app.submit("中性输入。", "v7-delivery", sid)
+        assert result["ok"] and len(online.calls) == 1
+        assert result["state"]["turns"][-1]["response"] == "按本轮需要自然回应。"
+        assert ctx.reasoning.observation_history[-1].matched_plan is False
+        delivery = ctx.working_memory["intervention_delivery"]
+        assert delivery["status"] == ("delivered" if selected else "not_delivered")
+        if not selected:
+            assert delivery["reason"] == "unbound_final_strategy_delivery"
+    finally:
+        app.close()
+
+
+@pytest.mark.parametrize("version", ["v3", "v4_evidence", "v5_bound", "v6_semantic", "v7"])
+@pytest.mark.parametrize("mutation", [None, "version", "turn_index", "requested_intervention_id",
+                                      "selected_intervention_id", "parsed_response_sha256", "candidate"])
+def test_semantic_strategy_delivery_requires_current_exact_binding(version, mutation):
+    ctx = context(version)
+    response = "正文按当前需要交付，无须照抄预设问题。"
+    trace = {"version": "online_turn_decision_" + version, "status": "parsed", "turn_index": 0,
+             "requested_intervention_id": "quiet_companionship", "selected_intervention_id": "quiet_companionship",
+             "parsed_response_sha256": hashlib.sha256(response.encode()).hexdigest()}
+    ctx.working_memory["online_turn_decision"] = trace
+    if mutation == "candidate":
+        ctx.reasoning.candidates = []
+    elif mutation:
+        trace[mutation] = "different"
+    reasoner = ElderStateReasoner()
+    execution = reasoner.record_observation_execution(ctx, response)
+    assert not execution.matched_plan
+    delivered = reasoner.record_intervention_delivery(ctx, response)
+    assert (delivered is not None) is (mutation is None)
+    if mutation:
+        assert ctx.working_memory["intervention_delivery"]["reason"] == "unbound_final_strategy_delivery"

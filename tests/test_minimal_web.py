@@ -180,7 +180,8 @@ def test_state_and_restarted_replay_do_not_mutate_or_call_clients(tmp_path):
 
 @pytest.mark.parametrize("applicability", ["within_scope", "outside_scope"])
 def test_real_updater_candidate_correction_and_nonadoption_are_visible_without_promotion(tmp_path, applicability):
-    """Reuse strict protocol fixtures; these are prescribed responses, not measured quality."""
+    """Unknown positive observations defer; grounded in-scope corrections apply."""
+    from tests.test_reflection_evidence_review import support
     app, clients = live_fixture(tmp_path)
     first_words = [turn.user for turn in context().turns]
     first_id = start_and_submit(app, first_words)
@@ -190,25 +191,38 @@ def test_real_updater_candidate_correction_and_nonadoption_are_visible_without_p
     app.seal(first_id)
     first = app.reflect("form-candidate", wait=True)
     assert first["ok"]
-    before = first["state"]["profile"]["hypotheses"][0]
-    assert before["status"] == "candidate"
-    assert before["scope"] == "不赶时间的新操作教学"
+    assert first["state"]["profile"]["hypotheses"] == []
     first_fact = first["state"]["profile"]["facts"][0]
     assert first_fact["source_session_id"] == first_id
     assert first_fact["source_turn_index"] == 0 and first_fact["source_quote"] == first_words[0]
-    assert all(evidence["session_id"] == first_id for evidence in before["evidence"])
-    quoted_turns = {row["turn_index"]: row["quote"]
-                    for evidence in before["evidence"] for row in evidence["quotes"]}
-    assert quoted_turns == {i: first_words[i] for i in (1, 2)}
-    assert first["state"]["profile"]["evidence"][0]["disposition"] == "applied"
-    assert any(row.get("category") == "hypotheses" and row["kind"] == "added"
-               for row in first["state"]["profile"]["changes"])
+    first_review = first["state"]["profile"]["evidence"][0]
+    assert first_review["session_id"] == first_id
+    assert first_review["disposition"] == "event_identity_unknown_no_update"
+    assert {row["turn_index"]: row["quote"] for row in first_review["evidence"]} == {
+        i: first_words[i] for i in (1, 2)}
+    assert not any(row.get("category") == "hypotheses" and row["kind"] == "added"
+                   for row in first["state"]["profile"]["changes"])
+    assert app.store.load("fictional-chen").person_hypotheses == []
+    first_context = current
 
     second_words = ["今天我来纠正上次说的办法。", "现在我改为喜欢先看完整步骤，不想等每一步。",
                     "这只是更喜欢的办法，没有授权替我转发。"]
     second_id = start_and_submit(app, second_words)
     engine, current = app._sessions["fictional-chen"]
-    hypothesis = engine.persona.person_hypotheses[0]
+    # This is previously accepted evidence inserted only as a software fixture.
+    # It invokes no updater/model and cannot be attributed to the first review.
+    prior_call_counts = (len(clients.memory.calls), len(clients.reflection.calls))
+    hypothesis = support(engine.hypothesis_updater, clients.reflection, engine.persona, ctx=first_context)
+    app.store.save(engine.persona)
+    assert (len(clients.memory.calls), len(clients.reflection.calls)) == prior_call_counts == (1, 1)
+    before = app.state()["profile"]["hypotheses"][0]
+    assert before["status"] == "candidate"
+    assert before["scope"] == "不赶时间的新操作教学"
+    assert all(evidence["session_id"] == first_id for evidence in before["evidence"])
+    quoted_turns = {row["turn_index"]: row["quote"]
+                    for evidence in before["evidence"] for row in evidence["quotes"]}
+    assert quoted_turns == {i: first_words[i] for i in (1, 2)}
+    baseline_evidence = deepcopy(hypothesis.model_dump())
     item = review(current, hypothesis, relation="counter", applicability=applicability)
     item["event_evidence"] = deepcopy(item["evidence"])
     clients.reflection.payload = {"protocol_version": "2.0", "reviews": [item],
@@ -221,15 +235,18 @@ def test_real_updater_candidate_correction_and_nonadoption_are_visible_without_p
     assert after["status"] == "candidate" and after["scope"] == before["scope"]
     if applicability == "within_scope":
         assert after["confidence"] < before["confidence"]
-        assert after["evidence"][-1]["relation"] == "counter"
-        assert after["evidence"][-1]["session_id"] == second_id
-        assert profile["evidence"][-1]["disposition"] == "applied"
         assert any(row.get("category") == "hypotheses" and row["kind"] == "revised"
                    for row in corrected["state"]["reviews"][-1]["changes"])
+        assert profile["evidence"][-1]["disposition"] == "applied"
     else:
         assert after == before
+        assert not any(row.get("category") == "hypotheses" and row["kind"] == "revised"
+                       for row in corrected["state"]["reviews"][-1]["changes"])
         assert profile["evidence"][-1]["disposition"] == "outside_scope_no_update"
+    assert profile["evidence"][-1]["session_id"] == second_id
     assert profile["evidence"][-1]["evidence"][0]["quote"] == second_words[1]
+    saved = app.store.load("fictional-chen").person_hypotheses[0]
+    assert saved.confidence < baseline_evidence["confidence"] if applicability == "within_scope" else saved.model_dump() == baseline_evidence
 
     third_id = app.start()["state"]["session_id"]
     app._sessions["fictional-chen"][1].working_memory["ui_future_suggestions"] = [
@@ -534,3 +551,31 @@ def test_http_rejects_bad_bodies_and_allows_only_explicit_start(local_server):
                         content_length=17001)
     assert status == 400
     assert app.state()["turns"] == []
+
+
+
+@pytest.mark.parametrize("binding", ["valid", "missing", "wrong", "legacy_indices"])
+def test_checkpoint_response_provenance_restores_only_hash_bound_original_indices(tmp_path, binding):
+    import hashlib
+    app, clients = live_fixture(tmp_path)
+    sid = start_and_submit(app, STORY[0][:3])
+    profile = app.store.load("fictional-chen")
+    checkpoint = profile.pending_session
+    kept = [checkpoint.turns[0], checkpoint.turns[2]]
+    for row in kept:
+        row.person_response_sha256 = (None if binding == "missing" else "0" * 64
+            if binding == "wrong" else hashlib.sha256(row.agent.encode()).hexdigest())
+    checkpoint.turns = kept
+    checkpoint.turn_indices = [0, 2] if binding != "legacy_indices" else []
+    checkpoint.original_turn_count = 3
+    app.store.save(profile)
+    restarted = MinimalWebApp(tmp_path, clients=clients)
+    assert restarted.start()["state"]["session_id"] == sid
+    ctx = restarted._sessions["fictional-chen"][1]
+    restored = ctx.working_memory.get("_person_response_deliveries", {})
+    if binding == "valid":
+        assert restored == {str(index): row.person_response_sha256 for index, row in zip([0, 2], kept)}
+        assert ctx.turns[1].agent == ""
+    else:
+        assert restored == {}
+    restarted.close()

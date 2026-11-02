@@ -34,12 +34,16 @@ def test_stale_saved_suggestion_expires_without_mutating_profile():
     "我忘了买点菜，但是没有影响做饭。", "我忘了交电费，后来办好了，没有耽误家里用电。",
     "我忘了带零钱，不过不影响买菜。",
 ])
-def test_negated_functional_impact_cannot_be_granted_by_model_boolean(text):
+@pytest.mark.parametrize("impact", [False, True])
+def test_functional_impact_is_the_same_call_semantic_annotation(text, impact):
     persona = enabled()
     ctx = context_with(persona, text)
     rows = extract_cognitive_rows([{"domain": "daily_function", "evidence_quote": text,
-                                   "turn_index": 0, "functional_impact": True}], persona, ctx)
-    assert len(rows) == 1 and not rows[0].functional_impact
+                                   "turn_index": 0, "functional_impact": impact,
+                                   "signal": "explicit_change"}], persona, ctx)
+    # A forced True label here is deliberately wrong. Software must not
+    # pretend that an unrelated negation regex proves semantic accuracy.
+    assert len(rows) == 1 and rows[0].functional_impact is impact
 
 
 def test_literal_fragment_is_not_proof_of_a_correct_semantic_annotation():

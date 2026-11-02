@@ -73,12 +73,17 @@ Default preview reads no `.env` and activates no model or media service. Explici
 `--enable-model-calls` requires request and observed-cost limits before credentials
 are loaded. Online, memory, and reflection calls share a persistent ledger: intent
 is saved before sending. Product output failures retain the failed result and use
-a labelled fallback; three consecutive failed operations pause future calls until
-the owner explicitly resumes. Resume does not resend old requests or restore budget.
+a labelled fallback. The current release isolates a fully settled format failure
+only after verifying that no business state was partially committed; it preserves
+that failure and permits a separately submitted new input. Eligible unreceived
+online failures require the owner's explicit choice to retain their reservation
+before a new input. The historical ProductCallGuard's three-failure pause/resume
+is a separate option, not the default release rule. No continuation resends an
+old request or restores budget.
 Unknown cost/result, failed persistence, or a budget, routing or privacy violation
-remains a hard stop that the recovery button cannot clear. Verified no-content
-429/5xx errors with known cost may receive at most two additional physical attempts,
-each reserved and recorded. Default physical requests reject HTTP redirects rather
+remains a hard stop that the recovery button cannot clear. The current release
+has zero automatic paid retries or model fallbacks. Historical retry protocols
+remain explicit archival options, not current defaults. Physical requests reject HTTP redirects rather
 than send credentials or create an unrecorded request at another address. The
 [local guide](docs/MINIMAL_DEMO_LOCAL.md#显式启用文字模型) describes the complete conditions.
 Refresh, restart, and clearing chat do not reset that ledger.
@@ -95,8 +100,11 @@ retention and processing terms before sending real information.
 
 The first version supplies a local simulated notification channel and simulated
 consent. A simulated receipt is not real delivery or family acknowledgement.
-Sharing is limited to authorized reminder status, with a trigger, scope, expiry,
-and revocation; it excludes conversation text and psychological hypotheses.
+Reminder sharing requires a trigger, scope, expiry and revocation. A separate
+owner-controlled flow can preview and approve one complete saved utterance for
+one chosen contact, then explicitly send through the local simulated channel.
+Caregivers cannot approve that flow for the owner; reminder consent does not
+authorize it. Inferred psychological hypotheses and change observations are excluded.
 An unconfirmed reminder is not proof of missed medication or danger. Revocation
 blocks pending sends but cannot retract delivered information. Unknown outcomes
 require review rather than automatic resending.
@@ -106,8 +114,11 @@ Personality preferences cannot change medical rules, permissions, or escalation
 thresholds. Crisis and acute-warning handling remains a deterministic safeguard,
 not a validated diagnosis or an emergency response service.
 
-Closing/idle seals a conversation; only an explicit action starts post-session model
-work. Saved playback performs no model or care writes. Stage animation is never
+Closing/idle seals a conversation. Post-session model work is manual by default;
+explicit owner opt-in may process newly sealed sessions within daily and shared
+call/cost limits. A foreground input may wait for an already sent physical request
+to settle, then takes priority before the next background call; it does not wait
+for the entire review. Saved playback performs no model or care writes. Stage animation is never
 emotion evidence. Enabled care scheduling continues while the service runs,
 including during playback; stopping the service pauses scheduling.
 

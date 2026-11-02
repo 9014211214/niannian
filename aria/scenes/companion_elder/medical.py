@@ -17,6 +17,12 @@ SAFE_MEDICAL_BOUNDARY_REPLY = (
     "突然口角歪斜或说话不清等明确急症，请立即拨打 120。"
 )
 
+# Explicit candidate only: no location is available to this final text guard.
+SAFE_MEDICAL_BOUNDARY_REPLY_V2 = (
+    "我不能替医生下诊断、指导自行调整用药或保证治疗效果；用药疑问请向开药医生或药师核实，"
+    "若有现实中的急症请立即联系当地急救服务。"
+)
+
 _DISEASE_TERM = (
     r"(?:高血压|低血压|糖尿病|心肌梗死|心梗|脑梗|脑卒中|中风|"
     r"冠心病|心脏病|心衰|肺炎|慢阻肺|抑郁(?:症)?|焦虑(?:症)?|"
@@ -96,6 +102,33 @@ _NEGATED_DIAGNOSIS = re.compile(
     r"(?:不是|并非|没有|没|未|无|不代表|不等于).{0,10}" + _DISEASE_TERM
 )
 
+_LOCAL_MEDICATION_REFUSAL_V2 = re.compile(
+    r"(?:不要|不能|不可|不应|不可以|不建议|切勿|严禁|别)"
+    r"(?:自行|擅自|私自|随意|任意|随便|直接|再|继续){0,3}$"
+)
+
+# Output-only finite backstop: the local adverb does not turn a refusal such
+# as "不能一次吃两片" into affirmative dose advice. It does not admit requests.
+_LOCAL_MEDICATION_REFUSAL_V3 = re.compile(
+    r"(?:不要|不能|不可|不应|不可以|不建议|切勿|严禁|别)"
+    r"(?:自行|擅自|私自|随意|任意|随便|直接|再|继续|一次){0,3}$"
+)
+
+
+def _local_medication_refusal_v2(clause: str, match: re.Match[str], *, sentence_scoped=False) -> bool:
+    """Finite local negation backstop, not general semantic interpretation.
+
+    Only recognized modifiers may separate the refusal and matched action.
+    New clauses, affirmative modal words and double negation are not masked.
+    """
+    prefix = clause[:match.start()]
+    pattern = _LOCAL_MEDICATION_REFUSAL_V3 if sentence_scoped else _LOCAL_MEDICATION_REFUSAL_V2
+    refusal = pattern.search(prefix)
+    if refusal is None:
+        return False
+    before = prefix[:refusal.start()]
+    return re.search(r"(?:不是|并非|不能|不要|不)(?:说|认为)?$", before) is None
+
 
 def _claim_is_explicitly_refused(clause: str, match: re.Match[str]) -> bool:
     """Allow a local safety boundary without licensing a later unsafe claim."""
@@ -125,12 +158,16 @@ def _claim_is_explicitly_refused(clause: str, match: re.Match[str]) -> bool:
     return _LOCAL_REFUSAL.search(prefix) is not None
 
 
-def guard_general_medical_reply(response: str) -> str:
+def guard_general_medical_reply(response: str, *, version: str = "legacy", source_positions=None) -> str:
     """Replace unsafe diagnosis, medication-change, or cure claims.
 
     Matching is clause-local so a disclaimer before ``但是`` or punctuation
     cannot be used to smuggle an affirmative diagnosis into the same reply.
     """
+    if version not in ("legacy", "local_refusal_v2", "sentence_refusal_v3"):
+        raise ValueError("invalid_medical_guard_version")
+    if version == "sentence_refusal_v3":
+        return _guard_medical_sentences(response, source_positions=source_positions)
     compact = " ".join((response or "").strip().split())
     if not compact:
         return compact
@@ -146,12 +183,89 @@ def guard_general_medical_reply(response: str) -> str:
     )
     for clause in clauses:
         for pattern in patterns:
-            match = pattern.search(clause)
-            if match is not None and not _claim_is_explicitly_refused(
-                clause, match
-            ):
-                return SAFE_MEDICAL_BOUNDARY_REPLY
+            # Check overlapping starts too: a greedy first match must not hide
+            # a second affirmative action following a refused one.
+            matches = (pattern.match(clause, index) for index in range(len(clause))) if version == "local_refusal_v2" else [pattern.search(clause)]
+            for match in matches:
+                if match is None:
+                    continue
+                refused = _claim_is_explicitly_refused(clause, match)
+                if version == "local_refusal_v2" and pattern in _MEDICATION_ADJUSTMENT_CLAIMS:
+                    refused = refused or _local_medication_refusal_v2(clause, match)
+                if not refused:
+                    return (SAFE_MEDICAL_BOUNDARY_REPLY_V2 if version == "local_refusal_v2"
+                            else SAFE_MEDICAL_BOUNDARY_REPLY)
     return compact
 
 
-__all__ = ["SAFE_MEDICAL_BOUNDARY_REPLY", "guard_general_medical_reply"]
+def _guard_medical_sentences(response, *, source_positions=None):
+    """Remove only sentences with an affirmative finite unsafe output claim.
+
+    This is not a semantic classifier or a completeness guarantee. Existing
+    diagnosis/medication boundaries and overlapping-match checks still apply.
+    """
+    original = str(response or "").strip()
+    offset = len(str(response or "")) - len(str(response or "").lstrip())
+    if not original:
+        if source_positions is not None:
+            source_positions[:] = []
+        return original
+    from ...engine.risk.safety_review import response_sentences
+    try:
+        sentences = response_sentences(original)
+    except ValueError:
+        if source_positions is not None:
+            source_positions[:] = [None] * len(SAFE_MEDICAL_BOUNDARY_REPLY_V2)
+        return SAFE_MEDICAL_BOUNDARY_REPLY_V2
+    patterns = (*_DIAGNOSIS_CLAIMS, *_MEDICATION_ADJUSTMENT_CLAIMS, *_TREATMENT_GUARANTEES)
+    retained = []
+    retained_positions = []
+    cursor = offset
+    removed = False
+    for sentence in sentences:
+        unsafe = False
+        for clause in _CLAUSE_SPLIT.split(" ".join(sentence.split())):
+            for pattern in patterns:
+                for index in range(len(clause)):
+                    match = pattern.match(clause, index)
+                    if match is None:
+                        continue
+                    # The broad legacy dose pattern can start at the final
+                    # character of the noun "漏服" and consume a later risk
+                    # description ("漏服后擅自加倍服用可能导致..."). That
+                    # substring is not an affirmative medication instruction.
+                    # Independent affirmative matches later in the clause are
+                    # still checked; semantic risk review remains separate.
+                    if (pattern is _MEDICATION_ADJUSTMENT_CLAIMS[-1]
+                            and index > 0 and clause[index - 1:index + 1] == "漏服"):
+                        continue
+                    refused = _claim_is_explicitly_refused(clause, match)
+                    if pattern in _MEDICATION_ADJUSTMENT_CLAIMS:
+                        refused = refused or _local_medication_refusal_v2(clause, match, sentence_scoped=True)
+                    if not refused:
+                        unsafe = True
+                        break
+                if unsafe:
+                    break
+            if unsafe:
+                break
+        if unsafe:
+            removed = True
+        else:
+            retained.append(sentence)
+            retained_positions.extend(range(cursor, cursor + len(sentence)))
+        cursor += len(sentence)
+    if not removed:
+        if source_positions is not None:
+            source_positions[:] = list(range(offset, offset + len(original)))
+        return original
+    untrimmed = "".join(retained)
+    body = untrimmed.strip()
+    if source_positions is not None:
+        trim = len(untrimmed) - len(untrimmed.lstrip())
+        source_positions[:] = retained_positions[trim:trim + len(body)] + [None] * (
+            (1 if body else 0) + len(SAFE_MEDICAL_BOUNDARY_REPLY_V2))
+    return (body + "\n" if body else "") + SAFE_MEDICAL_BOUNDARY_REPLY_V2
+
+
+__all__ = ["SAFE_MEDICAL_BOUNDARY_REPLY", "SAFE_MEDICAL_BOUNDARY_REPLY_V2", "guard_general_medical_reply"]

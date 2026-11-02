@@ -19,15 +19,15 @@ from tests.test_reflection_failure_persistence import _engine
 from tests.test_reflection_structured_contract_v23 import payload
 
 
-def test_contract_distinguishes_current_event_group_from_old_event_reference():
-    assert EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION == "2.4"
+def test_contract_assigns_event_identity_to_code_and_requires_reliable_current_evidence():
+    assert EVIDENCE_REVIEW_PROMPT_CONTRACT_VERSION == "2.5"
     assert EVIDENCE_REVIEW_PROTOCOL_VERSION == "2.0"
     prompt = reflection_system_prompt(True)
-    assert "同一批 reviews 中首次描述的一个新事件" in prompt
-    assert "逐对象复用同一组 event_evidence" in prompt
-    assert "same_event 专指请求中已提供 event_id 的历史事件" in prompt
-    assert "不把 unknown 改成" in prompt
-    assert "证据类型与结果字段无法如实一致，保留观察、changes=[]" in prompt
+    assert "你不输出事件分类或旧事件 ID" in prompt
+    assert "重复的原话不会刷新支持会话或置信" in prompt
+    assert "新原话也不自动证明事件刚刚发生" in prompt
+    assert "当期新证据依据时只记录观察，不增加支持分" in prompt
+    assert "reviews 可以没有 change" in prompt
 
 
 def test_current_event_group_reuses_identity_without_extra_support():
@@ -38,37 +38,45 @@ def test_current_event_group_reuses_identity_without_extra_support():
     supplement["evidence"] = deepcopy(first["evidence"][:1])
     apply(updater, llm, persona, ctx, [first, supplement], [change(first)])
     assert updater.last_status == "ok"
-    hypothesis = persona.person_hypotheses[0]
+    assert not persona.person_hypotheses
     assert len({row.event_id for row in persona.evidence_review_ledger}) == 1
-    assert len(hypothesis.supporting_events()) == 1
-    assert hypothesis.status == "candidate"
+    assert [row.event_kind for row in persona.evidence_review_ledger] == ["new_event", "same_event"]
+    assert updater.last_proposal_results[0]["reason"] == "event_identity_unknown_no_update"
     assert confirmed_prompt_hypotheses(persona) == []
     single_updater, single_llm, single_persona = setup()
     apply(single_updater, single_llm, single_persona, ctx, [first], [change(first)])
-    assert hypothesis.confidence == single_persona.person_hypotheses[0].confidence
-    before = hypothesis.model_dump()
-    # Repeating the very same event quotes cannot acquire a fresh vote even if
-    # the generated event_kind wrongly calls it new again in another session.
+    assert not single_persona.person_hypotheses
+    assert single_persona.evidence_review_ledger[0].event_id == persona.evidence_review_ledger[0].event_id
+    # Repeating the same event quotes cannot acquire a fresh vote in a later
+    # session; the model supplies no event classification or identifier.
     repeated_ctx = context(2, words=[turn.user for turn in ctx.turns])
-    repeated = review(repeated_ctx, hypothesis)
-    apply(updater, llm, persona, repeated_ctx, [repeated], [change(repeated, hypothesis)])
-    assert hypothesis.model_dump() == before
+    repeated = review(repeated_ctx)
+    apply(updater, llm, persona, repeated_ctx, [repeated], [change(repeated)])
+    assert not persona.person_hypotheses
+    assert len({row.event_id for row in persona.evidence_review_ledger}) == 1
+    assert persona.evidence_review_ledger[-1].event_kind == "same_event"
     assert updater.last_proposal_results[0]["reason"] == "same_event_no_fresh_evidence"
 
 
 @pytest.mark.parametrize("reference", [None, "r1", "unknown_old_event"])
-def test_missing_or_fabricated_old_event_still_rejects_whole_transaction(reference):
+def test_removed_model_event_fields_are_rejected_without_losing_independent_review(reference):
     ctx = context()
     first = review(ctx)
     extra = review(ctx, id="r2", event_kind="same_event", prior_event_id=reference)
     value = {"protocol_version": "2.0", "reviews": [first, extra], "changes": [change(first)]}
-    updater, client, persona = run([value, EMPTY])
-    assert updater.last_status == "failed"
-    assert updater.last_error_detail == (
-        "same_event_requires_known_reference" if reference is None else "unknown_prior_event_reference"
-    )
+    client = Replies([value])
+    updater = PersonaHypothesisUpdater(
+        client, evidence_review_protocol=True, body_json_protocol=True, itemwise_review=True)
+    persona = PersonaProfile(user_id="person")
+    updater.update(persona, ctx)
+    assert updater.last_status == "partial"
+    assert updater.last_review_results == [
+        {"review_index": 0, "status": "accepted", "reason": "event_identity_unknown_no_update"},
+        {"review_index": 1, "status": "rejected", "reason": "invalid_review_shape"},
+    ]
     assert len(client.calls) == 1 and updater.last_format_correction_count == 0
-    assert not persona.person_hypotheses and not persona.evidence_review_ledger
+    assert not persona.person_hypotheses and len(persona.evidence_review_ledger) == 1
+    assert updater.last_proposal_results[0]["reason"] == "event_identity_unknown_no_update"
 
 
 @pytest.mark.parametrize("relation", ["support", "unknown"])

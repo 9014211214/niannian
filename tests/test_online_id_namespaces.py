@@ -6,7 +6,7 @@ import pytest
 
 from aria.engine.context import EngineContext
 from aria.engine.policy import online_decision as decision
-from aria.engine.policy.online_json import parse_json_decision
+from aria.engine.policy.online_json import parse_json_decision, parse_v7_payload
 from aria.scenes.companion_elder.reasoning import ElderStateReasoner
 
 
@@ -50,7 +50,7 @@ def test_state_inventory_is_read_from_schema_instead_of_hardcoded_aliases(monkey
 
 
 @pytest.mark.parametrize('version', decision.ONLINE_DECISION_VERSIONS)
-def test_strategy_in_state_is_still_rejected_and_not_repaired(version):
+def test_strategy_in_state_is_never_accepted_or_repaired(version):
     value = {
         'response': '软件夹具',
         'state_signals': [{'id': 'autonomy_restoration', 'relation': 'candidate',
@@ -64,13 +64,35 @@ def test_strategy_in_state_is_still_rejected_and_not_repaired(version):
     if version == decision.ONLINE_DECISION_VERSION_V2:
         value['deliberation'] = {'person_read': '软件占位', 'applied_basis': [],
                                 'options': [{'intervention_id': '', 'predicted_reaction': '软件占位'}]}
-    if version == decision.ONLINE_DECISION_VERSION_SAFETY:
+    if version in decision.SAFETY_DECISION_VERSIONS:
         value['safety_concern'] = 'none'
+    if version in decision.EVIDENCE_DECISION_VERSIONS:
+        value['safety_evidence'] = {
+            'quote': '', 'subject': 'not_applicable',
+            'time': 'not_applicable', 'urgency': 'not_applicable',
+        }
+    if version in decision.BOUND_DECISION_VERSIONS:
+        value['applied_preference_ids'] = []
+    if version in decision.SEMANTIC_DECISION_VERSIONS:
+        value['response_segments'] = [{'text': value['response'], 'kind': 'conversation',
+                                       'source_quote': '', 'action': 'none', 'target': '', 'state_ref': ''}]
+    if version == decision.ONLINE_DECISION_VERSION_V7:
+        value.pop('response')
     raw = json.dumps(value, ensure_ascii=False)
-    with pytest.raises(ValueError, match='invalid_online_json_schema'):
-        parse_json_decision(raw, version)
+    if version == decision.ONLINE_DECISION_VERSION_V7:
+        assert parse_json_decision(raw, version) == raw
+        parsed, dropped = parse_v7_payload(raw)
+        assert 'state_signals' not in parsed
+        assert dropped == ['state_signals']
+        assert parsed['response'] == ''.join(row['text'] for row in value['response_segments'])
+    else:
+        with pytest.raises(ValueError, match='invalid_online_json_schema'):
+            parse_json_decision(raw, version)
     # The same complete payload is valid with a genuine state; no other fault masks the enum check.
     value['state_signals'][0]['id'] = 'autonomy_threat'
     valid = json.dumps(value, ensure_ascii=False)
     assert parse_json_decision(valid, version) == valid
+    if version == decision.ONLINE_DECISION_VERSION_V7:
+        parsed, dropped = parse_v7_payload(valid)
+        assert parsed['state_signals'] == value['state_signals'] and dropped == []
     assert json.loads(raw)['state_signals'][0]['id'] == 'autonomy_restoration'

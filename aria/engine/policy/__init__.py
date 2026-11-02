@@ -19,7 +19,8 @@ from .llm import LLMClient, MockLLMClient
 from .online_decision import (
     DETERMINISTIC_MODEL_FAILURE_REPLY,
     ONLINE_DECISION_VERSIONS,
-    ONLINE_DECISION_VERSION_SAFETY,
+    EVIDENCE_DECISION_VERSIONS, ONLINE_DECISION_VERSION_EVIDENCE,
+    ONLINE_DECISION_VERSION_SAFETY, SAFETY_DECISION_VERSIONS,
     apply_single_pass_decision,
     configured_online_decision_version,
     is_internal_protocol_response,
@@ -32,6 +33,7 @@ from .actions import (
     is_pending_confirmation,
 )
 from .prompt import build_messages, configured_delivery_block, select_delivery_mode
+from .release_prompt import CompactPromptBudgetExceeded
 
 __all__ = ["PolicyEngine", "build_messages", "select_delivery_mode"]
 
@@ -47,6 +49,7 @@ class PolicyEngine:
         fast_llm: Optional[LLMClient] = None,
         online_decision_version: Optional[str] = None,
         delivery_block: Optional[str] = None,
+        safety_response_instruction_version: str = "legacy",
     ):
         # ``llm`` 仅作旧注入名；在线策略永远只有这一条 fast client。
         selected = fast_llm or llm or MockLLMClient(role="online_fast")
@@ -60,8 +63,23 @@ class PolicyEngine:
             raise ValueError("unknown_online_decision_version")
         self.online_decision_version = version
         self.delivery_block = configured_delivery_block(delivery_block)
+        from .safety_instruction import SafetyResponseInstruction
+        self._safety_response_instruction = SafetyResponseInstruction(safety_response_instruction_version)
+        self._safety_response_instruction.validate(version)
 
-    def respond(
+    @property
+    def safety_response_instruction_version(self):
+        return self._safety_response_instruction.version
+
+    def respond(self, ctx, scene, utterance, persona=None, available_tools=None, model_route=None):
+        guard = getattr(self.fast_llm, "model_request_control", None)
+        admission = getattr(guard, "online_context_admission", None)
+        if callable(admission):
+            with admission(self.fast_llm, ctx, persona, utterance):
+                return self._respond_admitted(ctx, scene, utterance, persona, available_tools, model_route)
+        return self._respond_admitted(ctx, scene, utterance, persona, available_tools, model_route)
+
+    def _respond_admitted(
         self,
         ctx: EngineContext,
         scene: Scene,
@@ -70,9 +88,22 @@ class PolicyEngine:
         available_tools: Optional[list[str]] = None,
         model_route: ReplyModelRoute | None = None,
     ) -> str:
+        instruction = self._safety_response_instruction
+        instruction.bind_context(ctx, self.online_decision_version)
+        ctx.working_memory.pop("safety_response_instruction", None)
         # Select the current contract before building the base prompt.
         # Clear stale v3 semantics when an explicit historical policy is used.
         ctx.working_memory["_online_decision_version"] = self.online_decision_version
+        from ..memory.preference_candidate import bind_context as bind_preference_candidate
+        bind_preference_candidate(self.fast_llm, ctx)
+        from ..memory.preference_recovery import bind_context as bind_preference_recovery
+        bind_preference_recovery(self.fast_llm, ctx)
+        from ..memory.preference_dialogue import current_preference_invitation
+        evidence_candidate = self.online_decision_version in EVIDENCE_DECISION_VERSIONS
+        preference_invitation = (current_preference_invitation(persona, ctx)
+                                 if evidence_candidate else None)
+        from ..memory.preference_dialogue import bind_preference_request
+        bind_preference_request(persona, ctx, utterance)
         pending_action = current_pending_action(ctx)
         advertised_tools = (
             list(available_tools or [])
@@ -90,6 +121,8 @@ class PolicyEngine:
         messages = build_messages(
             scene, persona, ctx, utterance, advertised_tools,
             delivery_block=self.delivery_block,
+            **({"safety_response_instruction_version": instruction.version}
+               if instruction.version != "legacy" else {}),
         )
         if is_pending_confirmation(utterance, pending_action) and messages:
             pending_payload = {
@@ -113,7 +146,7 @@ class PolicyEngine:
             "fast_integrated", ("routing_not_provided",)
         )
         selected = self.fast_llm
-        if self.online_decision_version == ONLINE_DECISION_VERSION_SAFETY:
+        if self.online_decision_version in SAFETY_DECISION_VERSIONS:
             # Semantic safety cannot depend on the lexical fast/complex router.
             # This changes the shape of the same call, never adds a classifier call.
             route = ReplyModelRoute("fast_integrated", (*route.reasons, "same_call_semantic_safety"))
@@ -124,10 +157,22 @@ class PolicyEngine:
                 version=self.online_decision_version, persona=persona,
                 delivery_block=self.delivery_block,
                 format_style=("schema_guided" if getattr(selected, "online_return_format", None)
-                              == "json_object" else "legacy"),
+                              in {"json_object", "json_schema_v1"} else "legacy"),
             )
         else:
             messages = _fast_delivery_messages(messages, ctx)
+        instruction.validate_messages(messages, self.online_decision_version)
+        if instruction.version != "legacy":
+            from .safety_instruction import SCENE_CLARIFICATION_SHA256
+            ctx.working_memory["safety_response_instruction"] = {
+                "version": instruction.version, "system_block_sha256": instruction.block_sha256,
+                "scene_clarification_sha256": (None if instruction.version == "compact_response_v1"
+                                               else SCENE_CLARIFICATION_SHA256),
+                "user_id": ctx.user_id, "session_id": ctx.session_id, "scene_id": ctx.scene_id,
+                "turn_index": len(ctx.turns), "online_version": self.online_decision_version,
+                "passed_to_client": False, "actual_send_verified": False,
+                "semantic_verified": False, "grants_permission": False,
+            }
         deterministic_fallback = False
         readiness_dispatch = None
         readiness_outcome = "abandoned"
@@ -138,8 +183,33 @@ class PolicyEngine:
             if isinstance(snapshot, dict):
                 # This is the local client boundary, not a provider receipt.
                 snapshot["passed_to_client"] = True
-            response = selected.complete(messages)
+            if (evidence_candidate
+                    and current_preference_invitation(persona, ctx) != preference_invitation):
+                raise ValueError("preference_invitation_changed_before_dispatch")
+            if self._safety_response_instruction is not instruction:
+                raise ValueError("safety_response_instruction_changed_before_dispatch")
+            instruction.validate_messages(messages, self.online_decision_version)
+            if instruction.version != "legacy":
+                ctx.working_memory["safety_response_instruction"]["passed_to_client"] = True
+            # A request option, not a client flag or a user-text instruction.
+            # A client lacking this explicit capability fails closed.
+            requirements = {}
+            if preference_invitation is not None:
+                requirements["require_preference_control"] = True
+            if instruction.version == "conditional_response_v2":
+                requirements["require_task_projection"] = True
+            guard = getattr(selected, "model_request_control", None)
+            bind_context = getattr(guard, "bind_online_context", None)
+            if callable(bind_context):
+                bind_context(selected, ctx, persona, utterance, messages, requirements, preference_invitation)
+            response = selected.complete(messages, **requirements)
             readiness_outcome = "client_returned"
+        except CompactPromptBudgetExceeded:
+            # This typed local failure precedes HTTP Request construction.
+            # Preserve it for the product's no-attempt check; do not turn it
+            # into a model/transport failure and lose the distinction.
+            readiness_outcome = "local_request_rejected"
+            raise
         except Exception:
             readiness_outcome = "client_error"
             response = DETERMINISTIC_MODEL_FAILURE_REPLY
@@ -153,7 +223,7 @@ class PolicyEngine:
             from ..cognitive import finish_cognitive_readiness_dispatch
             finish_cognitive_readiness_dispatch(ctx, readiness_dispatch, readiness_outcome)
         if deterministic_fallback and (
-            self.online_decision_version == ONLINE_DECISION_VERSION_SAFETY
+            self.online_decision_version in SAFETY_DECISION_VERSIONS
             or (ctx.working_memory.get("model_route") or {})
             .get("state", {}).get("tier") == "online_integrated"
         ):

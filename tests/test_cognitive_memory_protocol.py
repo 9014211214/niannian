@@ -40,7 +40,7 @@ def test_enabled_primary_example_is_one_object_with_five_arrays():
     assert set(example) == set(FIELDS)
     assert all(isinstance(example[name], list) for name in FIELDS)
     assert set(example["cognitive_observations"][0]) == {
-        "domain", "evidence_quote", "turn_index", "functional_impact", "event_kind", "prior_event_id",
+        "domain", "evidence_quote", "turn_index", "functional_impact", "event_kind", "prior_event_id", "signal",
     }
     assert "同一个顶层JSON对象必须同时包含" in system
     assert "不能省略字段" in system
@@ -158,6 +158,61 @@ def test_complete_observation_fixture_still_requires_literal_evidence(tmp_path):
     assert extractor.last_status == "ok"
     assert [r.source_quote for r in persona.cognitive_observations] == [ctx.turns[0].user]
     assert persona.episodic_memory == []
+
+
+@pytest.mark.parametrize("prefix_recovery", [False, True])
+@pytest.mark.parametrize("signal", ["explicit_change", "context", None, "invalid", ["context"]])
+def test_signal_is_itemwise_semantic_input_and_privacy_mask_survives(prefix_recovery, signal):
+    from aria.engine.memory.memory_contract import validate_memory_response
+    persona = enabled()
+    text = "邻居没忘约定，我却又记错了时间，只好让人重新安排。"
+    ctx = context_with(persona, text)
+    ordinary = "我喜欢蓝色的纸风车。"
+    ctx.add_turn(ordinary, "听见了。")
+    payload = complete_payload()
+    row = {"domain": "memory", "evidence_quote": text, "turn_index": 0, "functional_impact": True,
+           "event_kind": "new_event", "prior_event_id": None}
+    if signal is not None:
+        row["signal"] = signal
+    payload["cognitive_observations"] = [row]
+    payload["episodes"] = [{"summary": words, "keywords": [], "referenceable": True,
+                            "evidence_quote": words, "turn_index": index}
+                           for index, words in enumerate([text, ordinary])]
+    # Native reception admits old or malformed optional signal for itemwise
+    # extraction; it must not discard the unrelated ordinary fact.
+    validate_memory_response(json.dumps(payload, ensure_ascii=False))
+    client = LocalResponse(payload)
+    extractor = LLMExtractor(client, prefix_recovery=prefix_recovery)
+    result = extractor.extract(ctx, persona)
+    assert extractor.last_status == "ok" and len(client.calls) == 1
+    assert [row.source_quote for row in result.new_episodes] == [ordinary]
+    assert 0 in ctx.working_memory["_sensitive_memory_excluded_turns"]
+    if isinstance(signal, list) or signal == "invalid":
+        assert result.cognitive_observations == []
+    else:
+        assert len(result.cognitive_observations) == 1
+        note = result.cognitive_observations[0]
+        assert note.counting is (signal == "explicit_change")
+        assert note.functional_impact is (signal == "explicit_change")
+
+
+def test_default_native_memory_wire_requires_semantic_signal_without_new_call():
+    from aria.engine.policy.memory_structured import memory_request_format
+    observation = memory_request_format()["json_schema"]["schema"]["$defs"]["_Observation"]
+    assert "signal" in observation["required"]
+    assert observation["properties"]["signal"] == {"type": "string", "enum": ["explicit_change", "context"]}
+
+
+@pytest.mark.parametrize("text", ["我突然不认得家了。", "煤气忘关了。"])
+def test_semantic_signal_cannot_override_existing_emergency_exclusion(text):
+    persona = enabled()
+    ctx = context_with(persona, text)
+    payload = complete_payload()
+    payload["cognitive_observations"] = [{"domain": "orientation", "evidence_quote": text,
+        "turn_index": 0, "functional_impact": True, "event_kind": "new_event", "prior_event_id": None,
+        "signal": "explicit_change"}]
+    extractor = LLMExtractor(LocalResponse(payload))
+    assert extractor.extract(ctx, persona).cognitive_observations == []
 
 
 def test_offline_failed_protocol_stays_pending_and_does_not_reach_reflection(tmp_path):

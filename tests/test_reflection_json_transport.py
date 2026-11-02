@@ -159,7 +159,6 @@ def test_projection_keeps_shape_and_preserves_original_full_schema():
 def test_projection_does_not_weaken_local_full_validation():
     review = {"id": "r1", "hypothesis_id": None, "claim_quote": None, "scope_quote": None,
               "applicability": "unknown", "relation": "neutral", "evidence_basis": "context_only",
-              "event_kind": "unknown", "prior_event_id": None,
               "evidence": [{"turn_index": 0, "evidence_quote": "今天"}],
               "event_evidence": [{"turn_index": 0, "evidence_quote": "今天"}],
               "reason": "仅背景", "event_summary": "本次话题"}

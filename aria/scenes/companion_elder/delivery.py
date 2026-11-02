@@ -14,6 +14,11 @@ from typing import Any
 
 from ...engine.context import EngineContext
 from ...engine.model.persona import PersonaProfile
+from ...engine.policy.action_receipts import (
+    _GENERIC_EXTERNAL_ACTORS, _TERMINAL_NOTIFICATION_STATUSES,
+    _actor_aliases, _notification_delivery_confirmed,
+    _successful_receipts, _receipt_matches_claim,
+)
 from ...engine.policy.reply_contract import (
     UNAVAILABLE_CONTACT_REPLY, contact_offer_violations, reply_quality_contract,
     physical_offer_violations,
@@ -31,13 +36,8 @@ UNVERIFIED_ACTION_REPLY = (
 UNGROUNDED_EXTERNAL_EVENT_REPLY = (
     "我没有依据确认这件事已经发生，先不把它说成事实。"
 )
+UNVERIFIED_PREFERENCE_REPLY = "我这次没有确认或修改相处说明。您可以在相处说明里核对当前状态。"
 
-_GENERIC_EXTERNAL_ACTORS = (
-    "工作人员", "护理人员", "护理员", "照护人", "家里人", "家属",
-    "孙女", "孙子", "外孙女", "外孙", "女儿", "儿子", "老伴", "爱人",
-    "护士", "医生", "药师", "社工", "社区", "邻居", "朋友", "对方",
-    "收件人",
-)
 _THIRD_PERSON_PRONOUNS = ("他们", "她们", "他", "她")
 _AGENT_ASSISTANCE = ("我", "替你", "帮你", "给你", "为你")
 _MANAGED_SUBJECTS = ("提醒", "闹钟", "通知", "消息", "报名", "订单")
@@ -47,7 +47,6 @@ _UNCERTAIN_OR_HYPOTHETICAL = (
     "如果", "假如", "要是", "可能", "也许", "或许", "大概", "听说",
     "据说", "预计", "准备", "打算", "将会", "会不会",
 )
-_TERMINAL_NOTIFICATION_STATUSES = {"delivered", "notified"}
 _EXPLICIT_NON_COMPLETION = (
     "这个动作还没有执行", "还没有实际执行", "没有创建成功",
     "尚未执行", "未执行",
@@ -87,18 +86,6 @@ _USER_FEEDBACK_CONDITION = re.compile(
 )
 
 
-def _actor_aliases(persona: PersonaProfile | None) -> dict[str, str]:
-    aliases = {item: item for item in _GENERIC_EXTERNAL_ACTORS}
-    if persona is not None:
-        for item in persona.referenceable_relationships()[-6:]:
-            canonical = item.name.strip() or item.relation.strip()
-            if not canonical:
-                continue
-            if item.name.strip():
-                aliases[item.name.strip()] = canonical
-            if item.relation.strip():
-                aliases[item.relation.strip()] = canonical
-    return aliases
 
 
 def _is_completed_claim(clause: str, match: re.Match[str]) -> bool:
@@ -160,6 +147,7 @@ def _extract_claims(
     persona: PersonaProfile | None,
     *,
     require_completion: bool,
+    additional_action_patterns=(),
 ) -> list[dict[str, str]]:
     """Extract action/event claims while retaining the grammatical actor."""
     aliases = _actor_aliases(persona)
@@ -180,7 +168,7 @@ def _extract_claims(
                 mentions[-1][2], active_actor
             )
 
-        for category, pattern in _ACTION_PATTERNS:
+        for category, pattern in (*_ACTION_PATTERNS, *additional_action_patterns):
             for match in pattern.finditer(clause):
                 prefix = clause[max(0, match.start() - 10):match.start()]
                 if any(marker in prefix for marker in _NEGATIONS):
@@ -272,82 +260,10 @@ def _third_party_claim_is_grounded(
     return False
 
 
-def _notification_delivery_confirmed(receipt: dict, data: dict) -> bool:
-    # ok only describes the adapter call. Explicit pending/unknown/conflicting
-    # statuses cannot be promoted into terminal delivery by a truthy flag.
-    statuses = [source["status"] for source in (receipt, data)
-                if "status" in source]
-    if any(not isinstance(status, str)
-           or status.strip().lower() not in _TERMINAL_NOTIFICATION_STATUSES
-           for status in statuses):
-        return False
-    if statuses:
-        return len({status.strip().lower() for status in statuses}) == 1
-    # Compatibility for adapters with an explicit terminal boolean receipt.
-    return data.get("notified") is True or data.get("delivered") is True
 
 
-def _successful_receipts(
-    ctx: EngineContext,
-    persona: PersonaProfile | None,
-) -> list[dict[str, str]]:
-    successful: list[dict[str, str]] = []
-    aliases = _actor_aliases(persona)
-    receipts = [
-        ctx.working_memory.get("_consumed_tool_result_for_turn"),
-        ctx.working_memory.get("last_tool_result"),
-    ]
-    for receipt in receipts:
-        if not isinstance(receipt, dict) or receipt.get("ok") is not True:
-            continue
-        data = receipt.get("data")
-        data = data if isinstance(data, dict) else {}
-        if any(
-            data.get(field) is False
-            for field in ("executed", "persisted", "notified", "delivered")
-        ):
-            continue
-        category = {
-            "medication_reminder": "reminder",
-            "notify_family": "notification",
-        }.get(str(receipt.get("tool") or ""))
-        if not category:
-            continue
-        if category == "notification" and not _notification_delivery_confirmed(receipt, data):
-            continue
-        args = receipt.get("args")
-        args = args if isinstance(args, dict) else {}
-        target = str(args.get("contact") or "").strip()
-        successful.append({
-            "category": category,
-            "target": aliases.get(target, target),
-        })
-    care_action = ctx.working_memory.get("last_care_action")
-    if isinstance(care_action, dict) and care_action.get("ok") is True:
-        category = {
-            "reminder_created": "reminder",
-        }.get(str(care_action.get("action") or ""))
-        if category:
-            successful.append({"category": category, "target": ""})
-    return successful
 
 
-def _receipt_matches_claim(
-    claim: dict[str, str],
-    receipts: list[dict[str, str]],
-) -> bool:
-    for receipt in receipts:
-        if receipt["category"] != claim["category"]:
-            continue
-        if claim.get("target"):
-            # A named outbound target must be present in, and match, the
-            # server-side prepared args.  Category-only success is not proof.
-            if not receipt.get("target"):
-                continue
-            if receipt["target"] != claim["target"]:
-                continue
-        return True
-    return False
 
 
 def _minimal_care_record_claims(ctx: EngineContext, candidate: str) -> tuple[str, bool]:
@@ -458,6 +374,53 @@ def _record_guard(
     online["delivery_guard"] = integrated
 
 
+def _uninvited_preference_completion_violations(ctx, candidate, utterance, persona):
+    """Finite output-receipt backstop, not a classifier of the owner's request.
+
+    Applies only to a historical discarded uninvited control. Mere
+    preference words, future/negated actions and unrelated save/refusal prose
+    do not make a completed preference transaction. This is deliberately not
+    claimed to cover every natural-language way of asserting completion.
+    """
+    online = ctx.working_memory.get("online_turn_decision") or {}
+    # v5 uses structured sentence annotations and a code-owned status channel.
+    # Do not extend this legacy lexical backstop to the new protocol.
+    if (online.get("version") == "online_turn_decision_v5_bound"
+            or ctx.working_memory.get("_safety_delivery_version") != "minimal_response_v1"
+            or online.get("preference_control_ignored_reason") != "no_invitation"
+            or type(online.get("turn_index")) is not int
+            or online["turn_index"] != len(ctx.turns)):
+        return []
+    named = "\n".join(clause for clause in _CLAUSE_SPLIT.split(candidate)
+                      if re.search(r"相处说明|相处偏好|交流偏好|沟通偏好", clause))
+    patterns = (("preference_confirm", re.compile(r"保存|记下|确认|启用")),
+                ("preference_decline", re.compile(r"拒绝")))
+    claims = [claim for claim in _extract_claims(
+        named, persona, require_completion=True, additional_action_patterns=patterns)
+        if claim["category"].startswith("preference_") and claim["owner"] != "third_party"]
+    if not claims:
+        return []
+    from ...engine.memory.preference_dialogue import preference_fingerprint, _sha
+    receipt = ctx.working_memory.get("preference_dialogue_receipt") or {}
+    row = next((item for item in persona.stated_preferences
+                if item.id == receipt.get("target_id")), None) if persona is not None else None
+    index = receipt.get("turn_index")
+    source = (utterance if index == len(ctx.turns) else ctx.turns[index].user
+              if type(index) is int and 0 <= index < len(ctx.turns) else None)
+    if (row is not None and receipt.get("version") == "preference_confirmation_v1"
+            and receipt.get("persisted") is True
+            and row.status == {"confirm": "confirmed", "decline": "declined"}.get(receipt.get("action"))
+            and receipt.get("owner_id") == persona.user_id == ctx.user_id
+            and receipt.get("session_id") == ctx.session_id
+            and type(index) is int and source is not None
+            and receipt.get("owner_message_sha256") == _sha(source)
+            and receipt.get("committed_sha256") == preference_fingerprint(row)
+            and all(claim["category"] == "preference_" + str(receipt.get("action"))
+                    for claim in claims)):
+        return []
+    return ["unverified_preference_completion"]
+
+
 def guard_external_delivery_response(
     ctx: EngineContext,
     response: str,
@@ -466,6 +429,10 @@ def guard_external_delivery_response(
     *, privacy_predicate=is_cognitive_health_sensitive_utterance,
 ) -> str:
     """Enforce receipts for Aria actions and grounding for third parties."""
+    if ctx.working_memory.get("_online_decision_version") in ("online_turn_decision_v6_semantic", "online_turn_decision_v7"):
+        from ...engine.policy.semantic_delivery import guard_semantic_delivery
+        return guard_semantic_delivery(ctx, response, utterance, persona,
+                                       privacy_predicate=privacy_predicate)
     compact = " ".join(str(response or "").strip().split())
     if not compact:
         _record_guard(ctx, [])
@@ -474,8 +441,16 @@ def guard_external_delivery_response(
         ctx.working_memory.get("_delivery_response_candidate_for_turn")
         or compact
     )
+    if ctx.working_memory.get("_safety_delivery_version") in ("source_response_v3", "source_response_v4", "minimal_response_v1"):
+        from ...engine.risk.source_response import attributed_current_quote
+        candidate = attributed_current_quote(candidate, utterance)
     checked_candidate, invalid_care_status = _minimal_care_record_claims(ctx, candidate)
-    claims = _extract_claims(checked_candidate, persona, require_completion=True)
+    # Explicit v2 safety-task backstop for finite completion statements.
+    # This extends receipt checking, not task/safety semantic classification.
+    extra = (("notification", re.compile(r"发送|发给|转达|寄给")),) if (
+        ctx.working_memory.get("_safety_delivery_version") in ("task_context_v2", "source_response_v3", "source_response_v4", "minimal_response_v1")) else ()
+    claims = _extract_claims(checked_candidate, persona, require_completion=True,
+                             additional_action_patterns=extra)
     receipts = _successful_receipts(ctx, persona)
     sources = _grounding_sources(ctx, utterance, persona, privacy_predicate=privacy_predicate)
     # Use the actual deliverable, not a superseded model candidate, for future
@@ -483,7 +458,10 @@ def guard_external_delivery_response(
     future_violations = contact_offer_violations(compact, reply_quality_contract(ctx))
     physical_violations = physical_offer_violations(compact)
     device_violations = device_capability_violations(compact, ctx, utterance)
-    violations: list[str] = [*future_violations, *physical_violations, *device_violations]
+    preference_violations = _uninvited_preference_completion_violations(
+        ctx, candidate, utterance, persona)
+    violations: list[str] = [*future_violations, *physical_violations, *device_violations,
+                             *preference_violations]
     if invalid_care_status:
         violations.append("unverified_minimal_care_record_status")
     for claim in claims:
@@ -496,7 +474,7 @@ def guard_external_delivery_response(
             ):
                 violations.append("ungrounded_third_party_completion")
     _record_guard(ctx, violations)
-    if violations and not invalid_care_status and not future_violations and not physical_violations and not device_violations and any(
+    if violations and not invalid_care_status and not future_violations and not physical_violations and not device_violations and not preference_violations and any(
         marker in compact for marker in _EXPLICIT_NON_COMPLETION
     ):
         # 工具失败路径已经给出了更具体、真实的失败原因，不要再用通用
@@ -519,8 +497,27 @@ def guard_external_delivery_response(
         safe = "我没有身体，也没有接入能执行这件事的设备，不能替你动手完成。"
     elif device_violations:
         safe = UNCONFIRMED_DEVICE_CAPABILITY_REPLY
+    elif preference_violations:
+        online = ctx.working_memory.get("online_turn_decision") or {}
+        if (online.get("version") == "online_turn_decision_v5_bound"
+                and type(online.get("preference_body_composition")) is dict):
+            # Model sentence annotations are not receipt evidence. Apply the
+            # existing finite completion backstop without discarding unrelated
+            # companion sentences or the code-produced transaction status.
+            from ...engine.risk.safety_review import response_sentences
+            from ...engine.risk.source_response import attributed_current_quote
+            sentences = response_sentences(str(response))
+            safe = "".join(sentence for sentence in sentences
+                if not _uninvited_preference_completion_violations(
+                    ctx, attributed_current_quote(sentence, utterance), utterance, persona)).strip()
+            if not safe:
+                safe = UNVERIFIED_PREFERENCE_REPLY
+        else:
+            safe = UNVERIFIED_PREFERENCE_REPLY
     if safe != compact:
         ctx.working_memory["delivery_response_guard"]["response_changed"] = True
+        if ctx.working_memory.get("_safety_delivery_version") == "minimal_response_v1":
+            return safe
         from ...engine.policy.online_decision import _controlled_wait_task_communication
 
         # A compound violation must not return before the independent task is
@@ -530,7 +527,8 @@ def guard_external_delivery_response(
             safe = f"{safe}\n{task_message}"
             ctx.working_memory["delivery_response_guard"]["task_communication"] = task_trace
         return safe
-    return compact
+    return (str(response).strip() if ctx.working_memory.get("_safety_delivery_version") in ("source_response_v3", "source_response_v4", "minimal_response_v1")
+            else compact)
 
 
 __all__ = [
