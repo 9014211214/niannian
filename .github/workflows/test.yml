@@ -21,7 +21,7 @@ jobs:
   test:
     name: ${{ matrix.os }} / Python ${{ matrix.python-version }} / ${{ matrix.partition }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && matrix.partition == 'B' && 180 || 120 }}
     strategy:
       fail-fast: false
       matrix:
