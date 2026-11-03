@@ -177,6 +177,18 @@ def test_current_span_clearance_cannot_use_a_historical_risk_shape(risk):
     assert row["span_review_complete"] and row["delete_sentence_ids"] == []
 
 
+def test_native_period_units_preserve_bytes_and_existing_maximum_capacity():
+    from aria.engine.risk.safety_review_v2 import MAX_SENTENCES, response_sentences
+
+    text = "Rate 3.5 at example.org. Keep this."
+    assert response_sentences(text) == (text,)
+    assert response_sentences(text, split_periods=True) == ("Rate 3.5 at example.org.", " Keep this.")
+    bounded = "One. Two," * MAX_SENTENCES
+    assert len(response_sentences(bounded)) == MAX_SENTENCES
+    assert response_sentences(bounded, split_periods=True) == response_sentences(bounded)
+    assert "".join(response_sentences(bounded, split_periods=True)) == bounded
+
+
 def test_maximum_span_review_fits_native_completion_limit_without_repeating_ids():
     from aria.engine.risk.safety_review import MAX_SENTENCES
     risk = assessment("medical_emergency", subject="uncertain", time="recent_resolved",

@@ -4,4 +4,4 @@
 engine/ 永不依赖 scenes/;场景通过 interfaces/ 的协议接入。
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

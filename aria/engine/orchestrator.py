@@ -783,7 +783,7 @@ class Engine:
         )
         from .policy.delivery_provenance import record_reply_stage
         response_overridden = False
-        response_guard = getattr(self.scene, "guard_response", None)
+        response_guard = self._scene_response_guard(self.scene, before_native_review=action is None)
         if callable(response_guard):
             guarded = response_guard(ctx, response)
             record_reply_stage(ctx, "scene_guard", response, guarded,
@@ -1578,7 +1578,7 @@ class Engine:
         if (frozen is not None and assessment_current
                 and (not self._reviews_clear_body() or review_evidence is not None)
                 and (expected_return is None or expected_return == frozen.guarded)):
-            response_guard = getattr(guard_scene, "guard_response", None)
+            response_guard = self._scene_response_guard(guard_scene, before_native_review=review_evidence is not None)
             delivery_guard = getattr(guard_scene, "guard_delivery_response", None)
             if callable(response_guard) and callable(delivery_guard):
                 # Recheck the original candidate, including completion claims
@@ -1617,8 +1617,8 @@ class Engine:
                             delivered_prelude=delivered_prelude)
                     reviewed = self._remove_repeated_safety_core(
                         ctx, guarded, reviewed, protection, body_positions, body_segments)
-                    reviewed = self._project_reviewed_ui_state(ctx, utterance, profile, reviewed,
-                                                               candidate=guarded, positions=body_positions)
+                    reviewed = self._guard_reviewed_body(ctx, utterance, profile, reviewed,
+                                                         candidate=guarded, positions=body_positions)
                     remaining_protection = self._undelivered_review_protection(ctx, protection)
                     response = "\n".join(piece for piece in (remaining_protection, reviewed) if piece)
                     if not response:
@@ -1673,7 +1673,8 @@ class Engine:
                 preference_reply, _ignored_action = parse_action_projected(ctx, preference_reply)
                 ctx.working_memory["_delivery_response_candidate_for_turn"] = preference_reply
                 for guard_name in ("guard_response", "guard_delivery_response"):
-                    guard = getattr(self.scene, guard_name, None)
+                    guard = (self._scene_response_guard(self.scene, before_native_review=True)
+                             if guard_name == "guard_response" else getattr(self.scene, guard_name, None))
                     if callable(guard):
                         before = preference_reply
                         preference_reply = (guard(ctx, before) if guard_name == "guard_response"
@@ -1702,6 +1703,14 @@ class Engine:
                 and self.safety_review_version == "safety_review_v2"
                 and self.safety_delivery_version == MINIMAL_RESPONSE_V1
                 and getattr(self.safety_review_llm, "role", None) == "safety_review")
+
+    def _scene_response_guard(self, scene, *, before_native_review):
+        from .risk.safety_review_v2 import uses_owner_sources
+        if before_native_review and self._reviews_clear_body() and uses_owner_sources(self.safety_review_llm):
+            guard = getattr(scene, "guard_response_before_review", None)
+            if guard is not None:
+                return guard
+        return getattr(scene, "guard_response", None)
 
     def _review_clear_source_body(self, ctx, utterance, candidate, *, safety_prelude):
         """Review final bound model spans without editing genuine code receipts.
@@ -1798,15 +1807,17 @@ class Engine:
         review["code_receipts_excluded_from_review"] = any(origin is None for origin in positions)
         record_reply_stage(ctx, "clear_body_review", candidate, response,
                            violations=[] if clear else ["body_safety_review"])
-        return self._project_reviewed_ui_state(ctx, utterance, self.persona, response), clear
+        response = self._guard_reviewed_body(ctx, utterance, self.persona, response)
+        return response, clear and review.get("model_body_delivered") is True
 
     @staticmethod
     def _retained_review_offsets(candidate, body, review):
         """Exact source positions of the reviewer's retained and edge-stripped text."""
-        from .risk.safety_review_v2 import response_sentences
+        from .risk.safety_review_v2 import NATIVE_SPAN_UNIT, response_sentences
         retained = set(review.get("retained_sentence_ids", []))
         offsets, offset = [], 0
-        for index, sentence in enumerate(response_sentences(candidate)):
+        sentences = response_sentences(candidate, split_periods=review.get("deletion_unit") == NATIVE_SPAN_UNIT)
+        for index, sentence in enumerate(sentences):
             if index in retained:
                 offsets.extend(range(offset, offset + len(sentence)))
             offset += len(sentence)
@@ -1814,24 +1825,37 @@ class Engine:
         start = len(text) - len(text.lstrip())
         return offsets[start:start + len(body)] if text.strip() == body else None
 
-    def _project_reviewed_ui_state(self, ctx, utterance, profile, body, *, candidate=None, positions=None):
-        """Use the same transaction evidence after either route's safety review."""
+    def _guard_reviewed_body(self, ctx, utterance, profile, body, *, candidate=None, positions=None):
+        """Apply final medical and transaction backstops to the actual retained text."""
         from .memory.preference_status import preceding_failed_ui_state
         from .policy.delivery_spans import model_positions, publish_positions
         from .policy.delivery_provenance import record_reply_stage
         from .policy.semantic_delivery import guard_semantic_delivery
+        from .risk.safety_review_v2 import uses_owner_sources
         review = ctx.working_memory.get("safety_review") or {}
         trace = ctx.working_memory.get("online_turn_decision") or {}
-        if (not body or review.get("status") != "reviewed" or trace.get("version") != "online_turn_decision_v7"
-                or not any(row["kind"] == "preference_state" for row in trace.get("response_segments") or [])):
+        if not body or review.get("status") != "reviewed" or trace.get("version") != "online_turn_decision_v7":
             return body
-        failed_state = preceding_failed_ui_state(profile, ctx, utterance)
-        if not failed_state:
+        medical_guard = (getattr(self.scene, "guard_reviewed_medical", None)
+                         if self._reviews_clear_body() and uses_owner_sources(self.safety_review_llm) else None)
+        has_state = any(row["kind"] == "preference_state" for row in trace.get("response_segments") or [])
+        failed_state = preceding_failed_ui_state(profile, ctx, utterance) if has_state else None
+        if medical_guard is None and not failed_state:
             return body
         if model_positions(ctx, body) is None and candidate is not None and positions is not None:
             offsets = self._retained_review_offsets(candidate, body, review)
             if offsets is not None:
                 publish_positions(ctx, body, [positions[i] for i in offsets])
+        if medical_guard is not None:
+            guarded = medical_guard(ctx, body)
+            if guarded != body:
+                record_reply_stage(ctx, "reviewed_medical_guard", body, guarded,
+                                   violations=["unsafe_medical_claim"])
+                review["model_body_delivered"] = any(
+                    origin is not None for origin in model_positions(ctx, guarded) or [])
+                body = guarded
+        if not failed_state:
+            return body
         projected = guard_semantic_delivery(ctx, body, utterance, profile, privacy_predicate=None,
                                             failed_state=failed_state)
         if projected != body:
@@ -1857,7 +1881,7 @@ class Engine:
     def _remove_repeated_safety_core(ctx, candidate, reviewed, protection, positions, segments):
         """Delete only exact repeated sentences from bound marked segments."""
         from .risk.source_response import digest
-        from .risk.safety_review_v2 import response_sentences
+        from .risk.safety_review_v2 import NATIVE_SPAN_UNIT, response_sentences
 
         trace = ctx.working_memory.get("online_turn_decision") or {}
         if trace.get("version") != "online_turn_decision_v7" or not protection or not reviewed:
@@ -1885,7 +1909,7 @@ class Engine:
         # delete a shared condition and leave a different consequent behind.
         # First recover the reviewer's exact retained offsets, then only remove
         # an entire original sentence which survived review in full.
-        sentences = response_sentences(candidate)
+        sentences = response_sentences(candidate, split_periods=review.get("deletion_unit") == NATIVE_SPAN_UNIT)
         retained = review.get("retained_sentence_ids")
         if (type(retained) is not list
                 or any(type(index) is not int or not 0 <= index < len(sentences) for index in retained)

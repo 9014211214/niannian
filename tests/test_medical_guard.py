@@ -89,3 +89,38 @@ def test_cognitive_guard_remains_more_specific_for_cognitive_diagnosis():
     output = scene.guard_response(None, "你这就是阿尔茨海默病。")
     assert "不能通过聊天预测、诊断" in output
     assert output != SAFE_MEDICAL_BOUNDARY_REPLY
+
+
+@pytest.mark.parametrize("owner,mask", [
+    ("药盒空了两格，我可能重复吃了药。", (True, False, True)),
+    ("这段话能给我说清楚些吗？", (True, False, True)),
+    ("这段话能给我说清楚些吗？", (True, True, True)),
+    ("这段话能给我说清楚些吗？", (True, True)),
+])
+def test_native_medical_backstop_checks_the_reviewed_remainder(tmp_path, monkeypatch, owner, mask):
+    from contextlib import closing
+    import json
+    from aria.voice.minimal import MinimalWebApp
+    from tests.test_deepseek_offline_route import clients, guard
+    from tests.test_review_delivery_convergence import review_app_wires
+
+    draft = "先别急着喝东西冲淡，也别再吃任何药。把药盒留着。"
+    bundle = clients()
+    def first_output(client, wire):
+        if client is bundle.online:
+            return {"safety_concern": "none", "response_segments": [{"text": draft}]}
+        assert client is bundle.safety_review
+        return {"risk_assessment": [], "keep_each_span": list(mask)}
+
+    wires = review_app_wires(monkeypatch, bundle, first_output)
+    with closing(guard(tmp_path)) as allowance:
+        with closing(MinimalWebApp(tmp_path / "app", clients=bundle, model_call_guard=allowance)) as app:
+            sid = app.start()["state"]["session_id"]
+            assert app.submit(owner, "turn1", sid, on_safety_prelude=lambda _: True)["ok"]
+            assert len(wires) == 2
+            request = json.loads(wires[1]["messages"][1]["content"])
+            assert request["candidate"] == draft and len(request["sentences"]) == 3
+            turn = app._run["turns"][0]
+            assert "别再吃任何药" not in turn["response"]
+            assert ("先别急着喝东西冲淡" in turn["response"]) is (mask == (True, False, True))
+            assert ("把药盒留着" in turn["response"]) is (len(mask) == 3)

@@ -11,11 +11,15 @@ from ..risk.safety_review import (MAX_BODY_BYTES, MAX_SENTENCES, SAFETY_REVIEW_I
 from ..risk import safety_review_v2
 
 
-def safety_request_format(version=SAFETY_REVIEW_VERSION, *, owner_sources=False):
+def safety_request_format(version=SAFETY_REVIEW_VERSION, *, owner_sources=False, sentence_count=None):
     if version not in {SAFETY_REVIEW_VERSION, safety_review_v2.SAFETY_REVIEW_VERSION}:
         raise ValueError("invalid_safety_review_version")
     schema = (safety_review_v2.safety_review_schema(owner_sources=owner_sources)
               if version == safety_review_v2.SAFETY_REVIEW_VERSION else safety_review_schema())
+    if version == safety_review_v2.SAFETY_REVIEW_VERSION and owner_sources and sentence_count is not None:
+        if type(sentence_count) is not int or not 1 <= sentence_count <= MAX_SENTENCES:
+            raise ValueError("invalid_safety_review_sentences")
+        schema["properties"]["keep_each_span"].update(minItems=sentence_count, maxItems=sentence_count)
     return {"type": "json_schema", "json_schema": {
         "name": "aria_" + version, "strict": True, "schema": schema}}
 
@@ -47,6 +51,8 @@ def validate_safety_structured_client(client):
         sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
     binding["v2_instruction_sha256"] = sha256(safety_review_v2.SAFETY_REVIEW_INSTRUCTION.encode()).hexdigest()
     if safety_review_v2.uses_owner_sources(client):
+        # The allowance binds the schema template. Each outgoing request
+        # separately binds the exact verdict count to its validated candidate.
         fmt = safety_request_format(safety_review_v2.SAFETY_REVIEW_VERSION, owner_sources=True)
         binding["source_risk_schema_sha256"] = sha256(json.dumps(fmt, sort_keys=True,
             separators=(",", ":"), allow_nan=False).encode()).hexdigest()
@@ -172,11 +178,16 @@ def validate_safety_review_request(messages, *, client=None):
            for i, row in enumerate(sentences)):
         raise ValueError("invalid_safety_review_sentences")
     body = "".join(row["text"] for row in sentences)
-    splitter = safety_review_v2.response_sentences if version == safety_review_v2.SAFETY_REVIEW_VERSION else response_sentences
-    if (version == safety_review_v2.SAFETY_REVIEW_VERSION
-            and (data["candidate"] != body or data["deletion_unit"] != "punctuation_span_v1")):
+    if len(body.encode()) > MAX_BODY_BYTES:
         raise ValueError("invalid_safety_review_sentences")
-    if len(body.encode()) > MAX_BODY_BYTES or splitter(body) != tuple(row["text"] for row in sentences):
+    if version == safety_review_v2.SAFETY_REVIEW_VERSION:
+        if data["candidate"] != body or data["deletion_unit"] != (
+                safety_review_v2.NATIVE_SPAN_UNIT if sourced else "punctuation_span_v1"):
+            raise ValueError("invalid_safety_review_sentences")
+        expected = safety_review_v2.response_sentences(body, split_periods=sourced)
+    else:
+        expected = response_sentences(body)
+    if expected != tuple(row["text"] for row in sentences):
         raise ValueError("invalid_safety_review_sentences")
     return len(sentences)
 

@@ -152,6 +152,82 @@ def test_pause_source_reaches_both_requests_without_expanding_an_incomplete_prop
             app.close()
 
 
+@pytest.mark.parametrize("include_identifier", [False, True])
+def test_outgoing_draft_can_keep_approved_details_at_an_english_sentence_boundary(
+        tmp_path, monkeypatch, include_identifier):
+    from contextlib import closing
+    from aria.voice.minimal import MinimalWebApp
+    from tests.test_deepseek_offline_route import clients, guard
+
+    owner = "帮我写给同伴的英文，时间是晚上七点半，地点是图书馆B室，入场编号C16。"
+    owner += "时间地点和入场编号都给她。" if include_identifier else "只告诉她时间地点。"
+    candidate = "Meet at 7.30 p.m., Library Room B. Entry No. C16."
+    parts = ["Meet at 7.30 p.m.,", " Library Room B.", " Entry No.", " C16."]
+    bundle = clients()
+
+    def first_output(client, wire):
+        if client is bundle.online:
+            assert "先选本人允许收件人知道的内容" in wire["messages"][0]["content"]
+            assert "译清获准事项及其原意" in wire["messages"][0]["content"]
+            return {"safety_concern": "none", "response_segments": [{"text": candidate}]}
+        assert client is bundle.safety_review
+        assert "对外草稿逐项核对本人允许收件人知道的内容" in wire["messages"][0]["content"]
+        data = json.loads(wire["messages"][1]["content"])
+        assert (data["utterance"], data["candidate"]) == (owner, candidate)
+        assert [s["text"] for s in data["sentences"]] == parts
+        return {"risk_assessment": [], "keep_each_span": [True, True, include_identifier, include_identifier]}
+
+    wires = review_app_wires(monkeypatch, bundle, first_output)
+    with closing(guard(tmp_path)) as allowance:
+        app = MinimalWebApp(tmp_path / "app", clients=bundle, model_call_guard=allowance)
+        try:
+            sid = app.start()["state"]["session_id"]
+            assert app.submit(owner, "draft-disclosure", sid)["ok"]
+            turn = app._run["turns"][0]
+            assert turn["response"] == (candidate if include_identifier else "".join(parts[:2]))
+            assert turn["safety_review"]["retained_sentence_ids"] == ([0, 1, 2, 3] if include_identifier else [0, 1])
+            assert len(wires) == 2
+            messages = deepcopy(wires[1]["messages"])
+            data = json.loads(messages[1]["content"])
+            data["deletion_unit"] = "punctuation_span_v1"
+            messages[1]["content"] = json.dumps(data)
+            with pytest.raises(ValueError, match="invalid_safety_review_sentences"):
+                validate_safety_review_request(messages, client=bundle.safety_review)
+        finally:
+            app.close()
+
+
+@pytest.mark.parametrize("candidate,withheld,expected", [
+    ("先打急救电话。让他帮你按住伤口、抬高胳膊。", "抬高胳膊", "先打急救电话。"),
+    ("先打急救电话。在场的人可以帮你按住伤口。在场的人可以帮你抬高胳膊。", "抬高胳膊",
+     "先打急救电话。在场的人可以帮你按住伤口。"),
+    ("推门、进屋这两件事都不可以。等消防员。", "都不可以", "等消防员。"),
+    ("拿水浇油锅、冲进浓烟是反面示范，现在应当撤出。", "是反面示范", "现在应当撤出。"),
+])
+def test_native_review_keeps_independent_help_and_never_detaches_list_qualifiers(
+        tmp_path, monkeypatch, candidate, withheld, expected):
+    from contextlib import closing
+    from aria.voice.minimal import MinimalWebApp
+    from tests.test_deepseek_offline_route import clients, guard
+
+    bundle = clients()
+    def first_output(client, wire):
+        if client is bundle.online:
+            return {"safety_concern": "none", "response_segments": [{"text": candidate}]}
+        data = json.loads(wire["messages"][1]["content"])
+        assert "".join(item["text"] for item in data["sentences"]) == candidate
+        return {"risk_assessment": [],
+                "keep_each_span": [withheld not in item["text"] for item in data["sentences"]]}
+
+    wires = review_app_wires(monkeypatch, bundle, first_output)
+    with closing(guard(tmp_path)) as allowance, closing(MinimalWebApp(
+            tmp_path / "app", clients=bundle, model_call_guard=allowance)) as app:
+        sid = app.start()["state"]["session_id"]
+        assert app.submit("请给我一句提醒。", "list", sid)["ok"]
+        assert app._run["turns"][0]["response"] == expected
+        assert len(wires) == 2
+
+
 def run_candidate(tmp_path, monkeypatch, segments, review, *, invited=False, concern="none"):
     def online(value):
         value["response_segments"] = deepcopy(segments)
@@ -314,6 +390,8 @@ def test_per_span_review_binds_delivery_separately_from_risk_attribution(
         assert [s["id"] for s in data["sentences"]] == [0, 1]
         schema = wire["response_format"]["json_schema"]["schema"]
         assert set(schema["properties"]) == set(schema["required"]) == {"risk_assessment", "keep_each_span"}
+        verdict_schema = schema["properties"]["keep_each_span"]
+        assert verdict_schema["minItems"] == verdict_schema["maxItems"] == len(data["sentences"])
         risk = answer("other_danger", subject="owner", time="current", urgency="immediate", owner_source_id=source_id)
         result = {"risk_assessment": [risk["risk_assessment"]]}
         if verdicts is not None:
@@ -683,3 +761,55 @@ def test_failed_deletion_keeps_independent_risk_judgment_in_real_app(tmp_path, m
         assert len(wires) == 2 and not guard.snapshot()["stopped"]
     finally:
         app.close(); guard.close()
+
+
+def test_native_review_binds_each_request_to_its_own_span_count(tmp_path, monkeypatch):
+    from contextlib import closing
+    from aria.engine.risk.safety_review import MAX_SENTENCES
+    from aria.engine.risk.safety_review_v2 import safety_review_messages
+    from tests.test_deepseek_offline_route import clients, guard
+
+    bundle = clients()
+    def keep_all(client, wire):
+        count = len(json.loads(wire["messages"][1]["content"])["sentences"])
+        return {"risk_assessment": [], "keep_each_span": [True] * count}
+
+    wires = review_app_wires(monkeypatch, bundle, keep_all)
+    with closing(guard(tmp_path)) as allowance:
+        allowance.attach(bundle.safety_review)
+        for count in (1, 19, MAX_SENTENCES):
+            messages = safety_review_messages("软件输入。", "一段。" * count, {"conversation_history": []},
+                                              None, final_protection="", owner_sources=True)
+            with allowance.scope("turn", f"review-{count}", "session"):
+                bundle.safety_review.complete(messages)
+            schema = wires[-1]["response_format"]["json_schema"]["schema"]
+            assert schema["properties"]["keep_each_span"] == {
+                "type": "array", "items": {"type": "boolean"}, "minItems": count, "maxItems": count}
+        assert allowance.snapshot()["calls_used"] == len(wires) == 3
+
+
+@pytest.mark.parametrize("minimum,maximum", [(1, 128), (18, 18)])
+def test_guard_rejects_verdict_count_not_bound_to_candidate(tmp_path, monkeypatch, minimum, maximum):
+    from contextlib import closing
+    from aria.engine.policy.minimal_calls import MinimalCallStopped
+    from aria.engine.risk.safety_review_v2 import safety_review_messages
+    from tests.test_deepseek_offline_route import clients, guard
+
+    bundle = clients()
+    review = bundle.safety_review
+    send = review._request_for_model
+    def change_count(payload, *, model):
+        payload["response_format"]["json_schema"]["schema"]["properties"]["keep_each_span"].update(
+            minItems=minimum, maxItems=maximum)
+        return send(payload, model=model)
+
+    monkeypatch.setattr(review, "_request_for_model", change_count)
+    wires = review_app_wires(monkeypatch, bundle, lambda *_: None)
+    messages = safety_review_messages("软件输入。", "一段。" * 19, {"conversation_history": []},
+                                      None, final_protection="", owner_sources=True)
+    with closing(guard(tmp_path)) as allowance:
+        allowance.attach(review)
+        with allowance.scope("turn", "review", "session"), pytest.raises(MinimalCallStopped):
+            review.complete(messages)
+        assert allowance.snapshot()["calls_used"] == 0
+    assert not wires

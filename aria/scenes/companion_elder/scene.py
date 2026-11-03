@@ -51,7 +51,10 @@ class ElderCompanionScene(BaseScene):
         return ElderRiskMonitor()
 
 
-    def guard_response(self, ctx, response: str) -> str:
+    def guard_response_before_review(self, ctx, response: str) -> str:
+        return self.guard_response(ctx, response, defer_medical=True)
+
+    def guard_response(self, ctx, response: str, *, defer_medical=False) -> str:
         """全局医疗声明守卫；防止普通回合中模型自发越过医疗边界。"""
         cognitive_safe = guard_cognitive_health_reply(response)
         semantic = ctx is not None and ctx.working_memory.get("_online_decision_version") in ("online_turn_decision_v6_semantic", "online_turn_decision_v7")
@@ -67,9 +70,10 @@ class ElderCompanionScene(BaseScene):
         if ctx is not None and ctx.working_memory.get("_online_decision_version") in ("online_turn_decision_v5_bound", "online_turn_decision_v6_semantic", "online_turn_decision_v7"):
             medical_version = "sentence_refusal_v3"
         source_positions = [] if semantic else None
-        safe = (guard_general_medical_reply(cognitive_safe, version=medical_version, source_positions=source_positions)
-                if semantic else guard_general_medical_reply(cognitive_safe, version=medical_version))
-        if semantic:
+        safe = cognitive_safe
+        if not defer_medical:
+            safe = guard_general_medical_reply(cognitive_safe, version=medical_version, source_positions=source_positions)
+        if semantic and not defer_medical:
             if safe == cognitive_safe.strip():
                 safe = cognitive_safe
                 source_positions = list(range(len(cognitive_safe)))
@@ -88,6 +92,25 @@ class ElderCompanionScene(BaseScene):
                 and safe == " ".join(str(response or "").strip().split())):
             return response
         return safe
+
+    def guard_reviewed_medical(self, ctx, response: str) -> str:
+        """Apply the same finite backstop to retained model text, excluding code receipts."""
+        from ...engine.policy.delivery_spans import model_positions, publish_positions
+        positions = model_positions(ctx, response)
+        if positions is None:
+            return guard_general_medical_reply(response, version="sentence_refusal_v3")
+        model_offsets = [i for i, origin in enumerate(positions) if origin is not None]
+        model_text = "".join(response[i] for i in model_offsets)
+        kept = []
+        safe = guard_general_medical_reply(model_text, version="sentence_refusal_v3", source_positions=kept)
+        if safe == model_text.strip():
+            return response
+        kept_offsets = {model_offsets[i] for i in kept if i is not None}
+        offsets = [i for i, origin in enumerate(positions) if origin is None or i in kept_offsets]
+        boundary = "".join(char for char, origin in zip(safe, kept) if origin is None)
+        result = "".join(response[i] for i in offsets) + boundary
+        publish_positions(ctx, result, [positions[i] for i in offsets] + [None] * len(boundary))
+        return result
 
 
     def guard_delivery_response(

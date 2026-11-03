@@ -427,7 +427,7 @@ class MinimalCallGuard:
                 from .safety_structured import (validate_safety_structured_client,
                     validate_safety_review_request, safety_request_format, uses_source_instruction)
                 safety_route = validate_safety_structured_client(client)
-                validate_safety_review_request(messages, client=client)
+                safety_sentence_count = validate_safety_review_request(messages, client=client)
             if client.role == "confirm_judge":
                 from .online_structured import validate_release_online_client
                 from ..memory.preference_dialogue import validate_confirm_judge_messages, confirm_judge_request_format
@@ -463,7 +463,7 @@ class MinimalCallGuard:
                             stream=False, provider=provider)
             if safety_route is not None:
                 expected["response_format"] = safety_request_format(json.loads(messages[1]["content"])["version"],
-                    owner_sources=uses_source_instruction(messages))
+                    owner_sources=uses_source_instruction(messages), sentence_count=safety_sentence_count)
             elif client.role == "confirm_judge":
                 expected["response_format"] = confirm_judge_request_format()
             elif memory_route is not None:

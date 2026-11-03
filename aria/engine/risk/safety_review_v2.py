@@ -13,6 +13,7 @@ from .safety_review import (_binding, _digest, _unique_object, parse_safety_revi
                             MAX_BODY_BYTES, MAX_SENTENCES, safety_review_schema as v1_schema)
 
 SAFETY_REVIEW_VERSION = "safety_review_v2"
+NATIVE_SPAN_UNIT = "punctuation_span_v2"
 CONCERNS = ("fall", "medical_emergency", "self_harm", "unsafe_medication", "none", "uncertain")
 SUBJECTS = ("owner", "other", "uncertain")
 TIMES = ("current", "recent_resolved", "historical", "uncertain")
@@ -85,21 +86,22 @@ _DELETION_LIST = (
     "不能由conflicts=false推导none。false对应空数组，true对应非空整数序号数组。"
 )
 _SPAN_VERDICTS = (
-    "只返回risk_assessment和keep_each_span。按sentences原顺序，每片段判一次：能安全交付填true，"
-    "危险指令、虚假动作声明及其依赖片段填false。"
+    "只返回risk_assessment和keep_each_span。对外草稿逐项核对本人允许收件人知道的内容，原文里有也可能越权。"
+    "按sentences原序逐片判断：能交付填true，须删及其依赖片段填false。"
 )
 _BODY_UNITS = (
     "sentences是按标点切分的可删除片段，序号不代表语义独立；candidate是完整正文。"
     "结合相邻片段理解否定、引述和条件，不能把被否定或有必要前提的动作当成肯定建议。"
-    "只选确有有害操作或虚假执行声明的最小片段；保留相邻的求助、陪伴与正确处理。"
+    "只选{excluded}的最小片段；保留相邻的求助、陪伴与正确处理。"
     "删除后须仍保留原意；若某危险建议跨片段，选全其依赖片段，不能留下失去前提的操作。"
     "不改写、不补句、不输出解释、推理或任何权限/保存动作。"
 )
 SAFETY_REVIEW_INSTRUCTION = (_REVIEW_CONTEXT + _LEGACY_APPLICABILITY + _BODY_REVIEW
-                             + _LEGACY_PROTECTION + _DELETION_LIST + _BODY_UNITS)
+                             + _LEGACY_PROTECTION + _DELETION_LIST
+                             + _BODY_UNITS.format(excluded="确有有害操作或虚假执行声明"))
 SOURCE_REVIEW_INSTRUCTION = (_SOURCE_APPLICABILITY + _BODY_REVIEW
                              + "protection_already_delivered只记录实际已展示的保护，null表示未展示。"
-                             + _SPAN_VERDICTS + _BODY_UNITS)
+                             + _SPAN_VERDICTS + _BODY_UNITS.format(excluded="有害、虚报执行或超出披露范围"))
 
 
 def uses_owner_sources(client):
@@ -110,7 +112,7 @@ def uses_owner_sources(client):
             and getattr(getattr(client, "safety_structured_route", None), "provider", None) == "together")
 
 
-def response_sentences(text):
+def response_sentences(text, *, split_periods=False):
     """V2 deletion units are exact punctuation spans, never semantic verdicts.
 
     The reviewer sees the complete body and decides dependencies. V1 keeps its
@@ -127,6 +129,10 @@ def response_sentences(text):
             units.append(piece)
     if not units or len(units) > MAX_SENTENCES or "".join(units) != text:
         raise ValueError("invalid_safety_review_sentences")
+    if split_periods:
+        finer = [part for unit in units for part in re.split(r"(?<=\.)(?=\s+\S)", unit)]
+        if len(finer) <= MAX_SENTENCES:
+            return tuple(finer)
     return tuple(units)
 
 
@@ -323,11 +329,11 @@ def safety_review_messages(utterance, candidate, evidence, protection, *, final_
             or protection is not None and (type(protection) is not str or not protection.strip())
             or type(final_protection) is not str or final_protection and not final_protection.strip()):
         raise ValueError("invalid_safety_review_input")
-    sentences = response_sentences(candidate)
+    sentences = response_sentences(candidate, split_periods=owner_sources)
     data = {"version": SAFETY_REVIEW_VERSION, "utterance": utterance,
             "safety_evidence": deepcopy(evidence), "protection_already_delivered": protection,
             "final_protection": final_protection, "candidate": candidate,
-            "deletion_unit": "punctuation_span_v1",
+            "deletion_unit": NATIVE_SPAN_UNIT if owner_sources else "punctuation_span_v1",
             "sentences": [{"id": i, "text": sentence} for i, sentence in enumerate(sentences)]}
     if owner_sources:
         # This reviewer independently assigns the risk. Only the actual
@@ -356,8 +362,8 @@ def review_safety_body(ctx, utterance, candidate, *, client, protection, final_p
     if client is None or getattr(client, "role", None) != "safety_review":
         return "", audit
     try:
-        sentences = response_sentences(candidate)
         sourced = uses_owner_sources(client)
+        sentences = response_sentences(candidate, split_periods=sourced)
         messages = safety_review_messages(utterance, candidate, evidence, protection,
                                           final_protection=final_protection, owner_sources=sourced)
         bound_messages = deepcopy(messages)
@@ -403,7 +409,7 @@ def review_safety_body(ctx, utterance, candidate, *, client, protection, final_p
     removed = set(row["delete_sentence_ids"])
     retained = [i for i in range(len(sentences)) if i not in removed]
     body = "".join(sentences[i] for i in retained).strip()
-    audit.update(status="reviewed", deletion_unit="punctuation_span_v1",
+    audit.update(status="reviewed", deletion_unit=NATIVE_SPAN_UNIT if sourced else "punctuation_span_v1",
                  conflicts=row["conflicts"], delete_sentence_ids=sorted(removed),
                  retained_sentence_ids=retained, retained_body_sha256=_digest(body))
     return body, audit

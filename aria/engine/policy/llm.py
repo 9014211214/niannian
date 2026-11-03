@@ -727,7 +727,8 @@ class OpenRouterLLMClient(OpenAILLMClient):
         if self.role == "safety_review":
             from .safety_structured import safety_request_format, uses_source_instruction
             base_payload["response_format"] = safety_request_format(
-                safety_review_version, owner_sources=uses_source_instruction(messages))
+                safety_review_version, owner_sources=uses_source_instruction(messages),
+                sentence_count=safety_sentence_count)
         elif self.role == "confirm_judge":
             from ..memory.preference_dialogue import confirm_judge_request_format
             base_payload["response_format"] = confirm_judge_request_format()
