@@ -48,7 +48,7 @@ is limited; a missing snapshot does not mean no records exist. Saved replay uses
 original snapshot. It supplies neither personality evidence nor action permission.
 
 Optional external emotion readings are per-turn, bounded hints whose source and
-modality are supplied by the caller. Aria does not verify a sensor observation or
+modality are supplied by the caller. Niannian does not verify a sensor observation or
 start an emotion service. Explicit model mode sends the accepted hint with the
 current turn; it is not a person's own words or personality evidence. Synthetic
 emotion experiments use a marked, separate Python-only namespace.

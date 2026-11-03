@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Aria · 爸，你帮我看看</title>
+  <title>念念 · 爸，你帮我看看</title>
   <style>
     :root { --paper:#f5f3eb; --white:#fffef9; --ink:#253f37; --muted:#69756c; --line:#dedfd3; --green:#284f40; --soft:#e8eee3; --gold:#bb8b48; --warning:#8e502e; --radius:22px; }
     * { box-sizing:border-box; }
@@ -166,7 +166,7 @@
 <body>
   <main class="shell">
     <header class="topbar">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">a</span> Aria <small>从一句话，慢慢认识一个人</small></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true">念</span> 念念 <small>从一句话，慢慢认识一个人</small></div>
       <div class="top-actions"><span id="mode-badge" class="badge">正在读取模式</span><a href="/care">护理员入口</a><button id="refresh" class="quiet" type="button">刷新状态</button></div>
     </header>
     <section class="hero" aria-labelledby="story-title">
@@ -201,7 +201,7 @@
             <g class="actor robot"><ellipse cx="655" cy="289" rx="42" ry="10" fill="#6f8875"/><path d="M623 257L620 286H640L647 254M663 256L673 286H692L683 251" fill="#9baa98"/><path d="M614 189Q602 216 609 255Q650 278 694 255L700 216Q698 191 675 183Z" fill="#e9eddd" stroke="#b4c1ab" stroke-width="2"/><path d="M610 210Q594 219 586 224M696 211Q711 235 700 245" fill="none" stroke="#b4c3ac" stroke-width="14" stroke-linecap="round"/><circle cx="650" cy="227" r="12" fill="#91ab8c"/><path d="M645 229L651 218L656 229Z" fill="#edf0e1"/>
               <g class="robot-head"><path d="M650 137V120" stroke="#a5b498" stroke-width="4"/><circle cx="650" cy="116" r="6" fill="#d2b776"/><rect x="605" y="134" width="90" height="68" rx="28" fill="#eef1e4" stroke="#b3c0a8" stroke-width="2"/><rect x="617" y="150" width="67" height="33" rx="15" fill="#718f79"/><path d="M631 161V169M669 161V169" stroke="#e6eddc" stroke-width="4" stroke-linecap="round"/><path d="M644 173Q650 176 656 173" fill="none" stroke="#e6eddc" stroke-width="2" stroke-linecap="round"/></g>
             </g>
-            <text x="278" y="331" fill="#626e59" text-anchor="middle" font-size="11">陈师傅 · 虚构角色</text><text x="650" y="331" fill="#626e59" text-anchor="middle" font-size="11">Aria · 表现角色</text>
+            <text x="278" y="331" fill="#626e59" text-anchor="middle" font-size="11">陈师傅 · 虚构角色</text><text x="650" y="331" fill="#626e59" text-anchor="middle" font-size="11">念念 · 表现角色</text>
           </svg>
           <div class="stage-caption" aria-live="polite"><strong id="subtitle-source">演出说明</strong><p id="subtitle">开始会话后，这里显示你送出的原话与实际返回文本。</p></div>
           <div class="stage-controls"><button id="stage-play" type="button">开始演出</button><button id="stage-view" type="button">文字视图</button><button id="takeover" type="button">接管输入</button><button type="button" disabled title="本轮未授权TTS调用；不使用系统语音替代真实服务">声音关闭 · TTS 未启用</button><button id="replay-start" type="button" disabled>回放已保存会话</button></div>
@@ -630,7 +630,7 @@
     }
     function message(role, body, source, failed) {
       const box=document.createElement('div'); box.className='message '+role+(failed?' failed':'');
-      const meta=document.createElement('div'); meta.className='message-meta'; meta.append(text('span',role==='user'?'陈师傅 · 演示者输入':role==='system'?'流程状态':'Aria'),text('span',source));
+      const meta=document.createElement('div'); meta.className='message-meta'; meta.append(text('span',role==='user'?'陈师傅 · 演示者输入':role==='system'?'流程状态':'念念'),text('span',source));
       box.append(meta,text('div',body,'message-body')); return box;
     }
     function renderConversation() {

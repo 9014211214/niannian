@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aria-eldercare-agent"
 version = "0.1.1"
-description = "Aria — elder companionship with grounded memory and local care workflows."
+description = "Niannian — elder companionship with grounded memory and local care workflows."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

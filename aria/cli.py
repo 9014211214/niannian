@@ -11,7 +11,7 @@ from ._env import load_local_env
 
 
 def web_main(argv: Optional[list[str]] = None) -> int:
-    parser = argparse.ArgumentParser(prog="aria-web", description="启动 Aria 老人陪伴 Web；默认本地占位")
+    parser = argparse.ArgumentParser(prog="aria-web", description="启动念念老人陪伴 Web（默认本地预览）")
     parser.add_argument("--host", choices=("127.0.0.1", "localhost"), default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--minimal", action="store_true", help="兼容旧命令；当前唯一入口已是最小陪伴 Demo")

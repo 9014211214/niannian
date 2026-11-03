@@ -1,7 +1,7 @@
-# Contributing to Aria
+# Contributing to Niannian
 
 Start with [PROGRESS](docs/PROGRESS.md) and [the product scope](docs/PRODUCT.md).
-Aria has one product: elder companionship with a bounded care workflow. Keep changes
+Niannian has one product: elder companionship with a bounded care workflow. Keep changes
 small enough to explain through that experience.
 
 ## Local checks

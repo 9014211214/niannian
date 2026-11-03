@@ -21,9 +21,9 @@
       "sha256": "9f273b1eb35ca82bd1b6b4bc1d71db13d2b0c0140df5fc7e19ee29b1e15d7ce9"
     },
     {
-      "bytes": 2201,
+      "bytes": 2209,
       "path": "CONTRIBUTING.md",
-      "sha256": "dd5c81ee4e697215b69c868148de37e052f9339e078d9e54164f9f0e4ba36bb5"
+      "sha256": "314cd1212c9319021e9cc23ffe29ffea90fc24cdc380f2703c8d019e0cc9903e"
     },
     {
       "bytes": 1066,
@@ -41,19 +41,19 @@
       "sha256": "5a8b41dbe67d67ac24f57da5a9b3d072554166ebe181153d62c065c520846359"
     },
     {
-      "bytes": 7523,
+      "bytes": 7698,
       "path": "README.md",
-      "sha256": "7a0ad335cdb2e74ceb8ac4429ad8dcaf7fd694b0a518cfec81bf7eb083196953"
+      "sha256": "a20c313f0d461bd95a077a8c8dd7328c327c2e40bfb6d8fc6748277b0ffdb184"
     },
     {
-      "bytes": 6135,
+      "bytes": 6261,
       "path": "README.zh.md",
-      "sha256": "104d9befeae5c8d1a52b99ff17512dd11b68c332bc09edc7c04eef85c631378a"
+      "sha256": "341fb48bd6f230fc5d30cc17382ec3be33791f6ee6e8208e46108051c583251d"
     },
     {
-      "bytes": 8250,
+      "bytes": 8254,
       "path": "SECURITY.md",
-      "sha256": "983f31d7e0dcbeb0d115d789e7dd3a428152af9b16a34a4e2e542c4e29c7611b"
+      "sha256": "ebc1731668dde97e8269c4dae5e944d67e337e8c5c84fd88c0882c66ff338356"
     },
     {
       "bytes": 12477,
@@ -91,14 +91,14 @@
       "sha256": "1123732cbac4a2cfc322340dee247914254ef2cb620c606c4058cdf0eb14fb6d"
     },
     {
-      "bytes": 22774,
+      "bytes": 22778,
       "path": "aria/assets/voice/care.html",
-      "sha256": "98e4bfaae94ed24df83419df7c50259c250bd4ea9214dd81a6bf845f643b1e09"
+      "sha256": "135cb8d1d4e0c0c0c25f02138c0b4bd7f8f6fdd96eccc6304b3be4ed447b29f9"
     },
     {
-      "bytes": 130641,
+      "bytes": 130651,
       "path": "aria/assets/voice/minimal.html",
-      "sha256": "916bc875b7a1c7f80dddfeb38733b5201c6ff94c47bec25c30cea887e7340c51"
+      "sha256": "87e14676cfcb855098c42498d4c850f8d6a1703a420757c4de059268d9711bcd"
     },
     {
       "bytes": 82,
@@ -271,9 +271,9 @@
       "sha256": "16ed06686ca07152ffa060728e1641f67f1031da27ef6db90cec8c3b1ec46c3c"
     },
     {
-      "bytes": 13679,
+      "bytes": 13682,
       "path": "aria/cli.py",
-      "sha256": "6a8dcf50fabd5d24b129c1e2b907d2b70bd2a6ccbc4884df2ab48f2a044d19fa"
+      "sha256": "2b003072cb4ae0aee789add5954aceb2baecc6019c323d39ca334603528bea6a"
     },
     {
       "bytes": 244,
@@ -1226,9 +1226,9 @@
       "sha256": "b257e5dcc988acf83d17868e6b2d519debfd716ca19ab19420ef0f59d081b768"
     },
     {
-      "bytes": 16909,
+      "bytes": 16893,
       "path": "docs/PRODUCT.md",
-      "sha256": "f7a2bab56cfe59288d2ccd562992f846e0f57c96415cef298bb0a832ec62a215"
+      "sha256": "62d079fc601bd6fe79c44a9d703b8bc6e4e298983111accd8371c031191577b8"
     },
     {
       "bytes": 32117,
@@ -1456,9 +1456,9 @@
       "sha256": "df882825d90fe7aa3e70230f3a90e0866fc23110d35a32e52a84350fd59680a7"
     },
     {
-      "bytes": 1847,
+      "bytes": 1851,
       "path": "pyproject.toml",
-      "sha256": "e18e7911cb17f2cec2aa279578ff32727f37dceefd4f215d9a98264b28f56560"
+      "sha256": "1a2b8fcfd2fa42194da7a71c224a7c2f6bbd3fbbb7650f596892169b8f0da70b"
     },
     {
       "bytes": 9775,

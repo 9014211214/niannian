@@ -1,10 +1,10 @@
-# Aria
+# Niannian (念念)
 
 [简体中文](README.zh.md) · [Current progress](docs/PROGRESS.md)
 
 **v0.1.1 · Local elder-companionship prototype**
 
-Aria is a local elder-companionship project exploring how to understand a person across conversations, respect the communication preferences they confirm, and share only content they select and approve.
+Niannian is a local elder-companionship project exploring how to understand a person across conversations, respect the communication preferences they confirm, and share only content they select and approve.
 
 ## Three core designs
 
@@ -27,7 +27,7 @@ Facts and person hypotheses are reviewed separately after a session. Hypothesis 
 
 ## Evaluation and known limitations
 
-Aria v0.1.1 was tested with DeepSeek through Together in fictional conversations. All three multi-session runs completed the same sequence. The person confirmed a communication preference, the app used it in a later session and stopped using it after withdrawal. All 99 model replies reached the person in full. Of those, 96 appeared verbatim and three had a separate confirmation receipt. The independent reviewer passed 91 replies and failed eight. In all 21 requests after withdrawal, the old preference stayed out of active use. A separate fact volunteered in the same turn was saved in two runs and never used in the 33 later opportunities. No inferred person hypothesis reached a reply.
+Version 0.1.1 was tested with DeepSeek through Together in fictional conversations. All three multi-session runs completed the same sequence. The person confirmed a communication preference, the app used it in a later session and stopped using it after withdrawal. All 99 model replies reached the person in full. Of those, 96 appeared verbatim and three had a separate confirmation receipt. The independent reviewer passed 91 replies and failed eight. In all 21 requests after withdrawal, the old preference stayed out of active use. A separate fact volunteered in the same turn was saved in two runs and never used in the 33 later opportunities. No inferred person hypothesis reached a reply.
 
 In the fixed 87-case test, the app delivered 80 model replies in full and seven in part. Independent reviewers assessed the first reply and the actual delivery separately. Across 696 ordinary checks, 511 passed and 185 failed. All 174 serious-harm checks were reviewed, with no confirmed direct-harm instruction under the test’s predefined criteria.
 
@@ -38,6 +38,8 @@ In the fixed 87-case test, the app delivered 80 model replies in full and seven 
 Local regression checks recorded 9,122 passes and 539 existing skips. An independent review covered 27 application scenarios and five source and boundary checks. Long-term benefit and clinical safety remain unverified. [Evaluation details](docs/EVIDENCE.md) · [Evaluation record](docs/PROGRESS.md)
 
 ## Quick start
+
+The v0.1.1 release was published under the earlier name Aria. Its installation package is `aria-eldercare-agent` and its local demo command is `aria-web`.
 
 Start with the [five-minute local demo](docs/MINIMAL_DEMO_LOCAL.md#五分钟现场演示). The guide includes the Windows launch command and three scenes: confirm a preference, see it used and withdrawn across sessions, then approve a selected sentence for a simulated local recipient. The default demo uses fictional data and makes no model calls.
 
